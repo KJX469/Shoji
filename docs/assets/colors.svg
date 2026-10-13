@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="230" viewBox="0 0 1120 230" role="img" aria-label="The seven crane colours: White, Blue, Cyan, Green, Gold, Purple, Red">
+<style>.t{font:500 17px 'Instrument Sans','Segoe UI',Helvetica,Arial,sans-serif;fill:#8A857B;letter-spacing:.5px}
+@media (prefers-color-scheme: dark){.t{fill:#B5AFA2}}</style>
+<ellipse cx="80.0" cy="104" rx="52" ry="52" fill="#E9ECF3" fill-opacity="0.10"/>
+<svg x="42.0" y="62" width="76" height="59.9" viewBox="270 320 710 560" overflow="visible">
+    <defs>
+      <linearGradient id="pWhite" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#E9ECF3"/></linearGradient>
+      <linearGradient id="cWhite" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#B2BACB"/><stop offset="1" stop-color="#8792A7"/></linearGradient>
+    </defs>
+    <path d="M282 547 515 653 517 827Z" fill="url(#pWhite)"/>
+    <path d="M529 334 731 660 529 869Z" fill="url(#pWhite)"/>
+    <path d="M529 869 731 660 791 767Z" fill="url(#cWhite)"/>
+    <path d="M731 660 860 540Q865 535 870 540L962 599 862 586 873 547 865 543 790 766Z" fill="url(#pWhite)"/>
+  </svg>
+<text class="t" x="80.0" y="190" text-anchor="middle">White</text>
+<ellipse cx="240.0" cy="104" rx="52" ry="52" fill="#397AFF" fill-opacity="0.10"/>
+<svg x="202.0" y="62" width="76" height="59.9" viewBox="270 320 710 560" overflow="visible">
+    <defs>
+      <linearGradient id="pBlue" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8BB4FF"/><stop offset="1" stop-color="#397AFF"/></linearGradient>
+      <linearGradient id="cBlue" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2054D3"/><stop offset="1" stop-color="#173A9C"/></linearGradient>
+    </defs>
+    <path d="M282 547 515 653 517 827Z" fill="url(#pBlue)"/>
+    <path d="M529 334 731 660 529 869Z" fill="url(#pBlue)"/>
+    <path d="M529 869 731 660 791 767Z" fill="url(#cBlue)"/>
+    <path d="M731 660 860 540Q865 535 870 540L962 599 862 586 873 547 865 543 790 766Z" fill="url(#pBlue)"/>
+  </svg>
+<text class="t" x="240.0" y="190" text-anchor="middle">Blue</text>
+<ellipse cx="400.0" cy="104" rx="52" ry="52" fill="#25C7DD" fill-opacity="0.10"/>
+<svg x="362.0" y="62" width="76" height="59.9" viewBox="270 320 710 560" overflow="visible">
+    <defs>
+      <linearGradient id="pCyan" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#84F2F5"/><stop offset="1" stop-color="#25C7DD"/></linearGradient>
+      <linearGradient id="cCyan" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0797BD"/><stop offset="1" stop-color="#066989"/></linearGradient>
+    </defs>
+    <path d="M282 547 515 653 517 827Z" fill="url(#pCyan)"/>
+    <path d="M529 334 731 660 529 869Z" fill="url(#pCyan)"/>
+    <path d="M529 869 731 660 791 767Z" fill="url(#cCyan)"/>
+    <path d="M731 660 860 540Q865 535 870 540L962 599 862 586 873 547 865 543 790 766Z" fill="url(#pCyan)"/>
+  </svg>
+<text class="t" x="400.0" y="190" text-anchor="middle">Cyan</text>
+<ellipse cx="560.0" cy="104" rx="52" ry="52" fill="#21B86E" fill-opacity="0.10"/>
+<svg x="522.0" y="62" width="76" height="59.9" viewBox="270 320 710 560" overflow="visible">
+    <defs>
+      <linearGradient id="pGreen" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#78E9A0"/><stop offset="1" stop-color="#21B86E"/></linearGradient>
+      <linearGradient id="cGreen" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#12884E"/><stop offset="1" stop-color="#0D603C"/></linearGradient>
+    </defs>
+    <path d="M282 547 515 653 517 827Z" fill="url(#pGreen)"/>
+    <path d="M529 334 731 660 529 869Z" fill="url(#pGreen)"/>
+    <path d="M529 869 731 660 791 767Z" fill="url(#cGreen)"/>
+    <path d="M731 660 860 540Q865 535 870 540L962 599 862 586 873 547 865 543 790 766Z" fill="url(#pGreen)"/>
+  </svg>
+<text class="t" x="560.0" y="190" text-anchor="middle">Green</text>
+<ellipse cx="720.0" cy="104" rx="52" ry="52" fill="#F8B42C" fill-opacity="0.10"/>
+<svg x="682.0" y="62" width="76" height="59.9" viewBox="270 320 710 560" overflow="visible">
+    <defs>
+      <linearGradient id="pGold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFE074"/><stop offset="1" stop-color="#F8B42C"/></linearGradient>
+      <linearGradient id="cGold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#DB8016"/><stop offset="1" stop-color="#A65A0C"/></linearGradient>
+    </defs>
+    <path d="M282 547 515 653 517 827Z" fill="url(#pGold)"/>
+    <path d="M529 334 731 660 529 869Z" fill="url(#pGold)"/>
+    <path d="M529 869 731 660 791 767Z" fill="url(#cGold)"/>
+    <path d="M731 660 860 540Q865 535 870 540L962 599 862 586 873 547 865 543 790 766Z" fill="url(#pGold)"/>
+  </svg>
+<text class="t" x="720.0" y="190" text-anchor="middle">Gold</text>
+<ellipse cx="880.0" cy="104" rx="52" ry="52" fill="#9D55EF" fill-opacity="0.10"/>
+<svg x="842.0" y="62" width="76" height="59.9" viewBox="270 320 710 560" overflow="visible">
+    <defs>
+      <linearGradient id="pPurple" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#D2A0FF"/><stop offset="1" stop-color="#9D55EF"/></linearGradient>
+      <linearGradient id="cPurple" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#772DC5"/><stop offset="1" stop-color="#531D95"/></linearGradient>
+    </defs>
+    <path d="M282 547 515 653 517 827Z" fill="url(#pPurple)"/>
+    <path d="M529 334 731 660 529 869Z" fill="url(#pPurple)"/>
+    <path d="M529 869 731 660 791 767Z" fill="url(#cPurple)"/>
+    <path d="M731 660 860 540Q865 535 870 540L962 599 862 586 873 547 865 543 790 766Z" fill="url(#pPurple)"/>
+  </svg>
+<text class="t" x="880.0" y="190" text-anchor="middle">Purple</text>
+<ellipse cx="1040.0" cy="104" rx="52" ry="52" fill="#ED3049" fill-opacity="0.10"/>
+<svg x="1002.0" y="62" width="76" height="59.9" viewBox="270 320 710 560" overflow="visible">
+    <defs>
+      <linearGradient id="pRed" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF7074"/><stop offset="1" stop-color="#ED3049"/></linearGradient>
+      <linearGradient id="cRed" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#BD183D"/><stop offset="1" stop-color="#89102C"/></linearGradient>
+    </defs>
+    <path d="M282 547 515 653 517 827Z" fill="url(#pRed)"/>
+    <path d="M529 334 731 660 529 869Z" fill="url(#pRed)"/>
+    <path d="M529 869 731 660 791 767Z" fill="url(#cRed)"/>
+    <path d="M731 660 860 540Q865 535 870 540L962 599 862 586 873 547 865 543 790 766Z" fill="url(#pRed)"/>
+  </svg>
+<text class="t" x="1040.0" y="190" text-anchor="middle">Red</text>
+</svg>

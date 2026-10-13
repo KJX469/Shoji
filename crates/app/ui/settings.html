@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en" data-accent="{{ACCENT}}" data-mode="{{MODE}}" data-fonts="{{FONTS}}">
+<head>
+  <meta charset="UTF-8">
+  <title>Settings</title>
+  <style>
+{{THEME_CSS}}
+    body { padding: 56px 32px 96px; font-size: 13px; line-height: 1.5; }
+    button, select, input { font: inherit; color: inherit; }
+    .wrap { max-width: 720px; margin: 0 auto; }
+    header { display: flex; align-items: center; gap: 16px; margin-bottom: 40px; }
+    header .crane { width: 44px; height: 44px; }
+    h1 { font-family: var(--font-display); font-size: 26px; font-weight: 400; }
+    h1 + p { color: var(--ink-3); font-size: 12px; }
+    section { margin-top: 34px; }
+    section > .label { display: block; margin: 0 4px 10px; }
+    .card { border-radius: 12px; background: var(--surface); border: 1px solid var(--line); }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 60px; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+    .row:last-child { border-bottom: 0; }
+    .row.stack { flex-direction: column; align-items: stretch; gap: 12px; }
+    .what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .what b { font-weight: 500; }
+    .what small { font-size: 12px; color: var(--ink-3); }
+    .path { font-family: var(--mono); font-size: 11px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    select, .btn { height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); cursor: pointer; outline: none; }
+    select:hover, .btn:hover { border-color: var(--line-strong); }
+    select:focus-visible { border-color: var(--accent); }
+    select option { background: var(--surface); }
+    input[type=text] { flex: 1; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); outline: none; }
+    input[type=text]:focus { border-color: var(--accent); }
+
+    .switch { position: relative; width: 38px; height: 22px; flex-shrink: 0; }
+    .switch input { position: absolute; opacity: 0; inset: 0; cursor: pointer; z-index: 1; }
+    .switch span { position: absolute; inset: 0; border-radius: 11px; background: var(--press); border: 1px solid var(--line); transition: background .2s, border-color .2s; }
+    .switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--ink-2); transition: transform .2s var(--ease), background .2s; }
+    .switch input:checked + span { background: var(--tone); border-color: transparent; }
+    .switch input:checked + span::after { transform: translateX(16px); background: var(--on-tone); }
+    .switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .colors { display: flex; flex-wrap: wrap; gap: 4px; }
+    .opt { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 68px; padding: 8px 0 6px; border: 0; border-radius: 10px; background: none; color: var(--ink-2); font-size: 11.5px; cursor: pointer; }
+    .opt:hover { background: var(--hover); color: var(--ink); }
+    .opt[aria-checked="true"] { background: var(--tint); color: var(--ink); font-weight: 600; }
+    .swatch-crane .crane { width: 32px; height: 32px; }
+    .types { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .type-opt { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 12px 14px 13px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); text-align: left; font-family: var(--font); cursor: pointer; transition: border-color .15s, background .15s; }
+    .type-opt:hover { border-color: var(--line-strong); }
+    .type-opt[aria-checked="true"] { border-color: var(--accent); background: var(--tint-soft); }
+    .type-aa { font-family: var(--font-display); font-size: 30px; line-height: 1.15; }
+    .type-opt b { font-weight: 600; font-size: 13px; }
+    .type-opt small { font-family: var(--font-text); font-size: 12px; line-height: 1.45; color: var(--ink-3); }
+    @media (max-width: 560px) { .types { grid-template-columns: 1fr; } }
+    .seg { display: inline-flex; padding: 3px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--line); }
+    .seg button { height: 26px; padding: 0 14px; border: 0; border-radius: 6px; background: none; color: var(--ink-2); cursor: pointer; }
+    .seg button[aria-checked="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px var(--line-strong); }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 6px 0 10px; border-radius: 7px; background: var(--tint-soft); border: 1px solid var(--line); font-size: 12px; }
+    .chip button { display: grid; place-items: center; width: 18px; height: 18px; border: 0; border-radius: 5px; background: none; color: var(--ink-3); cursor: pointer; }
+    .chip button:hover { background: var(--press); color: var(--danger); }
+    .hint { color: var(--ink-3); font-size: 12px; }
+    .add { display: flex; gap: 8px; }
+    .lists { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+    .lrow { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+    .lrow:last-child { border-bottom: 0; }
+    .lrow .what { flex: 1; }
+    .lrow small { font-size: 11.5px; }
+    .lrow .x { border: 0; background: none; color: var(--ink-3); cursor: pointer; font-size: 16px; }
+    .lrow .x:hover { color: var(--danger); }
+    textarea { width: 100%; min-height: 110px; resize: vertical; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); font-family: var(--mono); font-size: 12px; line-height: 1.5; outline: none; box-sizing: border-box; }
+    textarea:focus { border-color: var(--accent); }
+    #toast { position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 12px); padding: 8px 16px; border-radius: 9px; background: var(--ink); color: var(--bg); font-size: 12px; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s var(--ease); }
+    #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>{{CRANE}}<div><h1>Settings</h1><p>Changes save as you make them</p></div></header>
+
+    <section>
+      <span class="label">Appearance</span>
+      <div class="card">
+        <div class="row stack">
+          <div class="what"><b>Color</b><small>Tints the browser and its icon everywhere it appears</small></div>
+          <div class="colors" role="radiogroup" aria-label="Color">{{SWATCHES}}</div>
+        </div>
+        <div class="row stack">
+          <div class="what"><b>Type</b><small>The typefaces used across tabs, menus and Shoji's own pages</small></div>
+          <div class="types" role="radiogroup" aria-label="Type">{{TYPE_OPTIONS}}</div>
+        </div>
+        <div class="row">
+          <div class="what"><b>Mode</b><small>System follows your Windows light or dark setting</small></div>
+          <div class="seg" role="radiogroup" aria-label="Mode" id="modeSeg">
+            <button role="radio" data-mode="system" onclick="setMode('system')">System</button>
+            <button role="radio" data-mode="light" onclick="setMode('light')">Light</button>
+            <button role="radio" data-mode="dark" onclick="setMode('dark')">Dark</button>
+          </div>
+        </div>
+        <div class="row">
+          <div class="what"><b>Dark websites</b><small>Darkens pages that don't have a dark theme of their own. Right-click the moon button to skip a site.</small></div>
+          <label class="switch"><input type="checkbox" data-path="appearance.dark_websites"><span></span></label>
+        </div>
+        <div class="row stack" id="darkSkipRow">
+          <div class="what"><b>Sites shown in their own colors</b></div>
+          <div class="chips" id="darkSkip"></div>
+        </div>
+        <div class="row">
+          <div class="what"><b>Default zoom</b><small>Applied to new tabs</small></div>
+          <select data-path="appearance.default_zoom_level" data-type="number">
+            <option value="0.75">75%</option><option value="0.9">90%</option><option value="1">100%</option>
+            <option value="1.1">110%</option><option value="1.25">125%</option><option value="1.5">150%</option>
+          </select>
+        </div>
+        <div class="row">
+          <div class="what"><b>Zoom indicator</b><small>Show the zoom level in the address bar when it isn't 100%</small></div>
+          <label class="switch"><input type="checkbox" data-path="appearance.show_zoom_badge"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="what"><b>Link preview</b><small>Show where a link goes when you hover it (applies to new pages)</small></div>
+          <label class="switch"><input type="checkbox" data-path="appearance.enable_link_preview"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="what"><b>Compact address bar</b><small>Show just the site's domain until you click the address bar</small></div>
+          <label class="switch"><input type="checkbox" data-path="appearance.compact_address"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="what"><b>Tint toolbar with the page</b><small>A soft wash of the site's own color behind the toolbar</small></div>
+          <label class="switch"><input type="checkbox" data-path="appearance.tint_toolbar"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="what"><b>Frosted toolbar</b><small>Windows 11 translucent backdrop behind the toolbar. Takes effect after restarting Shoji; uses a little more GPU</small></div>
+          <label class="switch"><input type="checkbox" data-path="appearance.frosted_toolbar"><span></span></label>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <span class="label">Search</span>
+      <div class="card">
+        <div class="row">
+          <div class="what"><b>Search engine</b><small>Used from the address bar and new tab page</small></div>
+          <select data-path="search_engine">
+            <option value="duckduckgo">DuckDuckGo</option><option value="google">Google</option>
+            <option value="bing">Bing</option><option value="brave">Brave Search</option><option value="ecosia">Ecosia</option>
+          </select>
+        </div>
+        <div class="row">
+          <div class="what"><b>Search suggestions</b><small>Also ask the search engine for suggestions as you type. This sends what you type to it; off by default</small></div>
+          <label class="switch"><input type="checkbox" data-path="appearance.search_suggestions"><span></span></label>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <span class="label">Privacy</span>
+      <div class="card">
+        <div class="row">
+          <div class="what"><b>Private mode</b><small>Off: Shoji remembers logins, history and cache like any browser. On: everything is forgotten when Shoji closes</small></div>
+          <label class="switch"><input type="checkbox" id="privateMode" data-path="privacy.ephemeral_default"><span></span></label>
+        </div>
+        <div class="row stack" id="keepRow">
+          <div class="what"><b>Sites to keep</b><small>These sites remember cookies, so you stay signed in</small></div>
+          <div class="add">
+            <input type="text" id="siteInput" placeholder="github.com" spellcheck="false" onkeydown="if (event.key === 'Enter') addSite()">
+            <button class="btn" onclick="addSite()">Add</button>
+          </div>
+          <div class="chips" id="sites"></div>
+        </div>
+        <div class="row">
+          <div class="what"><b>HTTPS only</b><small>Upgrade http:// pages to https://, and ask before using plain HTTP. Local addresses are left alone</small></div>
+          <label class="switch"><input type="checkbox" data-path="privacy.https_only"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="what"><b>Strict tracking prevention</b><small>The engine's strictest level, for new tabs</small></div>
+          <label class="switch"><input type="checkbox" data-path="privacy.strict_tracking_prevention"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="what"><b>Save and fill passwords</b><small>Offers to save logins and fills them in. Stored encrypted for your Windows account. Not used in private mode</small></div>
+          <label class="switch"><input type="checkbox" data-path="privacy.save_passwords"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="what"><b>Saved passwords</b><small>The engine can't list them for other apps, so you can remove all saved logins and autofill entries here</small></div>
+          <button class="btn" onclick="if (this.dataset.sure) { post('ClearSavedLogins'); toast('Saved logins removed'); delete this.dataset.sure; this.textContent = 'Remove all'; } else { this.dataset.sure = '1'; this.textContent = 'Click again to confirm'; }">Remove all</button>
+        </div>
+        <div class="row">
+          <div class="what"><b>Restore tabs after a crash</b><small>If Shoji closes unexpectedly or is force-closed</small></div>
+          <select data-path="privacy.restore_session">
+            <option value="ask">Ask me</option><option value="always">Always restore the last session</option><option value="never">Never</option>
+          </select>
+        </div>
+        <div class="row">
+          <div class="what"><b>Remembered site choices</b><small id="siteChoices">{{SITE_CHOICES}} saved: per-site zoom and allowed or blocked permissions</small></div>
+          <button class="btn" onclick="post('ClearSiteData'); $('siteChoices').textContent = '0 saved: per-site zoom and allowed or blocked permissions'; toast('Cleared')">Clear</button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <span class="label">Byōbu</span>
+      <div class="card">
+        <div class="row">
+          <div class="what"><b>Ad and tracker shield</b><small id="shStats">Blocks ads and trackers using uBlock Origin and Brave's lists</small></div>
+          <select data-path="shield.mode">
+            <option value="standard">Standard</option><option value="aggressive">Aggressive</option><option value="off">Off</option>
+          </select>
+        </div>
+        <div class="row stack">
+          <div class="what"><b>Paused sites</b><small>Byōbu leaves these alone. Use the shield button in the toolbar to add one</small></div>
+          <div class="chips" id="paused"></div>
+        </div>
+        <div class="row stack">
+          <div class="what" style="flex-direction:row;justify-content:space-between;align-items:center">
+            <span class="what"><b>Filter lists</b><small id="listStatus">Refreshed through the day; quick fixes hourly</small></span>
+            <button class="btn" id="updateBtn" onclick="updateLists()">Update now</button>
+          </div>
+          <div id="lists" class="lists"></div>
+          <div class="add">
+            <input type="text" id="listUrl" placeholder="https://example.org/my-filters.txt" spellcheck="false" onkeydown="if (event.key === 'Enter') addList()">
+            <button class="btn" onclick="addList()">Add list</button>
+          </div>
+        </div>
+        <div class="row stack">
+          <div class="what"><b>My rules</b><small>One filter per line, in uBlock syntax. Elements you hide with the picker are saved here</small></div>
+          <textarea id="myRules" spellcheck="false" placeholder="example.org##.annoying-banner&#10;||tracker.example^"></textarea>
+          <div><button class="btn" onclick="saveRules()">Save rules</button> <a class="hint" href="shoji://byobu" style="margin-left:10px">Open the request log</a></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <span class="label">Site permissions</span>
+      <div class="card">
+        <div class="row"><div class="what"><b>Location</b></div><select data-path="permissions.location"><option value="ask">Ask</option><option value="allow">Allow</option><option value="block">Block</option></select></div>
+        <div class="row"><div class="what"><b>Camera</b></div><select data-path="permissions.camera"><option value="ask">Ask</option><option value="allow">Allow</option><option value="block">Block</option></select></div>
+        <div class="row"><div class="what"><b>Microphone</b></div><select data-path="permissions.microphone"><option value="ask">Ask</option><option value="allow">Allow</option><option value="block">Block</option></select></div>
+        <div class="row"><div class="what"><b>Notifications</b></div><select data-path="permissions.notifications"><option value="ask">Ask</option><option value="allow">Allow</option><option value="block">Block</option></select></div>
+      </div>
+    </section>
+
+    <section>
+      <span class="label">Downloads</span>
+      <div class="card">
+        <div class="row">
+          <div class="what"><b>Ask where to save</b><small>Otherwise files go straight to the folder below</small></div>
+          <label class="switch"><input type="checkbox" data-path="downloads.ask_where_to_save"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="what"><b>Folder</b><span class="path" id="dlFolder"></span></div>
+          <button class="btn" onclick="post('ChangeDownloadFolder')">Change…</button>
+        </div>
+        <div class="row">
+          <div class="what"><b>Progress ring</b><small>Show download progress on the toolbar button</small></div>
+          <label class="switch"><input type="checkbox" data-path="downloads.show_progress_toolbar"><span></span></label>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <span class="label">Tabs</span>
+      <div class="card">
+        <div class="row">
+          <div class="what"><b>Drag to reorder</b></div>
+          <label class="switch"><input type="checkbox" data-path="tabs.enable_tab_reordering"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="what"><b>Drag out to a new window</b></div>
+          <label class="switch"><input type="checkbox" data-path="tabs.enable_tab_tearoff"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="what"><b>Rest background tabs</b><small>Suspend tabs you haven't looked at, freeing their memory</small></div>
+          <select data-path="performance.sleep_after_secs" data-type="number">
+            <option value="60">After 1 minute</option><option value="300">After 5 minutes</option>
+            <option value="900">After 15 minutes</option><option value="3600">After 1 hour</option><option value="0">Never</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <span class="label">About</span>
+      <div class="card">
+        <div class="row"><div class="what"><b>Shoji</b><small>Version {{APP_VERSION}}</small></div></div>
+        <div class="row"><div class="what"><b>Rendering engine</b><small>Microsoft Edge WebView2 {{ENGINE_VERSION}} · updated by Windows</small></div></div>
+        <div class="row"><div class="what"><b>Data folder</b><span class="path">{{DATA_DIR}}</span></div></div>
+      </div>
+    </section>
+  </div>
+  <div id="toast" role="status"></div>
+
+  <script>
+    const S = {{SETTINGS_JSON}};
+    const $ = id => document.getElementById(id);
+    function post(action, payload = null) {
+      if (window.ipc) window.ipc.postMessage(JSON.stringify({ action, payload }));
+    }
+    let toastTimer;
+    function toast(text) {
+      $('toast').textContent = text;
+      $('toast').classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => $('toast').classList.remove('show'), 1600);
+    }
+    const get = (obj, path) => path.split('.').reduce((o, k) => o && o[k], obj);
+    function patchFor(path, value) {
+      const keys = path.split('.');
+      const patch = {};
+      keys.reduce((o, k, i) => (o[k] = i === keys.length - 1 ? value : {}), patch);
+      return patch;
+    }
+    function save(path, value) {
+      post('SaveSettings', { patch: patchFor(path, value) });
+      toast('Saved');
+    }
+
+    for (const el of document.querySelectorAll('[data-path]')) {
+      const value = get(S, el.dataset.path);
+      if (el.type === 'checkbox') {
+        el.checked = !!value;
+        el.onchange = () => save(el.dataset.path, el.checked);
+      } else {
+        el.value = String(value);
+        if (el.value !== String(value) && el.dataset.type === 'number') {
+          el.value = [...el.options].reduce((a, o) => Math.abs(o.value - value) < Math.abs(a - value) ? o.value : a, el.options[0].value);
+        }
+        el.onchange = () => save(el.dataset.path, el.dataset.type === 'number' ? Number(el.value) : el.value);
+      }
+    }
+
+    function pick(id) { post('SetAccent', { accent: id }); window.__applyTheme({ accent: id }); }
+    function setMode(mode) { post('SetTheme', { theme: mode }); window.__applyTheme({ accent: S.appearance.accent, mode }); }
+    function setFonts(id) { save('appearance.fonts', id); window.__applyTheme({ accent: S.appearance.accent, fonts: id }); }
+    window.__applyTheme = t => {
+      S.appearance.accent = t.accent;
+      if (t.mode) S.appearance.theme = t.mode;
+      if (t.fonts) S.appearance.fonts = t.fonts;
+      document.documentElement.dataset.fonts = S.appearance.fonts;
+      document.querySelectorAll('.type-opt').forEach(o => o.setAttribute('aria-checked', String(o.dataset.fonts === S.appearance.fonts)));
+      document.documentElement.dataset.accent = t.accent;
+      document.documentElement.dataset.mode = S.appearance.theme;
+      document.querySelectorAll('.opt').forEach(o => o.setAttribute('aria-checked', String(o.dataset.id === t.accent)));
+      document.querySelectorAll('#modeSeg button').forEach(b => b.setAttribute('aria-checked', String(b.dataset.mode === S.appearance.theme)));
+    };
+    window.__applyTheme({ accent: S.appearance.accent });
+
+    window.__setDownloadFolder = path => { S.downloads.default_folder = path; $('dlFolder').textContent = path; toast('Saved'); };
+    $('dlFolder').textContent = S.downloads.default_folder;
+
+    const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    // The keep list only applies in private mode.
+    function showKeepRow() { $('keepRow').hidden = !$('privateMode').checked; }
+    $('privateMode').addEventListener('change', showKeepRow);
+    showKeepRow();
+    function renderSites() {
+      const sites = S.privacy.persistent_sites;
+      $('sites').innerHTML = sites.length
+        ? sites.map((s, i) => `<span class="chip">${esc(s)}<button onclick="removeSite(${i})" aria-label="Remove ${esc(s)}">×</button></span>`).join('')
+        : '<span class="hint">None — every site is forgotten when Shoji closes.</span>';
+    }
+    function saveSites() { save('privacy.persistent_sites', S.privacy.persistent_sites); renderSites(); }
+    function addSite() {
+      const raw = $('siteInput').value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[\/?#].*$/, '');
+      $('siteInput').value = '';
+      if (raw && !S.privacy.persistent_sites.includes(raw)) { S.privacy.persistent_sites.push(raw); saveSites(); }
+    }
+    function removeSite(i) { S.privacy.persistent_sites.splice(i, 1); saveSites(); }
+    renderSites();
+
+    function renderDarkSkip() {
+      const sites = S.appearance.dark_websites_exclude;
+      $('darkSkip').innerHTML = sites.length
+        ? sites.map((s, i) => `<span class="chip">${esc(s)}<button onclick="removeDarkSkip(${i})" aria-label="Darken ${esc(s)} again">×</button></span>`).join('')
+        : '<span class="hint">None — right-click the moon on any site to add it here.</span>';
+    }
+    function removeDarkSkip(i) {
+      S.appearance.dark_websites_exclude.splice(i, 1);
+      save('appearance.dark_websites_exclude', S.appearance.dark_websites_exclude);
+      renderDarkSkip();
+    }
+    window.__setDarkSkip = list => { S.appearance.dark_websites_exclude = list; renderDarkSkip(); };
+    renderDarkSkip();
+
+    /* Byobu: lists, paused sites, own rules */
+    const ago = t => {
+      if (!t) return 'not yet';
+      const m = Math.max(0, Math.round((Date.now() / 1000 - t) / 60));
+      return m < 2 ? 'just now' : m < 90 ? m + ' min ago' : m < 2880 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' d ago';
+    };
+    const num = n => Number(n).toLocaleString();
+    function renderPaused() {
+      const sites = S.shield.paused_sites;
+      $('paused').innerHTML = sites.length
+        ? sites.map((x, i) => `<span class="chip">${esc(x)}<button onclick="removePaused(${i})" aria-label="Resume Byōbu on ${esc(x)}">×</button></span>`).join('')
+        : '<span class="hint">None — Byōbu is active everywhere.</span>';
+    }
+    function removePaused(i) { S.shield.paused_sites.splice(i, 1); save('shield.paused_sites', S.shield.paused_sites); renderPaused(); }
+    let byobu = { lists: [], total: 0, week: 0, updating: false };
+    function renderLists() {
+      $('lists').innerHTML = byobu.lists.length ? byobu.lists.map(l => {
+        const meta = l.enabled ? `${num(l.rules)} rules · updated ${ago(l.checked)}` : 'Off';
+        const del = l.custom ? `<button class="x" onclick="removeList('${esc(l.url)}')" aria-label="Remove ${esc(l.title)}">×</button>` : '';
+        return `<div class="lrow"><span class="what"><b>${esc(l.title)}</b><small>${meta}</small></span>${del}` +
+          `<label class="switch"><input type="checkbox" ${l.enabled ? 'checked' : ''} onchange="toggleList('${esc(l.id)}', this.checked)"><span></span></label></div>`;
+      }).join('') : '<div class="lrow"><span class="hint">Loading lists…</span></div>';
+      $('shStats').textContent = byobu.total
+        ? `${num(byobu.week)} blocked this week · ${num(byobu.total)} in all`
+        : "Blocks ads and trackers using uBlock Origin and Brave's lists";
+      $('updateBtn').textContent = byobu.updating ? 'Updating…' : 'Update now';
+    }
+    function toggleList(id, on) {
+      const off = S.shield.disabled_lists.filter(x => x !== id);
+      if (!on) off.push(id);
+      S.shield.disabled_lists = off;
+      save('shield.disabled_lists', off);
+      const l = byobu.lists.find(x => x.id === id); if (l) l.enabled = on;
+      renderLists();
+    }
+    function addList() {
+      const url = $('listUrl').value.trim();
+      if (!/^https?:\/\//i.test(url)) { toast('Enter a list address starting with https://'); return; }
+      if (!S.shield.custom_lists.includes(url)) { S.shield.custom_lists.push(url); save('shield.custom_lists', S.shield.custom_lists); }
+      $('listUrl').value = '';
+      byobu.updating = true; renderLists();
+    }
+    function removeList(url) {
+      S.shield.custom_lists = S.shield.custom_lists.filter(x => x !== url);
+      save('shield.custom_lists', S.shield.custom_lists);
+      byobu.lists = byobu.lists.filter(l => l.url !== url); renderLists();
+    }
+    function updateLists() { byobu.updating = true; renderLists(); post('ShieldState', { refresh: true, log: false }); }
+    function saveRules() { S.shield.custom_rules = $('myRules').value; save('shield.custom_rules', S.shield.custom_rules); }
+    window.__byobuState = d => {
+      byobu = d;
+      renderLists();
+      renderPaused();
+      S.shield.paused_sites = S.shield.paused_sites || [];
+    };
+    window.__byobuDirty = () => post('ShieldState', { refresh: false, log: false });
+    $('myRules').value = S.shield.custom_rules || '';
+    renderPaused();
+    renderLists();
+    post('ShieldState', { refresh: false, log: false });
+    setInterval(() => { if (byobu.updating || !byobu.ready) window.__byobuDirty(); }, 2500);
+  </script>
+</body>
+</html>

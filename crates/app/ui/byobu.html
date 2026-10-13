@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en" data-accent="{{ACCENT}}" data-mode="{{MODE}}" data-fonts="{{FONTS}}">
+<head>
+  <meta charset="UTF-8">
+  <title>Byōbu</title>
+  <style>
+{{THEME_CSS}}
+    body { padding: 40px 32px 64px; font-size: 13px; line-height: 1.5; }
+    button, select, input { font: inherit; color: inherit; }
+    .wrap { max-width: 1040px; margin: 0 auto; }
+    header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+    header .crane { width: 40px; height: 40px; }
+    h1 { font-family: var(--font-display); font-size: 24px; font-weight: 400; }
+    h1 + p { color: var(--ink-3); font-size: 12px; }
+    .stats { display: flex; gap: 28px; margin-bottom: 18px; }
+    .stat b { display: block; font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .stat span { color: var(--ink-3); font-size: 12px; }
+    .tools { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+    select, .btn, input[type=text] { height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); outline: none; }
+    .btn { cursor: pointer; }
+    .btn:hover, select:hover { border-color: var(--line-strong); }
+    input[type=text] { flex: 1; min-width: 180px; }
+    input[type=text]:focus { border-color: var(--accent); }
+    .table { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); overflow: hidden; }
+    .head, .entry { display: grid; grid-template-columns: 68px 92px 78px minmax(0, 1.7fr) minmax(0, 1.3fr); gap: 12px; padding: 8px 14px; align-items: baseline; }
+    .head { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); border-bottom: 1px solid var(--line); background: var(--surface-2); }
+    .entry { border-bottom: 1px solid var(--line); font-size: 12px; }
+    .entry:last-child { border-bottom: 0; }
+    .entry:hover { background: var(--hover); }
+    .entry .url, .entry .rule { font-family: var(--mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .entry .rule { color: var(--ink-3); }
+    .entry .t, .entry .kind { color: var(--ink-3); }
+    .tag { display: inline-block; padding: 1px 8px; border-radius: 6px; font-size: 11px; background: var(--tint-soft); border: 1px solid var(--line); }
+    .tag.blocked { color: var(--danger); }
+    .empty { padding: 56px 0; text-align: center; color: var(--ink-3); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>{{CRANE}}<div><h1>Byōbu</h1><p>What the shield blocked, replaced or cleaned in this session</p></div></header>
+    <div class="stats">
+      <div class="stat"><b id="sShown">0</b><span>in this view</span></div>
+      <div class="stat"><b id="sWeek">0</b><span>blocked this week</span></div>
+      <div class="stat"><b id="sTotal">0</b><span>blocked in all</span></div>
+    </div>
+    <div class="tools">
+      <input type="text" id="q" placeholder="Filter by site, address or rule" spellcheck="false">
+      <select id="action">
+        <option value="">All actions</option><option value="blocked">Blocked</option>
+        <option value="replaced">Replaced</option><option value="cleaned">Cleaned</option>
+      </select>
+      <select id="kind"><option value="">All types</option></select>
+      <button class="btn" id="pause" onclick="togglePause()">Pause</button>
+    </div>
+    <div class="table">
+      <div class="head"><span>Time</span><span>Action</span><span>Type</span><span>Request</span><span>Page · rule</span></div>
+      <div id="rows"><div class="empty">Nothing yet. Browse a page and requests will appear here.</div></div>
+    </div>
+  </div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    function post(action, payload = null) {
+      if (window.ipc) window.ipc.postMessage(JSON.stringify({ action, payload }));
+    }
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    let data = { log: [], week: 0, total: 0 };
+    let paused = false;
+    const num = n => Number(n).toLocaleString();
+    function time(ms) { return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
+    function render() {
+      const q = $('q').value.trim().toLowerCase();
+      const act = $('action').value, kind = $('kind').value;
+      const rows = data.log.filter(e =>
+        (!act || e.action === act) && (!kind || e.kind === kind) &&
+        (!q || (e.url + ' ' + e.page + ' ' + (e.rule || '')).toLowerCase().includes(q)));
+      $('sShown').textContent = num(rows.length);
+      $('sWeek').textContent = num(data.week);
+      $('sTotal').textContent = num(data.total);
+      const kinds = [...new Set(data.log.map(e => e.kind))].sort();
+      const cur = $('kind').value;
+      if ([...$('kind').options].length - 1 !== kinds.length) {
+        $('kind').innerHTML = '<option value="">All types</option>' + kinds.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
+        $('kind').value = kinds.includes(cur) ? cur : '';
+      }
+      $('rows').innerHTML = rows.length ? rows.slice(0, 400).map(e =>
+        `<div class="entry"><span class="t">${time(e.t)}</span><span><span class="tag ${e.action}">${esc(e.action)}</span></span>` +
+        `<span class="kind">${esc(e.kind)}</span><span class="url" title="${esc(e.url)}">${esc(e.url)}</span>` +
+        `<span class="rule" title="${esc(e.rule || '')}">${esc(e.page)}${e.rule ? ' · ' + esc(e.rule) : ''}</span></div>`).join('')
+        : '<div class="empty">Nothing yet. Browse a page and requests will appear here.</div>';
+    }
+    window.__byobuState = d => { if (!paused) { data = d; render(); } };
+    window.__byobuDirty = () => {};
+    function poll() { if (!paused) post('ShieldState', { refresh: false, log: true }); }
+    function togglePause() { paused = !paused; $('pause').textContent = paused ? 'Resume' : 'Pause'; if (!paused) poll(); }
+    for (const id of ['q', 'action', 'kind']) $(id).addEventListener('input', render);
+    poll();
+    setInterval(poll, 1500);
+  </script>
+</body>
+</html>

@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en" data-accent="{{ACCENT}}" data-mode="{{MODE}}" data-fonts="{{FONTS}}">
+<head>
+  <meta charset="UTF-8">
+  <title>Welcome</title>
+  <style>
+{{THEME_CSS}}
+    html, body { height: 100%; }
+    body { display: grid; place-items: center; overflow: hidden auto; user-select: none; }
+    body::before { content: ""; position: fixed; inset: 0; pointer-events: none;
+      background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+      background-size: 132px 196px; background-position: center -40px;
+      -webkit-mask-image: radial-gradient(ellipse 62% 58% at 50% 45%, transparent 40%, #000 100%);
+      mask-image: radial-gradient(ellipse 62% 58% at 50% 45%, transparent 40%, #000 100%); opacity: .7; transition: opacity .5s; }
+    body:not([data-step="color"])::before { opacity: .3; }
+    main { position: relative; display: flex; flex-direction: column; align-items: center; width: min(800px, 100%); text-align: center; padding: 32px 24px; }
+    @keyframes rise { from { opacity: 0; transform: translateY(10px); } }
+    .hero { width: 148px; height: 148px; transition: width .5s var(--ease), height .5s var(--ease); }
+    body:not([data-step="color"]) .hero { width: 60px; height: 60px; }
+    h1 { margin-top: 22px; font-family: var(--font-display); font-size: 30px; font-weight: 400; letter-spacing: -.01em; }
+    p.lead { font-family: var(--font-text); margin-top: 10px; max-width: 440px; color: var(--ink-2); font-size: 14px; line-height: 1.6; }
+    .step { display: none; flex-direction: column; align-items: center; width: 100%; }
+    .step.on { display: flex; animation: rise .6s var(--ease) both; }
+
+    /* Progress through the customize steps */
+    .progress { display: flex; align-items: center; gap: 10px; margin-top: 18px; color: var(--ink-3); }
+    .progress[hidden] { display: none; }
+    .bars { display: flex; gap: 5px; }
+    .bars i { width: 22px; height: 4px; border-radius: 2px; background: var(--press); transition: background .3s; }
+    .bars i.done { background: var(--tone); }
+
+    /* Color */
+    .picker { display: flex; flex-wrap: wrap; justify-content: center; max-width: 100%; gap: 6px; margin-top: 34px; padding: 8px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
+    .opt { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 74px; padding: 10px 0 8px; border: 0; border-radius: 11px; background: none; color: var(--ink-2); font: inherit; font-size: 11.5px; cursor: pointer; transition: background .15s, color .15s; }
+    .opt:hover { background: var(--hover); color: var(--ink); }
+    .opt[aria-checked="true"] { background: var(--tint); color: var(--ink); font-weight: 600; }
+    .swatch-crane .crane { width: 38px; height: 38px; filter: var(--crane-shadow); }
+    .darkrow { display: flex; align-items: center; gap: 14px; margin-top: 22px; padding: 10px 16px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); text-align: left; font-size: 13px; }
+    .darkrow small { display: block; color: var(--ink-3); font-size: 11.5px; }
+    .switch { position: relative; width: 38px; height: 22px; flex-shrink: 0; }
+    .switch input { position: absolute; opacity: 0; inset: 0; cursor: pointer; z-index: 1; margin: 0; }
+    .switch span { position: absolute; inset: 0; border-radius: 11px; background: var(--press); border: 1px solid var(--line); transition: background .2s; }
+    .switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--ink-2); transition: transform .2s var(--ease), background .2s; }
+    .switch input:checked + span { background: var(--tone); border-color: transparent; }
+    .switch input:checked + span::after { transform: translateX(16px); background: var(--on-tone); }
+    .fine { max-width: 440px; line-height: 1.5; margin-top: 16px; font-size: 12px; color: var(--ink-3); }
+
+    /* Buttons */
+    button { font: inherit; color: inherit; }
+    .actions { display: flex; align-items: center; gap: 10px; margin-top: 30px; }
+    .begin { height: 42px; padding: 0 30px; border: 0; border-radius: 10px; background: var(--tone); color: var(--on-tone); font-size: 14px; font-weight: 600; cursor: pointer; transition: filter .15s, transform .15s; }
+    .begin:hover { filter: brightness(.96); }
+    .begin:active { transform: translateY(1px); }
+    .back { height: 42px; padding: 0 18px; border: 0; border-radius: 10px; background: none; color: var(--ink-2); font-size: 13.5px; cursor: pointer; }
+    .back:hover { background: var(--hover); color: var(--ink); }
+
+    /* Continue customizing, or start browsing */
+    .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: min(560px, 100%); margin-top: 32px; }
+    .choice { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 20px 20px 18px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); text-align: left; cursor: pointer; box-shadow: var(--shadow); transition: border-color .15s, transform .2s var(--ease), background .15s; }
+    .choice:hover { border-color: var(--line-strong); transform: translateY(-2px); }
+    .choice.primary { background: var(--tint-soft); border-color: color-mix(in srgb, var(--tone) 70%, transparent); }
+    .choice svg.i { width: 20px; height: 20px; color: var(--accent); margin-bottom: 6px; }
+    .choice b { font-family: var(--font-display); font-size: 19px; font-weight: 500; }
+    .choice small { font-family: var(--font-text); font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+    .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+    .chips span { padding: 2px 9px; border-radius: 20px; background: var(--surface); border: 1px solid var(--line); font-size: 11.5px; color: var(--ink-2); }
+
+    /* Type tester */
+    .specimen { display: flex; align-items: center; gap: 6px; width: min(620px, 100%); margin-top: 26px; padding: 4px 6px 4px 18px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
+    .specimen:focus-within { border-color: var(--accent); }
+    .specimen input { flex: 1; min-width: 0; height: 46px; border: 0; background: none; outline: none; color: var(--ink); font-family: var(--font-display); font-size: 20px; user-select: text; }
+    .specimen input::placeholder { color: var(--ink-3); }
+    .icon-btn { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 9px; background: none; color: var(--ink-2); cursor: pointer; }
+    .icon-btn:hover { background: var(--hover); color: var(--ink); }
+    .icon-btn:active svg { transform: rotate(-90deg); transition: transform .2s; }
+    .sheets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; width: 100%; margin-top: 18px; }
+    .sheet { position: relative; display: flex; flex-direction: column; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); text-align: left; overflow: hidden; cursor: pointer; padding: 0; box-shadow: var(--shadow); transition: border-color .15s, transform .25s var(--ease); }
+    .sheet:hover, .sheet:focus-visible { transform: translateY(-3px); border-color: var(--line-strong); }
+    .sheet[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow); }
+    .mini-strip { display: flex; align-items: flex-end; gap: 6px; height: 30px; padding: 0 10px; background: var(--bg-sunk); }
+    .mini-tab { padding: 5px 12px 6px; border-radius: 7px 7px 0 0; background: var(--surface); font-family: var(--font); font-size: 11px; color: var(--ink); }
+    .mini-tab.dim { background: none; color: var(--ink-3); }
+    .mini-omni { margin: 8px 10px 0; padding: 6px 10px; border-radius: 7px; background: var(--surface-2); font-family: var(--font); font-size: 11px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sheet-body { display: flex; flex-direction: column; gap: 8px; flex: 1; padding: 16px 16px 14px; }
+    .sheet-body .label { font-size: 10px; }
+    .sheet-body h2 { font-family: var(--font-display); font-size: 25px; font-weight: 400; line-height: 1.15; letter-spacing: -.005em; color: var(--ink); overflow-wrap: anywhere; min-height: 2.3em; }
+    .sheet-body p { font-family: var(--font-text); font-size: 12.5px; line-height: 1.55; color: var(--ink-2); }
+    .sheet-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 6px; font-family: var(--font); font-size: 11.5px; color: var(--ink-3); }
+    .tick { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line-strong); color: transparent; flex-shrink: 0; }
+    .tick svg.i { width: 12px; height: 12px; stroke-width: 2.4; }
+    [aria-checked="true"] .tick { background: var(--tone); border-color: transparent; color: var(--on-tone); }
+    .hint { margin-top: 14px; font-size: 12px; color: var(--ink-3); }
+    kbd { padding: 0 5px; border-radius: 4px; border: 1px solid var(--line-strong); font: 11px var(--font); }
+
+    /* Search engine */
+    .mock-search { display: flex; align-items: center; gap: 12px; width: min(520px, 100%); height: 50px; margin-top: 28px; padding: 0 18px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow); color: var(--ink-3); font-size: 15px; text-align: left; }
+    .mock-search .i { color: var(--ink-3); }
+    .mock-search em { font-style: normal; color: var(--ink); }
+    .caret { width: 1.5px; height: 20px; margin-left: -9px; background: var(--accent); animation: blink 1.1s steps(1) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    .engines { display: flex; flex-direction: column; gap: 6px; width: min(520px, 100%); margin-top: 16px; }
+    .engine { display: flex; align-items: center; gap: 14px; padding: 11px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); text-align: left; cursor: pointer; transition: border-color .15s, background .15s; }
+    .engine:hover { border-color: var(--line-strong); }
+    .engine[aria-checked="true"] { border-color: var(--accent); background: var(--tint-soft); }
+    .mono { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--line); font-family: var(--font-display); font-size: 16px; color: var(--ink-2); flex-shrink: 0; }
+    .engine[aria-checked="true"] .mono { background: var(--tone); border-color: transparent; color: var(--on-tone); }
+    .engine .what { flex: 1; display: flex; flex-direction: column; gap: 1px; }
+    .engine b { font-weight: 600; font-size: 13.5px; }
+    .engine small { font-family: var(--font-text); font-size: 12px; color: var(--ink-3); }
+    .tag { margin-left: 6px; padding: 1px 7px; border-radius: 10px; background: var(--hover); font-size: 10.5px; font-weight: 500; color: var(--ink-3); }
+
+    @media (max-width: 680px) {
+      .sheets, .choices { grid-template-columns: 1fr; }
+      .mini-strip, .mini-omni { display: none; }
+    }
+  </style>
+</head>
+<body data-step="color">
+  <main>
+    {{CRANE}}
+    <div class="progress" id="progress" hidden><span class="label" id="progressText"></span><div class="bars" id="bars"></div></div>
+
+    <section class="step on" data-step="color">
+      <h1>Welcome to Shoji</h1>
+      <p class="lead">Choose a color for your crane. It tints the browser and its icon in the taskbar, Start menu and desktop.</p>
+      <div class="picker" role="radiogroup" aria-label="Color">{{SWATCHES}}</div>
+      <label class="darkrow">
+        <span class="switch"><input type="checkbox" id="darkSites" {{DARK_CHECKED}} onchange="post('SetDarkWebsites', { on: this.checked })"><span></span></span>
+        <span>Dark websites<small>Matches your Windows setting. A few sites may look off — the moon button turns it off.</small></span>
+      </label>
+      <div class="actions"><button class="begin" onclick="go('fork')">Continue</button></div>
+      <div class="fine">Shoji follows your Windows light or dark setting. Change either one any time in Settings.</div>
+    </section>
+
+    <section class="step" data-step="fork">
+      <h1>Make it yours?</h1>
+      <p class="lead">A few more choices, a few seconds each. Everything here can be changed later in Settings.</p>
+      <div class="choices">
+        <button class="choice primary" onclick="go(CUSTOM[0].id)">
+          <svg class="i" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>
+          <b>Keep customizing</b>
+          <small>Set up the rest of Shoji now.</small>
+          <span class="chips" id="customChips"></span>
+        </button>
+        <button class="choice" onclick="finish()">
+          <svg class="i" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          <b>Start browsing</b>
+          <small>Go with the defaults. You can change anything later in Settings.</small>
+        </button>
+      </div>
+      <div class="actions"><button class="back" onclick="go('color')">Back</button></div>
+    </section>
+
+    <section class="step" data-step="type">
+      <h1>Pick your type</h1>
+      <p class="lead">Write anything to see it set three ways. Hover a sheet to try it on the whole page, then click the one you like.</p>
+      <div class="specimen">
+        <input id="specimen" maxlength="60" spellcheck="false" placeholder="Type to try it out" aria-label="Sample text">
+        <button class="icon-btn" onclick="shuffle()" title="Another line" aria-label="Another sample line">
+          <svg class="i" viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5.3L20 9"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 0 1-14 5.3L4 15"/><path d="M4 20v-5h5"/></svg>
+        </button>
+      </div>
+      <div class="sheets" role="radiogroup" aria-label="Type" id="sheets"></div>
+      <div class="hint">Keys <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> choose a set</div>
+      <div class="actions"><button class="back" data-back>Back</button><button class="begin" data-next></button></div>
+    </section>
+
+    <section class="step" data-step="privacy">
+      <h1>Remember your browsing?</h1>
+      <p class="lead">Like most browsers, Shoji can keep you signed in and remember history and cache, saved in your Windows profile. Or it can forget everything when it closes.</p>
+      <div class="engines" role="radiogroup" aria-label="Browsing data" id="modes">
+        <button class="engine" role="radio" aria-checked="false" data-private="false">
+          <span class="mono">R</span>
+          <span class="what"><b>Remember<span class="tag">Default</span></b><small>Logins, history and cache stay between sessions.</small></span>
+          <span class="tick"><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+        </button>
+        <button class="engine" role="radio" aria-checked="false" data-private="true">
+          <span class="mono">P</span>
+          <span class="what"><b>Private</b><small>Everything is forgotten when Shoji closes.</small></span>
+          <span class="tick"><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+        </button>
+      </div>
+      <div class="fine">You can switch any time with Private mode in Settings.</div>
+      <div class="actions"><button class="back" data-back>Back</button><button class="begin" data-next></button></div>
+    </section>
+
+    <section class="step" data-step="search">
+      <h1>Choose a search engine</h1>
+      <p class="lead">It answers whatever you type in the address bar and on the new tab page.</p>
+      <div class="mock-search" aria-hidden="true">
+        <svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>
+        <span class="caret"></span><span>Search with <em id="engineName"></em></span>
+      </div>
+      <div class="engines" role="radiogroup" aria-label="Search engine" id="engines"></div>
+      <div class="actions"><button class="back" data-back>Back</button><button class="begin" data-next></button></div>
+    </section>
+  </main>
+  <script>
+    const PROFILES = {{PROFILES_JSON}};
+    const ENGINES = [
+      { id: 'duckduckgo', name: 'DuckDuckGo', note: "Doesn't profile you or keep a search history.", tag: 'Default' },
+      { id: 'google', name: 'Google', note: 'The broadest results on the web.' },
+      { id: 'bing', name: 'Bing', note: "Microsoft's search engine." },
+      { id: 'brave', name: 'Brave Search', note: 'An independent index, without profiling.' },
+      { id: 'ecosia', name: 'Ecosia', note: 'Puts its profits toward planting trees.' },
+    ];
+    // The optional customize prompts, in order. Add a <section class="step"> and an entry here.
+    const CUSTOM = [
+      { id: 'type', title: 'Type' },
+      { id: 'privacy', title: 'Privacy' },
+      { id: 'search', title: 'Search' },
+    ];
+    const LINES = [
+      'Paper lets the light through.',
+      'A quiet place to read the web.',
+      'Seven cranes, one thin frame.',
+      'Ink settles, the page stays calm.',
+      'The quick brown fox jumps over the lazy dog.',
+    ];
+
+    const $ = id => document.getElementById(id);
+    const root = document.documentElement;
+    const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const TICK = '<span class="tick"><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>';
+    function post(action, payload = null) {
+      if (window.ipc) window.ipc.postMessage(JSON.stringify({ action, payload }));
+    }
+    const save = patch => post('SaveSettings', { patch });
+    function finish() { post('FinishWelcome'); }
+
+    /* Steps */
+    let current = 'color';
+    function go(id) {
+      current = id;
+      document.body.dataset.step = id;
+      document.querySelectorAll('.step').forEach(s => s.classList.toggle('on', s.dataset.step === id));
+      const n = CUSTOM.findIndex(s => s.id === id);
+      $('progress').hidden = n < 0;
+      if (n >= 0) {
+        $('progressText').textContent = `${n + 1} of ${CUSTOM.length} · ${CUSTOM[n].title}`;
+        [...$('bars').children].forEach((b, i) => b.classList.toggle('done', i <= n));
+      }
+      window.scrollTo(0, 0);
+      if (id === 'type') $('specimen').focus({ preventScroll: true });
+    }
+    $('customChips').innerHTML = CUSTOM.map(s => `<span>${esc(s.title)}</span>`).join('');
+    $('bars').innerHTML = CUSTOM.map(() => '<i></i>').join('');
+    CUSTOM.forEach((s, i) => {
+      const section = document.querySelector(`.step[data-step="${s.id}"]`);
+      const next = CUSTOM[i + 1];
+      const nextBtn = section.querySelector('[data-next]');
+      nextBtn.textContent = next ? `Next: ${next.title}` : 'Start browsing';
+      nextBtn.onclick = () => next ? go(next.id) : finish();
+      section.querySelector('[data-back]').onclick = () => go(i ? CUSTOM[i - 1].id : 'fork');
+    });
+
+    /* Color */
+    function pick(id) {
+      post('SetAccent', { accent: id });
+      window.__applyTheme({ accent: id });
+    }
+
+    /* Type: every sheet renders the sample in its own set; hovering one dresses the page in it. */
+    let fonts = root.dataset.fonts;
+    $('sheets').innerHTML = PROFILES.map((p, i) => `
+      <button class="sheet" role="radio" aria-checked="false" data-fonts="${esc(p.id)}" style="${esc(p.vars)}">
+        <div class="mini-strip"><span class="mini-tab">New tab</span><span class="mini-tab dim">Reading</span></div>
+        <div class="mini-omni">Search or enter address</div>
+        <div class="sheet-body">
+          <span class="label">${i + 1} · ${esc(p.name)}</span>
+          <h2 class="sample"></h2>
+          <p>Shoji keeps very little for itself: tabs, an address bar, and a calm page to read on.</p>
+          <div class="sheet-foot"><span>${esc(p.note)}</span>${TICK}</div>
+        </div>
+      </button>`).join('');
+    function chooseFonts(id) {
+      if (id !== fonts) save({ appearance: { fonts: id } });
+      fonts = id;
+      root.dataset.fonts = id;
+      document.querySelectorAll('.sheet').forEach(s => s.setAttribute('aria-checked', String(s.dataset.fonts === id)));
+    }
+    document.querySelectorAll('.sheet').forEach(s => {
+      s.onclick = () => chooseFonts(s.dataset.fonts);
+      s.onmouseenter = s.onfocus = () => { root.dataset.fonts = s.dataset.fonts; };
+      s.onmouseleave = s.onblur = () => { root.dataset.fonts = fonts; };
+    });
+    function setSample(text) {
+      document.querySelectorAll('.sample').forEach(h => { h.textContent = text || LINES[0]; });
+    }
+    let line = 0;
+    function shuffle() {
+      line = (line + 1) % LINES.length;
+      $('specimen').value = LINES[line];
+      setSample(LINES[line]);
+    }
+    $('specimen').value = LINES[0];
+    $('specimen').oninput = e => setSample(e.target.value.trim());
+    setSample(LINES[0]);
+    document.addEventListener('keydown', e => {
+      if (current !== 'type' || e.target.tagName === 'INPUT' || e.ctrlKey || e.altKey) return;
+      const p = PROFILES[Number(e.key) - 1];
+      if (p) chooseFonts(p.id);
+    });
+
+    /* Browsing data: remember (default) or private */
+    function chooseMode(isPrivate, persist) {
+      if (persist) save({ privacy: { ephemeral_default: isPrivate } });
+      document.querySelectorAll('#modes .engine').forEach(b => b.setAttribute('aria-checked', String((b.dataset.private === 'true') === isPrivate)));
+    }
+    document.querySelectorAll('#modes .engine').forEach(b => { b.onclick = () => chooseMode(b.dataset.private === 'true', true); });
+    chooseMode({{PRIVATE_MODE}}, false);
+
+    /* Search engine */
+    let engine = ENGINES.some(e => e.id === '{{SEARCH_ENGINE}}') ? '{{SEARCH_ENGINE}}' : 'duckduckgo';
+    $('engines').innerHTML = ENGINES.map(e => `
+      <button class="engine" role="radio" aria-checked="false" data-id="${e.id}">
+        <span class="mono">${esc(e.name[0])}</span>
+        <span class="what"><b>${esc(e.name)}${e.tag ? `<span class="tag">${esc(e.tag)}</span>` : ''}</b><small>${esc(e.note)}</small></span>
+        ${TICK}
+      </button>`).join('');
+    function chooseEngine(id, persist) {
+      if (persist && id !== engine) save({ search_engine: id });
+      engine = id;
+      $('engineName').textContent = ENGINES.find(e => e.id === id).name;
+      document.querySelectorAll('#engines .engine').forEach(b => b.setAttribute('aria-checked', String(b.dataset.id === id)));
+    }
+    document.querySelectorAll('#engines .engine').forEach(b => { b.onclick = () => chooseEngine(b.dataset.id, true); });
+    chooseEngine(engine, false);
+
+    window.__applyTheme = t => {
+      root.dataset.accent = t.accent;
+      if (t.mode) root.dataset.mode = t.mode;
+      if (t.fonts) chooseFonts(t.fonts);
+      document.querySelectorAll('.opt').forEach(o => o.setAttribute('aria-checked', String(o.dataset.id === t.accent)));
+    };
+    window.__applyTheme({ accent: root.dataset.accent, fonts });
+  </script>
+</body>
+</html>

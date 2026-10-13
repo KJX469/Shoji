@@ -1,0 +1,15 @@
+[package]
+name = "shoji-byobu"
+version = "0.1.0"
+edition = "2021"
+authors = ["Shoji Contributors"]
+description = "Byobu: Shoji's ad and tracker shield"
+license = "MIT"
+
+[dependencies]
+# Brave's matcher. `single-thread` is left off so a rebuilt engine can be built on a worker
+# thread and swapped in on the UI thread.
+adblock = { version = "0.13", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling", "css-validation"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }

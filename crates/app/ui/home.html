@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en" data-accent="{{ACCENT}}" data-mode="{{MODE}}" data-fonts="{{FONTS}}">
+<head>
+  <meta charset="UTF-8">
+  <title>New tab</title>
+  <style>
+{{THEME_CSS}}
+    html, body { height: 100%; }
+    body { display: grid; place-items: center; overflow: hidden auto; }
+    /* Kumiko lattice: the frame of a shoji screen, fading out toward the centre */
+    body::before { content: ""; position: fixed; inset: 0; pointer-events: none;
+      background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+      background-size: 132px 196px; background-position: center -40px;
+      -webkit-mask-image: radial-gradient(ellipse 60% 55% at 50% 42%, transparent 35%, #000 100%);
+      mask-image: radial-gradient(ellipse 60% 55% at 50% 42%, transparent 35%, #000 100%); opacity: .7; }
+    main { position: relative; width: min(640px, 90vw); display: flex; flex-direction: column; align-items: center; margin: 8vh 0 6vh; }
+    .crane { width: 84px; height: 84px; }
+    .wordmark { margin: 14px 0 30px; font-family: var(--font-display); font-size: 15px; font-weight: 500; letter-spacing: .5em; text-indent: .5em; color: var(--ink-2); }
+    form { position: relative; width: min(560px, 100%); }
+    form svg.i { position: absolute; left: 18px; top: 50%; transform: translateY(-50%); color: var(--ink-3); }
+    input { width: 100%; height: 50px; padding: 0 20px 0 48px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; font-size: 15px; outline: none; box-shadow: var(--shadow); transition: border-color .15s, box-shadow .15s; }
+    input::placeholder { color: var(--ink-3); }
+    input:focus { border-color: var(--accent); box-shadow: var(--shadow), 0 0 0 4px var(--tint-soft); }
+
+    .restore { display: none; align-items: center; gap: 14px; width: min(560px, 100%); margin-bottom: 22px; padding: 12px 16px; border-radius: 12px; background: var(--tint-soft); border: 1px solid color-mix(in srgb, var(--tone) 70%, transparent); font-size: 13px; }
+    .restore.on { display: flex; }
+    .restore span { flex: 1; }
+    .restore button { height: 30px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; font-size: 12.5px; cursor: pointer; }
+    .restore button.primary { background: var(--tone); border-color: transparent; color: var(--on-tone); font-weight: 600; }
+
+    .block { width: 100%; margin-top: 34px; }
+    .block[hidden] { display: none; }
+    .block h2 { margin: 0 0 12px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); text-align: center; }
+    .favs { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+    .fav { position: relative; width: 108px; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 8px 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; font-size: 12px; cursor: pointer; transition: border-color .15s, transform .2s var(--ease); }
+    .fav:hover { border-color: var(--line-strong); transform: translateY(-2px); }
+    .fav .tile { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 10px; background: var(--tint); color: var(--ink); font-family: var(--font-display); font-size: 19px; }
+    .fav .name { width: 100%; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fav .x { position: absolute; top: 4px; right: 4px; display: none; width: 20px; height: 20px; place-items: center; border-radius: 6px; color: var(--ink-3); }
+    .fav:hover .x { display: grid; }
+    .fav .x:hover { background: var(--press); color: var(--danger); }
+    .recent { display: flex; flex-direction: column; gap: 2px; }
+    .recent button { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; border: 0; border-radius: 8px; background: none; color: var(--ink); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+    .recent button:hover { background: var(--hover); }
+    .recent .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .recent .h { color: var(--ink-3); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <main>
+    {{CRANE}}
+    <div class="wordmark">shoji</div>
+    <div class="restore" id="restore" role="status">
+      <span id="restoreText"></span>
+      <button class="primary" onclick="post('RestoreSession')">Restore</button>
+      <button onclick="post('DismissSession')">Dismiss</button>
+    </div>
+    <form onsubmit="go(event)">
+      <svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>
+      <input id="q" type="text" autocomplete="off" spellcheck="false" autofocus placeholder="Search {{SEARCH_ENGINE_NAME}} or enter an address" aria-label="Search">
+    </form>
+    <section class="block" id="favBlock" hidden>
+      <h2>Favourites</h2>
+      <div class="favs" id="favs"></div>
+    </section>
+    <section class="block" id="recentBlock" hidden>
+      <h2>Recently closed</h2>
+      <div class="recent" id="recent"></div>
+    </section>
+  </main>
+  <script>
+    function post(action, payload = null) {
+      if (window.ipc) window.ipc.postMessage(JSON.stringify({ action, payload }));
+    }
+    function go(e) {
+      e.preventDefault();
+      const url = document.getElementById('q').value.trim();
+      if (url) post('Navigate', { url });
+    }
+    const $ = id => document.getElementById(id);
+    const hostOf = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
+    function render(d) {
+      const favs = $('favs');
+      favs.textContent = '';
+      d.favourites.forEach(f => {
+        const b = document.createElement('div');
+        b.className = 'fav'; b.tabIndex = 0; b.setAttribute('role', 'link'); b.title = f.url;
+        const tile = document.createElement('div'); tile.className = 'tile';
+        tile.textContent = (hostOf(f.url)[0] || '?').toUpperCase();
+        const name = document.createElement('div'); name.className = 'name'; name.textContent = f.title || hostOf(f.url);
+        const x = document.createElement('span'); x.className = 'x'; x.textContent = '×'; x.title = 'Remove';
+        x.onclick = e => { e.stopPropagation(); post('RemoveFavourite', { url: f.url }); };
+        b.append(tile, name, x);
+        b.onclick = () => post('Navigate', { url: f.url });
+        b.onkeydown = e => { if (e.key === 'Enter') post('Navigate', { url: f.url }); };
+        favs.appendChild(b);
+      });
+      $('favBlock').hidden = !d.favourites.length;
+      const rec = $('recent');
+      rec.textContent = '';
+      d.recent.forEach(r => {
+        const b = document.createElement('button');
+        const t = document.createElement('span'); t.className = 't'; t.textContent = r.title || r.url;
+        const h = document.createElement('span'); h.className = 'h'; h.textContent = hostOf(r.url);
+        b.append(t, h);
+        b.onclick = () => post('Navigate', { url: r.url });
+        rec.appendChild(b);
+      });
+      $('recentBlock').hidden = !d.recent.length;
+      const n = d.restoreTabs || 0;
+      $('restore').classList.toggle('on', n > 0);
+      $('restoreText').textContent = n === 1 ? 'Shoji closed unexpectedly. Restore your 1 tab?' : `Shoji closed unexpectedly. Restore your ${n} tabs?`;
+    }
+    window.__homeData = render;
+    render({{HOME_JSON}});
+    window.__applyTheme = t => { const r = document.documentElement; r.dataset.accent = t.accent; if (t.mode) r.dataset.mode = t.mode; if (t.fonts) r.dataset.fonts = t.fonts; };
+  </script>
+</body>
+</html>
