@@ -2565,10 +2565,12 @@ name = "shoji"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "ring",
  "serde_json",
  "shoji-brand",
  "shoji-byobu",
  "shoji-core",
+ "ureq",
  "webview2-com",
  "windows",
  "winit",
