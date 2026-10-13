@@ -26,6 +26,19 @@ const DARK_READER: &str = include_str!("../ui/vendor/darkreader.min.js");
 
 static THEME_CSS: LazyLock<String> = LazyLock::new(theme::css);
 
+/// Every importable browser's mark, by catalogue id, for the welcome and settings pages.
+static LOGOS_JSON: LazyLock<String> = LazyLock::new(|| {
+    let marks: std::collections::BTreeMap<&str, String> = shoji_core::import::catalog::SOURCES
+        .iter()
+        .map(|s| (s.id, theme_logo(s)))
+        .collect();
+    script_json(serde_json::to_string(&marks))
+});
+
+fn theme_logo(s: &shoji_core::import::catalog::Source) -> String {
+    shoji_brand::logos::svg(s.id, s.color, s.name)
+}
+
 /// Replace every `{{KEY}}` in `template` in one pass. Unknown keys are left untouched.
 fn fill(template: &str, vars: &[(&str, &str)]) -> String {
     let mut out = String::with_capacity(template.len() + THEME_CSS.len() + 1024);
@@ -395,6 +408,7 @@ pub fn welcome(s: &Settings) -> String {
                 },
             ),
             ("PROFILES_JSON", &profiles_json()),
+            ("LOGOS_JSON", &LOGOS_JSON),
             ("SEARCH_ENGINE", &s.search_engine.to_lowercase()),
             (
                 "PRIVATE_MODE",

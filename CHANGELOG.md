@@ -11,6 +11,18 @@ All notable changes to Shoji are recorded here. The format follows
   tracking parameters (`utm_*`, `fbclid`, `gclid`, ...) are removed before a page loads.
 - **Global Privacy Control.** Every request carries `Sec-GPC: 1`.
 - Both are on by default, with switches under Settings → Privacy.
+- **Import from your old browser** in setup (and Settings → Privacy → Import…): favourites, history and sign-ins
+  from Chrome, Edge, Brave, Firefox and 40+ more (Opera, Vivaldi, Arc, Yandex, LibreWolf, Waterfox, Zen, Safari
+  bookmarks files, Internet Explorer favourites…), each with its logo. Installed browsers are marked Found and
+  every profile is listed. Passwords can't be imported: the WebView2 engine has no way to receive them.
+  Sign-ins sealed to the old browser itself (Chrome/Edge/Brave "app-bound" values) are skipped and reported.
+- **Default browser.** Shoji now registers with Windows and offers to become your default in setup.
+- **History.** Shoji keeps a browsing history (off in Private mode, cleared in Settings) that feeds address-bar suggestions.
+- Setup shows progress across every step, answers Enter and Esc, and lets you skip each step.
+
+### Changed
+- Favourites hold up to 5,000 entries (was 500).
+- Setup's Privacy step comes before Search and uses icons.
 
 ### Fixed
 - Version number now matches the release, so the updater no longer re-offers the current build.

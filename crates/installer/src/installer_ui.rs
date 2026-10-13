@@ -63,7 +63,7 @@ const TEMPLATE: &str = r#"<!DOCTYPE html>
 
   <section class="step" id="done">
     <h1 id="doneTitle">Shoji is ready</h1>
-    <p id="doneText">Pick a color for your crane the first time you open it.</p>
+    <p id="doneText">The first time you open it, pick a color, bring over your old browser's favourites and history, and make it your default.</p>
     <div class="options" id="launchBox"><label><input type="checkbox" id="launch" checked> Open Shoji now</label></div>
     <div class="actions"><button class="primary" onclick="post('finish', { launch: document.getElementById('launch').checked })">Finish</button></div>
   </section>

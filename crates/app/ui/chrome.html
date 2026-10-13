@@ -288,13 +288,23 @@
       const r = $('omnibox').getBoundingClientRect();
       post('SuggestShow', { items, x: r.left, width: r.width });
     }
+    let histItems = [];
+    // History matches arrive from the host a moment after the local ones.
+    window.__historyResults = (seq, items) => {
+      if (seq !== suggestSeq || !items.length) return;
+      const seen = new Set(suggestions.map(s => s.value));
+      histItems = items.filter(h => !seen.has(h.url)).map(h => ({ kind: 'url', value: h.url, label: h.title || h.url, sub: 'History \u00b7 ' + hostOf(h.url) }));
+      if (histItems.length) showSuggest(suggestions.concat(histItems).slice(0, 8));
+    };
     function omniInput() {
       const q = $('omnibox').value.trim();
       clearTimeout(suggestTimer);
       if (!q) { closeSuggest(); return; }
       const seq = ++suggestSeq;
       const local = localSuggestions(q);
+      histItems = [];
       showSuggest(local);
+      if (!/^[a-z]+:\/\//i.test(q)) post('SearchHistory', { query: q, seq });
       // Optional: ask the search engine too (off unless enabled in Settings).
       if (prefs.searchSuggestions && prefs.suggestUrl && q.length > 1 && !/^[a-z]+:\/\//i.test(q)) {
         suggestTimer = setTimeout(async () => {
@@ -303,7 +313,7 @@
             const json = await res.json();
             if (seq !== suggestSeq) return;
             const words = (Array.isArray(json) ? json[1] : []).filter(w => typeof w === 'string').slice(0, 5);
-            const merged = local.slice(0, 4).concat(words.map(w => ({ kind: 'search', value: w, label: w, sub: 'Search' })));
+            const merged = local.slice(0, 4).concat(histItems.slice(0, 2)).concat(words.map(w => ({ kind: 'search', value: w, label: w, sub: 'Search' })));
             showSuggest(merged);
           } catch { /* offline or blocked: local suggestions stay */ }
         }, 120);

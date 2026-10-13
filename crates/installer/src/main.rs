@@ -329,6 +329,8 @@ fn install_files(
                 ("InstallLocation", &dir.to_string_lossy()),
             ],
         );
+        // Lists Shoji among the web browsers in Settings → Default apps.
+        let _ = shoji_core::shell::register_as_browser(&exe);
     }
     progress(100, "Done");
     Ok(())
@@ -367,6 +369,7 @@ fn uninstall(remove_data: bool, proxy: EventLoopProxy<InstallerEvent>) {
         }
         shoji_core::shell::notify_icons_changed();
         registry::remove_uninstall_entry(UNINSTALL_KEY);
+        shoji_core::shell::unregister_browser();
     }
 
     progress(70, "Removing files");
