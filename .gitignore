@@ -3,6 +3,7 @@
 
 # Distribution & packaging
 dist/
+/installer/
 *.zip
 
 # Local runtime data (root only, so source folders named "data" are never hidden)

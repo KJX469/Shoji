@@ -6,6 +6,12 @@ All notable changes to Shoji are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- Version number now matches the release, so the updater no longer re-offers the current build.
+- Uninstall path guard also rejects drive roots on any platform.
+
+## [0.1.1] - 2026-10-13
+
 ### Added
 - **Automatic updates.** Shoji checks the project's GitHub releases every hour, downloads a newer
   `ShojiSetup.exe`, verifies it against the release's published SHA-256, and installs it only
