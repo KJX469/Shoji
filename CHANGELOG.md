@@ -4,7 +4,7 @@ All notable changes to Shoji are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [0.2.0] - 2026-10-13
+## [0.1.2] - 2026-10-13
 
 ### Added
 - **Clean links.** Tracker redirects (Google, Facebook, Reddit, YouTube and others) are skipped and
