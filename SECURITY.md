@@ -18,6 +18,13 @@ rather not be.
 Only the latest release is supported. Shoji has no background updater yet, so please install the
 newest `ShojiSetup.exe` from the [releases page](https://github.com/KJX469/Shoji/releases/latest).
 
+## Automatic updates
+
+Shoji downloads new releases from this repository's GitHub releases only, checks the installer
+against the SHA-256 published in the same release, and refuses anything else. Installers are not
+yet code-signed, so the checksum guards against corruption, not against a compromised account.
+Updates can be turned off in Settings.
+
 ## Scope
 
 Shoji is a shell around the Microsoft Edge WebView2 runtime, which Windows updates on its own.

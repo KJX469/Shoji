@@ -7,6 +7,7 @@ mod keys;
 mod pages;
 mod shield;
 mod tray;
+mod update;
 mod webview;
 mod window;
 
@@ -99,6 +100,11 @@ const LINK_PREVIEW_SCRIPT: &str = r#"(() => {
 pub(crate) enum BrowserEvent {
     /// From the tray icon, or a later launch of Shoji handed to this copy
     Tray(tray::Action),
+    /// A newer, checksum-verified installer has been downloaded
+    UpdateReady {
+        version: String,
+        installer: PathBuf,
+    },
     /// From the chrome strip or side panel of a window
     WindowIpc(WindowId, UiToHostMessage),
     /// From a page (already filtered: web content may only send harmless messages)
@@ -743,6 +749,9 @@ struct BrowserApp {
     session_path: PathBuf,
     /// Instance window and tray icon (None if it could not be created)
     tray: Option<tray::Tray>,
+    /// A downloaded update, and whether its installer has been started
+    pending_update: Option<(String, PathBuf)>,
+    update_started: bool,
     /// Tabs from the previous run, waiting for the user's answer (or restored at startup)
     pending_session: Option<shoji_core::userdata::Session>,
     restore_on_start: bool,
@@ -832,6 +841,8 @@ impl BrowserApp {
             site_data,
             session_path,
             tray: None,
+            pending_update: None,
+            update_started: false,
             pending_session,
             restore_on_start,
             session_json: String::new(),
@@ -947,6 +958,8 @@ impl BrowserApp {
         }
         self.windows.remove(&id);
         if self.windows.is_empty() {
+            // No window is open, so a downloaded update can install without interrupting anyone.
+            self.apply_update();
             // Keep running in the notification area so Byōbu keeps updating its lists. Private
             // mode always quits: its in-memory data must not outlive the window.
             let keep = self.settings.performance.run_in_background
@@ -996,6 +1009,32 @@ impl BrowserApp {
             if let Some(w) = self.windows.get(&id) {
                 w.window.focus_window();
             }
+        }
+    }
+
+    /// Run a downloaded installer in update mode. Only when no window is open (the browser is
+    /// in the tray, or about to exit): the installer asks this copy to quit, replaces the files
+    /// and starts the new version in the tray.
+    fn apply_update(&mut self) {
+        if self.update_started || !self.windows.is_empty() || !self.settings.performance.auto_update
+        {
+            return;
+        }
+        let Some((_, installer)) = &self.pending_update else {
+            return;
+        };
+        if !installer.exists() {
+            return;
+        }
+        let mut cmd = std::process::Command::new(installer);
+        cmd.arg("--update");
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0000_0008); // DETACHED_PROCESS: outlives this copy
+        }
+        if cmd.spawn().is_ok() {
+            self.update_started = true;
         }
     }
 
@@ -3182,6 +3221,17 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
         if !self.windows.is_empty() {
             return;
         }
+        // `--background` (used after an automatic update) starts straight into the tray.
+        if std::env::args().any(|a| a == "--background")
+            && self.settings.first_run_complete
+            && self.settings.performance.run_in_background
+            && !self.settings.privacy.ephemeral_default
+        {
+            if let Some(tray) = &self.tray {
+                tray.show();
+                return;
+            }
+        }
         let first = if self.settings.first_run_complete {
             std::env::args()
                 .skip(1)
@@ -3205,6 +3255,10 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
         match event {
             BrowserEvent::Tray(tray::Action::Open(url)) => self.reopen(event_loop, url),
             BrowserEvent::Tray(tray::Action::Quit) => self.quit(event_loop),
+            BrowserEvent::UpdateReady { version, installer } => {
+                self.pending_update = Some((version, installer));
+                self.apply_update();
+            }
             BrowserEvent::WindowIpc(win_id, msg) => self.handle_ipc(win_id, None, msg, event_loop),
             BrowserEvent::TabIpc(tab_id, msg) => {
                 if let Some(win_id) = self.owner(tab_id) {
@@ -3686,6 +3740,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let instance = tray::instance_name();
     let quit_requested = args.iter().any(|a| a == "--quit");
     if !tray::claim_instance(&instance) {
+        if args.iter().any(|a| a == "--background") {
+            return Ok(()); // already running: don't pop a window
+        }
         let url = args.iter().skip(1).find(|a| !a.starts_with('-'));
         tray::forward_launch(&instance, quit_requested, url.map(String::as_str));
         return Ok(());
@@ -3724,8 +3781,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let event_loop = EventLoop::<BrowserEvent>::with_user_event().build()?;
+    let update_dir = data_dir.clone();
     let mut app = BrowserApp::new(event_loop.create_proxy(), data_dir, engine_version);
     app.tray = tray::Tray::start(event_loop.create_proxy(), &instance);
+    update::spawn_checker(event_loop.create_proxy(), update_dir);
     event_loop.run_app(&mut app)?;
     Ok(())
 }

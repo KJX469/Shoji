@@ -7,6 +7,10 @@ All notable changes to Shoji are recorded here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Automatic updates.** Shoji checks the project's GitHub releases every hour, downloads a newer
+  `ShojiSetup.exe`, verifies it against the release's published SHA-256, and installs it only
+  while no window is open (when it is waiting in the tray). The new version starts back in the
+  tray. Turn it off under Settings → Performance.
 - **Runs in the tray.** Closing the last window keeps Shoji running in the notification area
   (Open / Quit menu) so Byōbu's filter lists keep updating. Turn it off under Settings →
   Performance. Private mode always quits.
