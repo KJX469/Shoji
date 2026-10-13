@@ -22,5 +22,5 @@ Maintainers may edit, hide or remove comments, issues and pull requests that bre
 and may restrict participation for repeat or serious violations.
 
 To report a problem, use GitHub's *Report content* on the comment, or open a private
-[security advisory](https://github.com/KJX469/shoji/security/advisories/new) addressed to the
+[security advisory](https://github.com/KJX469/Shoji/security/advisories/new) addressed to the
 maintainers if it can't be raised publicly.

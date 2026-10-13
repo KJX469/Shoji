@@ -410,7 +410,9 @@ pub fn spawn_updater(shield: Shield, dir: PathBuf) {
             load_stats(&dir);
             let mut built: Option<Config> = None;
             let mut next_check = Instant::now();
-            let mut force = false;
+            // Check every list once per launch. These are conditional requests, so an unchanged
+            // list costs a 304 and nothing is downloaded.
+            let mut force = true;
             loop {
                 let cfg = hub().config.lock().map(|c| c.clone()).unwrap_or_default();
                 let due = force || Instant::now() >= next_check;

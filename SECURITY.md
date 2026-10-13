@@ -5,7 +5,7 @@
 Please **do not open a public issue** for a security problem.
 
 Use GitHub's private reporting instead:
-[**Report a vulnerability**](https://github.com/KJX469/shoji/security/advisories/new)
+[**Report a vulnerability**](https://github.com/KJX469/Shoji/security/advisories/new)
 (the *Security* tab → *Report a vulnerability*).
 
 Include what you found, how to reproduce it, the Shoji version (from the file properties of
@@ -16,7 +16,7 @@ rather not be.
 ## Supported versions
 
 Only the latest release is supported. Shoji has no background updater yet, so please install the
-newest `ShojiSetup.exe` from the [releases page](https://github.com/KJX469/shoji/releases/latest).
+newest `ShojiSetup.exe` from the [releases page](https://github.com/KJX469/Shoji/releases/latest).
 
 ## Scope
 

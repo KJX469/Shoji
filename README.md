@@ -7,8 +7,8 @@
 
 <br>
 
-[![Latest release](https://img.shields.io/github/v/release/KJX469/shoji?include_prereleases&style=flat-square&color=397AFF&label=release)](../../releases/latest)
-[![CI](https://img.shields.io/github/actions/workflow/status/KJX469/shoji/ci.yml?style=flat-square&label=tests)](../../actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/KJX469/Shoji?style=flat-square&color=397AFF&label=release)](../../releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/KJX469/Shoji/ci.yml?style=flat-square&label=tests)](../../actions/workflows/ci.yml)
 ![Platform](https://img.shields.io/badge/Windows-10%20%7C%2011-1b1a18?style=flat-square)
 ![Built with Rust](https://img.shields.io/badge/built%20with-Rust-b7410e?style=flat-square)
 [![MIT](https://img.shields.io/badge/license-MIT-21b86e?style=flat-square)](LICENSE)
