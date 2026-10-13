@@ -556,3 +556,21 @@ fn test_uninstall_message_round_trips_with_confirmation() {
         other => panic!("unexpected {other:?}"),
     }
 }
+
+#[test]
+fn test_run_in_background_defaults_on_and_can_be_switched_off() {
+    use shoji_core::settings::Settings;
+
+    let mut s = Settings::default();
+    assert!(s.performance.run_in_background);
+
+    assert!(s.apply_patch(&serde_json::json!({ "performance": { "run_in_background": false } })));
+    assert!(!s.performance.run_in_background);
+    // The sibling setting is untouched by the patch.
+    assert_eq!(s.performance.sleep_after_secs, 300);
+
+    // Settings files written before the option existed load with it on.
+    let old: Settings =
+        serde_json::from_str(r#"{ "performance": { "sleep_after_secs": 60 } }"#).unwrap();
+    assert!(old.performance.run_in_background);
+}

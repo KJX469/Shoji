@@ -105,6 +105,9 @@ pub struct PrivacySettings {
 pub struct PerformanceSettings {
     /// Seconds a background tab may stay idle before it is suspended (0 = never)
     pub sleep_after_secs: u64,
+    /// Keep running in the notification area after the last window closes, so the shield's
+    /// filter lists keep updating. Ignored in Private mode.
+    pub run_in_background: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -190,6 +193,7 @@ impl Default for PerformanceSettings {
     fn default() -> Self {
         Self {
             sleep_after_secs: 300,
+            run_in_background: true,
         }
     }
 }
