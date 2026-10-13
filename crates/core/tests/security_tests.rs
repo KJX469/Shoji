@@ -387,6 +387,9 @@ fn test_security_v10_web_content_ipc_allowlist() {
         UiToHostMessage::CreateTab { url: None },
         UiToHostMessage::ChangeDownloadFolder,
         UiToHostMessage::FinishWelcome,
+        UiToHostMessage::UninstallShoji {
+            confirm: "UNINSTALL".into(),
+        },
     ];
     for msg in privileged {
         assert!(
