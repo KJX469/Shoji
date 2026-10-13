@@ -184,6 +184,14 @@
           <label class="switch"><input type="checkbox" data-path="privacy.https_only"><span></span></label>
         </div>
         <div class="row">
+          <div class="what"><b>Clean links</b><small>Skip tracker redirects (Google, Facebook, Reddit and others) and drop tracking parameters such as utm_source and fbclid</small></div>
+          <label class="switch"><input type="checkbox" data-path="shield.clean_links"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="what"><b>Global Privacy Control</b><small>Tell every site not to sell or share your data</small></div>
+          <label class="switch"><input type="checkbox" data-path="shield.send_gpc"><span></span></label>
+        </div>
+        <div class="row">
           <div class="what"><b>Strict tracking prevention</b><small>The engine's strictest level, for new tabs</small></div>
           <label class="switch"><input type="checkbox" data-path="privacy.strict_tracking_prevention"><span></span></label>
         </div>
@@ -200,6 +208,14 @@
           <select data-path="privacy.restore_session">
             <option value="ask">Ask me</option><option value="always">Always restore the last session</option><option value="never">Never</option>
           </select>
+        </div>
+        <div class="row">
+          <div class="what"><b>Browsing history</b><small>Pages you've visited, kept by Shoji for address-bar suggestions. Not recorded in private mode</small></div>
+          <button class="btn" onclick="if (this.dataset.sure) { post('ClearHistory'); toast('History cleared'); delete this.dataset.sure; this.textContent = 'Clear'; } else { this.dataset.sure = '1'; this.textContent = 'Click again to confirm'; }">Clear</button>
+        </div>
+        <div class="row">
+          <div class="what"><b>Import from another browser</b><small>Favourites, history and sign-ins from Chrome, Edge, Firefox, Brave and more</small></div>
+          <button class="btn" onclick="post('Navigate', { url: 'shoji://welcome#import' })">Import…</button>
         </div>
         <div class="row">
           <div class="what"><b>Remembered site choices</b><small id="siteChoices">{{SITE_CHOICES}} saved: per-site zoom and allowed or blocked permissions</small></div>

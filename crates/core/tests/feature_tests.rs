@@ -193,3 +193,32 @@ fn session_file_roundtrips_and_tolerates_garbage() {
     assert_eq!(back.tab_count(), 2);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn import_and_default_browser_messages_stay_off_web_content() {
+    use shoji_core::ipc::UiToHostMessage as M;
+    let start: M = serde_json::from_str(
+        r#"{"action":"StartImport","payload":{"source":"chrome","kinds":{"favourites":true,"history":false,"cookies":false}}}"#,
+    )
+    .unwrap();
+    match &start {
+        M::StartImport { source, profile, path, kinds } => {
+            assert_eq!((source.as_str(), *profile, path.is_none()), ("chrome", 0, true));
+            assert!(kinds.favourites && !kinds.history && !kinds.cookies);
+        }
+        other => panic!("{other:?}"),
+    }
+    for m in [
+        start,
+        M::ListImportSources,
+        M::PickImportSource { source: "safari".into() },
+        M::CheckDefaultBrowser,
+        M::SetDefaultBrowser,
+        M::SearchHistory { query: "x".into(), seq: 1 },
+        M::ClearHistory,
+    ] {
+        assert!(!m.allowed_from_web_content(), "{m:?}");
+        let json = serde_json::to_string(&m).unwrap();
+        assert_eq!(serde_json::from_str::<M>(&json).unwrap(), m);
+    }
+}

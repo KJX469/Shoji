@@ -102,6 +102,7 @@
     .engine { display: flex; align-items: center; gap: 14px; padding: 11px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); text-align: left; cursor: pointer; transition: border-color .15s, background .15s; }
     .engine:hover { border-color: var(--line-strong); }
     .engine[aria-checked="true"] { border-color: var(--accent); background: var(--tint-soft); }
+    .mono svg.i { width: 17px; height: 17px; }
     .mono { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--line); font-family: var(--font-display); font-size: 16px; color: var(--ink-2); flex-shrink: 0; }
     .engine[aria-checked="true"] .mono { background: var(--tone); border-color: transparent; color: var(--on-tone); }
     .engine .what { flex: 1; display: flex; flex-direction: column; gap: 1px; }
@@ -109,7 +110,70 @@
     .engine small { font-family: var(--font-text); font-size: 12px; color: var(--ink-3); }
     .tag { margin-left: 6px; padding: 1px 7px; border-radius: 10px; background: var(--hover); font-size: 10.5px; font-weight: 500; color: var(--ink-3); }
 
+    /* Import */
+    .browsers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; width: min(560px, 100%); margin-top: 24px; }
+    .browser { position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px 6px 12px; border-radius: 13px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-size: 12.5px; cursor: pointer; box-shadow: var(--shadow); transition: border-color .15s, transform .2s var(--ease), background .15s; }
+    .browser:hover { border-color: var(--line-strong); transform: translateY(-2px); }
+    .browser[aria-checked="true"] { border-color: var(--accent); background: var(--tint-soft); box-shadow: 0 0 0 1px var(--accent), var(--shadow); }
+    .browser .logo, .row .logo { display: block; width: 36px; height: 36px; flex-shrink: 0; }
+    .browser .logo svg, .row .logo svg { display: block; width: 100%; height: 100%; }
+    .browser.absent .logo { opacity: .55; filter: grayscale(.4); }
+    .found { font-size: 10.5px; font-weight: 600; color: var(--on-tone); background: var(--tone); padding: 1px 8px; border-radius: 10px; }
+    .absent-tag { font-size: 10.5px; color: var(--ink-3); }
+    .more { width: min(560px, 100%); margin-top: 10px; text-align: left; }
+    .more-btn { display: flex; align-items: center; gap: 12px; width: 100%; height: 46px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); font-size: 13.5px; cursor: pointer; text-align: left; }
+    .more-btn:hover { border-color: var(--line-strong); color: var(--ink); }
+    .more-btn[aria-checked="true"] { border-color: var(--accent); background: var(--tint-soft); color: var(--ink); }
+    .more-btn .logo { width: 26px; height: 26px; }
+    .more-btn .label-text { flex: 1; }
+    .more-btn .chev { width: 16px; height: 16px; transition: transform .2s var(--ease); }
+    .more-btn[aria-expanded="true"] .chev { transform: rotate(180deg); }
+    .more-panel { margin-top: 6px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+    .more-panel[hidden] { display: none; }
+    .more-panel input { width: 100%; height: 40px; padding: 0 14px; border: 0; border-bottom: 1px solid var(--line); background: none; outline: none; color: var(--ink); font: inherit; font-size: 13px; user-select: text; }
+    .more-list { max-height: 232px; overflow-y: auto; padding: 4px; }
+    .row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 7px 10px; border: 0; border-radius: 9px; background: none; color: var(--ink); font-size: 13px; text-align: left; cursor: pointer; }
+    .row:hover, .row:focus-visible { background: var(--hover); }
+    .row .logo { width: 24px; height: 24px; }
+    .row .name { flex: 1; }
+    .row .found { font-size: 10px; }
+    .none { padding: 14px; color: var(--ink-3); font-size: 12.5px; text-align: center; }
+    .panel { width: min(560px, 100%); margin-top: 14px; padding: 14px 16px; border-radius: 13px; border: 1px solid var(--line); background: var(--surface); text-align: left; font-size: 13px; }
+    .panel[hidden] { display: none; }
+    .checks { display: flex; flex-direction: column; gap: 2px; }
+    .check { display: flex; align-items: center; gap: 12px; padding: 7px 4px; cursor: pointer; border-radius: 8px; }
+    .check:hover { background: var(--hover); }
+    .check input { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
+    .check small { display: block; color: var(--ink-3); font-size: 11.5px; }
+    .check.off { opacity: .5; cursor: default; }
+    .field { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; color: var(--ink-2); }
+    .field select { flex: 1; height: 34px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font: inherit; }
+    .ghost { height: 34px; padding: 0 14px; border-radius: 9px; border: 1px solid var(--line-strong); background: none; color: var(--ink); font-size: 13px; cursor: pointer; }
+    .ghost:hover { background: var(--hover); }
+    .note { margin-top: 10px; font-size: 12px; line-height: 1.5; color: var(--ink-3); }
+    .note.warn { color: var(--ink-2); padding: 8px 10px; border-radius: 9px; background: var(--tint-soft); }
+    .busy { display: flex; align-items: center; gap: 14px; }
+    .spin { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--press); border-top-color: var(--accent); animation: spin .8s linear infinite; flex-shrink: 0; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .result { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+    .result li { display: flex; align-items: center; gap: 10px; }
+    .result .tick { width: 18px; height: 18px; background: var(--tone); border-color: transparent; color: var(--on-tone); }
+    .result b { font-weight: 600; }
+    .link { border: 0; background: none; color: var(--ink-3); font-size: 13px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+    .link:hover { color: var(--ink); }
+
+    /* Default browser */
+    .status { display: flex; align-items: center; gap: 16px; width: min(480px, 100%); margin-top: 30px; padding: 18px 20px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow); text-align: left; }
+    .status .badge { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-2); flex-shrink: 0; }
+    .status .badge svg.i { width: 22px; height: 22px; }
+    .status.yes { border-color: var(--accent); background: var(--tint-soft); }
+    .status.yes .badge { background: var(--tone); color: var(--on-tone); border-color: transparent; }
+    .status b { display: block; font-size: 14.5px; font-weight: 600; }
+    .status small { display: block; margin-top: 2px; font-family: var(--font-text); font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+    .steps { margin-top: 16px; width: min(480px, 100%); text-align: left; font-family: var(--font-text); font-size: 12.5px; line-height: 1.7; color: var(--ink-3); padding-left: 22px; }
+
     @media (max-width: 680px) {
+      .browsers { grid-template-columns: repeat(2, 1fr); }
       .sheets, .choices { grid-template-columns: 1fr; }
       .mini-strip, .mini-omni { display: none; }
     }
@@ -128,8 +192,50 @@
         <span class="switch"><input type="checkbox" id="darkSites" {{DARK_CHECKED}} onchange="post('SetDarkWebsites', { on: this.checked })"><span></span></span>
         <span>Dark websites<small>Matches your Windows setting. A few sites may look off — the moon button turns it off.</small></span>
       </label>
-      <div class="actions"><button class="begin" onclick="go('fork')">Continue</button></div>
+      <div class="actions"><button class="begin" onclick="go('import')">Continue</button></div>
       <div class="fine">Shoji follows your Windows light or dark setting. Change either one any time in Settings.</div>
+    </section>
+
+    <section class="step" data-step="import">
+      <h1 id="importTitle">Bring your browser with you</h1>
+      <p class="lead">Copy favourites, history and sign-ins from the browser you use now. It stays on this PC, and your old browser isn't changed.</p>
+      <div class="browsers" id="popular" role="radiogroup" aria-label="Popular browsers"></div>
+      <div class="more">
+        <button class="more-btn" id="moreBtn" aria-expanded="false" aria-checked="false" onclick="toggleMore()">
+          <span class="logo" id="moreLogo"></span>
+          <span class="label-text" id="moreLabel">More browsers</span>
+          <svg class="i chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="more-panel" id="morePanel" hidden>
+          <input id="moreSearch" placeholder="Search browsers" aria-label="Search browsers" autocomplete="off" spellcheck="false">
+          <div class="more-list" id="moreList" role="listbox"></div>
+        </div>
+      </div>
+      <div class="panel" id="importOptions" hidden></div>
+      <div class="actions">
+        <button class="back" data-prev>Back</button>
+        <button class="link" id="importSkip" onclick="afterImport()">Skip for now</button>
+        <button class="begin" id="importGo" onclick="startImport()" disabled>Import</button>
+      </div>
+    </section>
+
+    <section class="step" data-step="default">
+      <h1>Make Shoji your default browser?</h1>
+      <p class="lead">Links from email, chat and other apps will open here.</p>
+      <div class="status" id="defaultStatus">
+        <span class="badge"><svg class="i" viewBox="0 0 24 24" id="defaultIcon"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.4 2.2 3.6 4.9 3.6 8s-1.2 5.8-3.6 8c-2.4-2.2-3.6-4.9-3.6-8s1.2-5.8 3.6-8z"/></svg></span>
+        <span class="what"><b id="defaultTitle">Shoji isn't your default yet</b><small id="defaultText">Windows will ask you to confirm the change in Settings.</small></span>
+      </div>
+      <ol class="steps" id="defaultSteps">
+        <li>Choose <b>Set as default</b> below. Windows Settings opens.</li>
+        <li>Under <b>Web browser</b>, pick <b>Shoji</b>.</li>
+        <li>Come back here. This page updates by itself.</li>
+      </ol>
+      <div class="actions">
+        <button class="back" data-prev>Back</button>
+        <button class="link" id="defaultSkip" onclick="afterDefault()">Not now</button>
+        <button class="begin" id="defaultGo" onclick="post('SetDefaultBrowser')">Set as default</button>
+      </div>
     </section>
 
     <section class="step" data-step="fork">
@@ -148,7 +254,7 @@
           <small>Go with the defaults. You can change anything later in Settings.</small>
         </button>
       </div>
-      <div class="actions"><button class="back" onclick="go('color')">Back</button></div>
+      <div class="actions"><button class="back" onclick="go('default')">Back</button></div>
     </section>
 
     <section class="step" data-step="type">
@@ -170,16 +276,17 @@
       <p class="lead">Like most browsers, Shoji can keep you signed in and remember history and cache, saved in your Windows profile. Or it can forget everything when it closes.</p>
       <div class="engines" role="radiogroup" aria-label="Browsing data" id="modes">
         <button class="engine" role="radio" aria-checked="false" data-private="false">
-          <span class="mono">R</span>
+          <span class="mono"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7.500V12l3 2"/></svg></span>
           <span class="what"><b>Remember<span class="tag">Default</span></b><small>Logins, history and cache stay between sessions.</small></span>
           <span class="tick"><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
         </button>
         <button class="engine" role="radio" aria-checked="false" data-private="true">
-          <span class="mono">P</span>
+          <span class="mono"><svg class="i" viewBox="0 0 24 24"><path d="M3 12s3.500-6 9-6 9 6 9 6-3.500 6-9 6-9-6-9-6z"/><path d="M4 4l16 16"/></svg></span>
           <span class="what"><b>Private</b><small>Everything is forgotten when Shoji closes.</small></span>
           <span class="tick"><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
         </button>
       </div>
+      <div class="note warn" id="privacyNote" hidden>Private mode doesn't keep the history and sign-ins you just imported. Choose Remember to keep them.</div>
       <div class="fine">You can switch any time with Private mode in Settings.</div>
       <div class="actions"><button class="back" data-back>Back</button><button class="begin" data-next></button></div>
     </section>
@@ -197,6 +304,8 @@
   </main>
   <script>
     const PROFILES = {{PROFILES_JSON}};
+    const LOGOS = {{LOGOS_JSON}};
+    const PRIVATE_NOW = {{PRIVATE_MODE}};
     const ENGINES = [
       { id: 'duckduckgo', name: 'DuckDuckGo', note: "Doesn't profile you or keep a search history.", tag: 'Default' },
       { id: 'google', name: 'Google', note: 'The broadest results on the web.' },
@@ -210,6 +319,8 @@
       { id: 'privacy', title: 'Privacy' },
       { id: 'search', title: 'Search' },
     ];
+    // Every numbered step, in order. "fork" sits between Default and the customize prompts.
+    const FLOW = [{ id: 'color', title: 'Color' }, { id: 'import', title: 'Import' }, { id: 'default', title: 'Default browser' }, ...CUSTOM];
     const LINES = [
       'Paper lets the light through.',
       'A quiet place to read the web.',
@@ -219,6 +330,9 @@
     ];
 
     const $ = id => document.getElementById(id);
+    let imported = { favourites: 0, history: 0, cookies: 0 };
+    // Opened from Settings (shoji://welcome#import): just the import and default-browser steps.
+    const SOLO = location.hash === '#import';
     const root = document.documentElement;
     const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const TICK = '<span class="tick"><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>';
@@ -234,17 +348,21 @@
       current = id;
       document.body.dataset.step = id;
       document.querySelectorAll('.step').forEach(s => s.classList.toggle('on', s.dataset.step === id));
-      const n = CUSTOM.findIndex(s => s.id === id);
-      $('progress').hidden = n < 0;
+      const n = id === 'fork' ? FLOW.findIndex(s => s.id === 'default') : FLOW.findIndex(s => s.id === id);
+      $('progress').hidden = n < 0 || SOLO;
       if (n >= 0) {
-        $('progressText').textContent = `${n + 1} of ${CUSTOM.length} · ${CUSTOM[n].title}`;
+        $('progressText').textContent = id === 'fork' ? `${n + 1} of ${FLOW.length} · Done with the essentials` : `${n + 1} of ${FLOW.length} · ${FLOW[n].title}`;
         [...$('bars').children].forEach((b, i) => b.classList.toggle('done', i <= n));
       }
       window.scrollTo(0, 0);
       if (id === 'type') $('specimen').focus({ preventScroll: true });
+      if (id === 'default') watchDefault(true); else watchDefault(false);
+      if (id === 'import') post('ListImportSources');
+      if (id === 'privacy') chooseMode(currentPrivate, false);
     }
     $('customChips').innerHTML = CUSTOM.map(s => `<span>${esc(s.title)}</span>`).join('');
-    $('bars').innerHTML = CUSTOM.map(() => '<i></i>').join('');
+    $('bars').innerHTML = FLOW.map(() => '<i></i>').join('');
+    document.querySelectorAll('[data-prev]').forEach(b => { b.onclick = () => { const first = b.closest('.step').dataset.step === 'import'; if (first && SOLO) finish(); else go(first ? 'color' : 'import'); }; });
     CUSTOM.forEach((s, i) => {
       const section = document.querySelector(`.step[data-step="${s.id}"]`);
       const next = CUSTOM[i + 1];
@@ -297,18 +415,26 @@
     $('specimen').oninput = e => setSample(e.target.value.trim());
     setSample(LINES[0]);
     document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && !$('morePanel').hidden) { toggleMore(false); return; }
+      if (e.key === 'Escape' && !importing) { const b = document.querySelector('.step.on [data-back], .step.on [data-prev], .step.on .back'); if (b) b.click(); return; }
+      if (e.key === 'Enter' && !e.target.closest('button, select, a, textarea, input') && !importing) {
+        const b = document.querySelector('.step.on .begin:not(:disabled), .step.on [data-next]'); if (b) b.click(); return;
+      }
       if (current !== 'type' || e.target.tagName === 'INPUT' || e.ctrlKey || e.altKey) return;
       const p = PROFILES[Number(e.key) - 1];
       if (p) chooseFonts(p.id);
     });
 
     /* Browsing data: remember (default) or private */
+    let currentPrivate = PRIVATE_NOW;
     function chooseMode(isPrivate, persist) {
+      currentPrivate = isPrivate;
       if (persist) save({ privacy: { ephemeral_default: isPrivate } });
+      $('privacyNote').hidden = !(isPrivate && (imported.history || imported.cookies));
       document.querySelectorAll('#modes .engine').forEach(b => b.setAttribute('aria-checked', String((b.dataset.private === 'true') === isPrivate)));
     }
     document.querySelectorAll('#modes .engine').forEach(b => { b.onclick = () => chooseMode(b.dataset.private === 'true', true); });
-    chooseMode({{PRIVATE_MODE}}, false);
+    chooseMode(PRIVATE_NOW, false);
 
     /* Search engine */
     let engine = ENGINES.some(e => e.id === '{{SEARCH_ENGINE}}') ? '{{SEARCH_ENGINE}}' : 'duckduckgo';
@@ -327,6 +453,154 @@
     document.querySelectorAll('#engines .engine').forEach(b => { b.onclick = () => chooseEngine(b.dataset.id, true); });
     chooseEngine(engine, false);
 
+
+    /* Import */
+    let sources = [], chosen = null, pickedPath = null, importing = false, lastResult = null;
+    const byId = id => sources.find(s => s.id === id);
+    const logo = id => `<span class="logo">${LOGOS[id] || ''}</span>`;
+    const foundTag = s => s.installed ? '<span class="found">Found</span>' : '';
+    window.__importSources = list => {
+      sources = list;
+      renderBrowsers();
+      // Pre-select the first browser that is actually installed, so most people just press Import.
+      if (!chosen) { const first = sources.find(s => s.installed); if (first) select(first.id); }
+    };
+    function renderBrowsers() {
+      $('popular').innerHTML = sources.filter(s => s.popular).map(s => `
+        <button class="browser ${s.installed ? '' : 'absent'}" role="radio" aria-checked="${s.id === chosen}" data-id="${s.id}">
+          ${logo(s.id)}<span>${esc(s.name)}</span>${s.installed ? foundTag(s) : '<span class="absent-tag">Not found</span>'}
+        </button>`).join('');
+      document.querySelectorAll('#popular .browser').forEach(b => { b.onclick = () => select(b.dataset.id); });
+      renderMore();
+    }
+    function renderMore() {
+      const q = $('moreSearch').value.trim().toLowerCase();
+      const rows = sources.filter(s => !s.popular && (!q || s.name.toLowerCase().includes(q)));
+      $('moreList').innerHTML = rows.length ? rows.map(s => `
+        <button class="row" role="option" data-id="${s.id}">${logo(s.id)}<span class="name">${esc(s.name)}</span>${foundTag(s)}</button>`).join('')
+        : '<div class="none">No browser by that name. Try "Bookmarks file" to import an exported file.</div>';
+      document.querySelectorAll('#moreList .row').forEach(b => { b.onclick = () => { select(b.dataset.id); toggleMore(false); }; });
+      const s = byId(chosen);
+      const other = s && !s.popular;
+      $('moreBtn').setAttribute('aria-checked', String(!!other));
+      $('moreLogo').innerHTML = other ? (LOGOS[s.id] || '') : '';
+      $('moreLogo').style.display = other ? '' : 'none';
+      $('moreLabel').textContent = other ? s.name : 'More browsers';
+    }
+    function toggleMore(force) {
+      const open = force === undefined ? $('morePanel').hidden : force;
+      $('morePanel').hidden = !open;
+      $('moreBtn').setAttribute('aria-expanded', String(open));
+      if (open) { $('moreSearch').value = ''; renderMore(); $('moreSearch').focus({ preventScroll: true }); }
+    }
+    $('moreSearch').oninput = renderMore;
+    function select(id) {
+      if (importing) return;
+      chosen = id; pickedPath = null; lastResult = null;
+      document.querySelectorAll('#popular .browser').forEach(b => b.setAttribute('aria-checked', String(b.dataset.id === id)));
+      renderMore();
+      renderOptions();
+    }
+    const canRead = s => s.family === 'chromium' || s.family === 'firefox';
+    function renderOptions() {
+      const s = byId(chosen), box = $('importOptions');
+      if (!s) { box.hidden = true; $('importGo').disabled = true; return; }
+      box.hidden = false;
+      const ready = s.installed || pickedPath;
+      let html = '';
+      if (!ready) {
+        const what = s.family === 'htmlfile' ? 'a bookmarks file' : 'its data folder';
+        html += `<div class="field">${s.pick ? '' : `${esc(s.name)} wasn't found on this PC. `}Choose ${what} to import from.
+          <button class="ghost" onclick="post('PickImportSource', { source: '${s.id}' })">Choose…</button></div>`;
+      } else {
+        if (pickedPath) html += `<div class="note" style="margin:0 0 10px">From <b>${esc(pickedPath)}</b> <button class="link" onclick="post('PickImportSource', { source: '${s.id}' })">Change</button></div>`;
+        if (!pickedPath && s.profiles.length > 1) {
+          html += `<label class="field">Profile <select id="profile">${s.profiles.map((p, i) => `<option value="${i}">${esc(p.name)}</option>`).join('')}</select></label>`;
+        }
+        const live = canRead(s);
+        const locked = PRIVATE_NOW;
+        const check = (id, title, sub, on, off) => `<label class="check ${off ? 'off' : ''}"><input type="checkbox" id="k_${id}" ${on && !off ? 'checked' : ''} ${off ? 'disabled' : ''}><span>${title}<small>${sub}</small></span></label>`;
+        html += `<div class="checks">
+          ${check('favourites', 'Favourites', 'Bookmarks, from the bar and every folder', true, false)}
+          ${check('history', 'History', locked ? "Private mode doesn't keep history" : 'So the address bar can suggest places you have been', true, !live || locked)}
+          ${check('cookies', 'Sign-ins', locked ? "Private mode doesn't keep sign-ins" : 'Stay signed in to the sites you use', true, !live || locked)}
+        </div>`;
+        if (!live) html += `<div class="note">Only favourites can be read from this source.</div>`;
+        html += `<div class="note">Saved passwords can't be moved: the engine Shoji runs on has no way to receive them. Export them from ${esc(s.name)} into a password manager.</div>`;
+      }
+      box.innerHTML = html;
+      $('importGo').disabled = !ready;
+      $('importGo').textContent = 'Import';
+      $('importGo').onclick = startImport;
+      $('importSkip').hidden = false;
+    }
+    window.__importPicked = (id, path) => { if (id === chosen) { pickedPath = path; renderOptions(); } };
+    function kinds() {
+      const on = k => { const e = $('k_' + k); return !!e && e.checked && !e.disabled; };
+      return { favourites: on('favourites'), history: on('history'), cookies: on('cookies') };
+    }
+    function startImport() {
+      const s = byId(chosen);
+      if (!s || importing) return;
+      const k = kinds();
+      if (!k.favourites && !k.history && !k.cookies) return;
+      importing = true;
+      const profile = $('profile') ? Number($('profile').value) : 0;
+      $('importOptions').innerHTML = `<div class="busy"><span class="spin"></span><span id="importStatus">Starting…</span></div>`;
+      $('importGo').disabled = true; $('importSkip').hidden = true;
+      post('StartImport', { source: s.id, profile, path: pickedPath, kinds: k });
+    }
+    window.__importProgress = text => { const e = $('importStatus'); if (e) e.textContent = text + '…'; };
+    window.__importFailed = msg => {
+      importing = false; $('importSkip').hidden = false;
+      renderOptions();
+      $('importOptions').insertAdjacentHTML('afterbegin', `<div class="note warn" style="margin:0 0 10px">${esc(msg)}</div>`);
+    };
+    window.__importDone = r => {
+      importing = false; lastResult = r;
+      imported.favourites += r.favourites; imported.history += r.history; imported.cookies += r.cookies;
+      const s = byId(chosen);
+      const n = x => Number(x).toLocaleString();
+      const items = [];
+      if (r.favourites) items.push(`<b>${n(r.favourites)}</b> favourite${r.favourites === 1 ? '' : 's'}`);
+      if (r.history) items.push(`<b>${n(r.history)}</b> page${r.history === 1 ? '' : 's'} of history`);
+      if (r.cookies) items.push(`<b>${n(r.cookies)}</b> sign-in${r.cookies === 1 ? '' : 's'}`);
+      const tick = '<span class="tick"><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>';
+      let html = items.length
+        ? `<ul class="result">${items.map(i => `<li>${tick}<span>${i}</span></li>`).join('')}</ul>`
+        : `<div>Nothing new to bring over${r.notes.length ? '' : ' — it was all here already.'}</div>`;
+      if (r.locked) html += `<div class="note warn">${esc(s.name)} is open and holding some of its files. Close it completely, then <button class="link" onclick="renderOptions()">try again</button>.</div>`;
+      else if (r.notes.length) html += `<div class="note">${r.notes.map(esc).join('<br>')}</div>`;
+      $('importOptions').innerHTML = html;
+      $('importSkip').hidden = true;
+      $('importGo').disabled = false;
+      $('importGo').textContent = 'Continue';
+      $('importGo').onclick = () => { $('importGo').onclick = startImport; afterImport(); };
+    };
+
+    /* Default browser: Windows decides, so open its page and watch for the change */
+    let defaultTimer = 0, isDefault = false;
+    function afterImport() { if (SOLO) finish(); else go('default'); }
+    function afterDefault() { if (SOLO) finish(); else go('fork'); }
+    function watchDefault(on) {
+      clearInterval(defaultTimer);
+      if (!on) return;
+      post('CheckDefaultBrowser');
+      defaultTimer = setInterval(() => post('CheckDefaultBrowser'), 1500);
+    }
+    window.__defaultBrowser = yes => {
+      isDefault = yes;
+      $('defaultStatus').classList.toggle('yes', yes);
+      $('defaultTitle').textContent = yes ? 'Shoji is your default browser' : "Shoji isn't your default yet";
+      $('defaultText').textContent = yes ? 'Links from other apps will open here.' : 'Windows will ask you to confirm the change in Settings.';
+      $('defaultIcon').innerHTML = yes ? '<path d="M5 12.5l4.5 4.5L19 7.5"/>' : '<circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.4 2.2 3.6 4.9 3.6 8s-1.2 5.8-3.6 8c-2.4-2.2-3.6-4.9-3.6-8s1.2-5.8 3.6-8z"/>';
+      $('defaultSteps').hidden = yes;
+      $('defaultSkip').hidden = yes;
+      const go_ = $('defaultGo');
+      go_.textContent = yes ? 'Continue' : 'Set as default';
+      go_.onclick = yes ? afterDefault : () => post('SetDefaultBrowser');
+    };
+
     window.__applyTheme = t => {
       root.dataset.accent = t.accent;
       if (t.mode) root.dataset.mode = t.mode;
@@ -334,6 +608,7 @@
       document.querySelectorAll('.opt').forEach(o => o.setAttribute('aria-checked', String(o.dataset.id === t.accent)));
     };
     window.__applyTheme({ accent: root.dataset.accent, fonts });
+    if (SOLO) go('import');
   </script>
 </body>
 </html>

@@ -5,6 +5,7 @@
 //! browser and its installer.
 
 pub mod env;
+pub mod import;
 pub mod ipc;
 pub mod notes;
 pub mod settings;

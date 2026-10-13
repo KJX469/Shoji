@@ -578,3 +578,13 @@ fn test_run_in_background_defaults_on_and_can_be_switched_off() {
         serde_json::from_str(r#"{ "performance": { "sleep_after_secs": 60 } }"#).unwrap();
     assert!(old.performance.run_in_background);
 }
+
+#[test]
+fn test_link_privacy_defaults_on_and_old_files_load() {
+    let s = Settings::default();
+    assert!(s.shield.clean_links && s.shield.send_gpc);
+    let old: Settings = serde_json::from_str(r#"{"shield":{"mode":"standard"}}"#).unwrap();
+    assert!(old.shield.clean_links && old.shield.send_gpc);
+    let off: Settings = serde_json::from_str(r#"{"shield":{"clean_links":false}}"#).unwrap();
+    assert!(!off.shield.clean_links && off.shield.send_gpc);
+}

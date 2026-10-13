@@ -5,6 +5,7 @@
 //! files, so the window/taskbar icon, the executable icon (via build scripts) and the
 //! shortcut icons are all generated from the same data — no bitmap assets ship in the repo.
 
+pub mod logos;
 pub mod theme;
 
 /// The seven paper colours of the crane. `White` is the default, greyscale theme.
