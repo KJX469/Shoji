@@ -275,8 +275,8 @@ pub fn render_rgba(accent: Accent, size: u32) -> Vec<u8> {
                         let t = ((u + v) * 0.5).clamp(0.0, 1.0);
                         let g = if p.fill == Fill::Paper { paper } else { fold };
                         for c in 0..3 {
-                            acc[c] += (g[0][c] as f32 + (g[1][c] as f32 - g[0][c] as f32) * t)
-                                as u32;
+                            acc[c] +=
+                                (g[0][c] as f32 + (g[1][c] as f32 - g[0][c] as f32) * t) as u32;
                         }
                         hits += 1;
                     }

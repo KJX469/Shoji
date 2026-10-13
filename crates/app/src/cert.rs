@@ -6,9 +6,9 @@
 
 use crate::BrowserEvent;
 use shoji_core::ipc::SecurityInfo;
+use std::collections::HashMap;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
-use std::collections::HashMap;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use winit::event_loop::EventLoopProxy;
@@ -59,7 +59,9 @@ impl CertificateCache {
         if !is_secure || !is_safe_host(&host) {
             return base;
         }
-        let Ok(mut cache) = self.cache.lock() else { return base };
+        let Ok(mut cache) = self.cache.lock() else {
+            return base;
+        };
         match cache.get(&host) {
             Some(Some(info)) => SecurityInfo {
                 is_persistent: persistent,
@@ -109,7 +111,9 @@ fn fetch_certificate(host: &str) -> Option<SecurityInfo> {
     );
     let output = powershell(&script).output().ok()?;
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let line = stdout.lines().find_map(|l| l.trim().strip_prefix("CERT|"))?;
+    let line = stdout
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("CERT|"))?;
     let p: Vec<&str> = line.split('|').collect();
     (p.len() >= 7).then(|| SecurityInfo {
         host: host.to_string(),

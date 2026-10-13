@@ -100,7 +100,11 @@ impl TypeProfile {
     }
 
     fn stack(family: &str) -> String {
-        let fallback = if family == "Instrument Sans" { SANS_FALLBACK } else { SERIF_FALLBACK };
+        let fallback = if family == "Instrument Sans" {
+            SANS_FALLBACK
+        } else {
+            SERIF_FALLBACK
+        };
         format!("\"{family}\", {fallback}")
     }
 
@@ -196,7 +200,11 @@ pub fn css() -> String {
         ));
     }
     for p in TypeProfile::ALL {
-        css.push_str(&format!(":root[data-fonts=\"{}\"]{{{}}}\n", p.id, p.css_vars()));
+        css.push_str(&format!(
+            ":root[data-fonts=\"{}\"]{{{}}}\n",
+            p.id,
+            p.css_vars()
+        ));
     }
     for a in Accent::ALL {
         let (tone, deep) = tones(a);

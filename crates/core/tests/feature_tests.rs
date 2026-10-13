@@ -41,8 +41,16 @@ fn restored_groups_survive_until_tabs_are_assigned() {
     let a = m.create_tab("https://a.com", 0);
     m.create_tab("https://b.com", 0);
     m.restore_groups(vec![
-        TabGroup { id: 4, name: "Kept".into(), color: "gold".into() },
-        TabGroup { id: 5, name: "Empty".into(), color: "red".into() },
+        TabGroup {
+            id: 4,
+            name: "Kept".into(),
+            color: "gold".into(),
+        },
+        TabGroup {
+            id: 5,
+            name: "Empty".into(),
+            color: "red".into(),
+        },
     ]);
     assert!(m.set_tab_group(a, Some(4)));
     m.prune_groups();
@@ -103,7 +111,10 @@ fn favourites_persist_and_reject_internal_pages() {
     let path = dir.join("favourites.json");
     let mut f = Favourites::load(path.clone());
     assert!(f.add("https://example.com/", "Example"));
-    assert!(!f.add("https://example.com", "again"), "trailing slash is the same page");
+    assert!(
+        !f.add("https://example.com", "again"),
+        "trailing slash is the same page"
+    );
     assert!(!f.add("shoji://settings", "Settings"));
     assert!(!f.add("javascript:alert(1)", "x"));
     assert!(f.contains("https://example.com"));
@@ -113,7 +124,10 @@ fn favourites_persist_and_reject_internal_pages() {
     assert_eq!(reloaded.items()[0].title, "Example");
 
     let mut f = reloaded;
-    assert!(!f.toggle("https://example.com/", ""), "toggle removes an existing favourite");
+    assert!(
+        !f.toggle("https://example.com/", ""),
+        "toggle removes an existing favourite"
+    );
     assert!(f.items().is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -157,8 +171,16 @@ fn session_file_roundtrips_and_tolerates_garbage() {
         clean_exit: false,
         windows: vec![SessionWindow {
             tabs: vec![
-                SessionTab { url: "https://a.com".into(), title: "A".into(), group: Some(1) },
-                SessionTab { url: "https://b.com".into(), title: "B".into(), group: None },
+                SessionTab {
+                    url: "https://a.com".into(),
+                    title: "A".into(),
+                    group: Some(1),
+                },
+                SessionTab {
+                    url: "https://b.com".into(),
+                    title: "B".into(),
+                    group: None,
+                },
             ],
             active: 1,
             groups: vec![],

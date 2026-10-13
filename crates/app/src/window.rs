@@ -74,7 +74,11 @@ pub fn webview_theme(pref: &str) -> wry::Theme {
 
 /// Page background used to pre-paint webviews so they never flash white.
 pub fn page_rgba(dark: bool) -> (u8, u8, u8, u8) {
-    let c = if dark { theme::PAGE_DARK } else { theme::PAGE_LIGHT };
+    let c = if dark {
+        theme::PAGE_DARK
+    } else {
+        theme::PAGE_LIGHT
+    };
     ((c >> 16) as u8, (c >> 8) as u8, c as u8, 255)
 }
 
@@ -83,8 +87,7 @@ pub fn page_rgba(dark: bool) -> (u8, u8, u8, u8) {
 pub fn apply_frame(window: &Window, dark: bool) {
     use windows::Win32::Foundation::{COLORREF, HWND};
     use windows::Win32::Graphics::Dwm::{
-        DwmSetWindowAttribute, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR,
-        DWMWA_USE_IMMERSIVE_DARK_MODE,
+        DwmSetWindowAttribute, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
     };
     use windows::Win32::Graphics::Gdi::{CreateSolidBrush, InvalidateRect};
     use windows::Win32::UI::WindowsAndMessaging::{SetClassLongPtrW, GCLP_HBRBACKGROUND};
@@ -100,17 +103,29 @@ pub fn apply_frame(window: &Window, dark: bool) {
         )
     });
 
-    let Ok(handle) = window.window_handle() else { return };
-    let RawWindowHandle::Win32(h) = handle.as_raw() else { return };
+    let Ok(handle) = window.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(h) = handle.as_raw() else {
+        return;
+    };
     let hwnd = HWND(h.hwnd.get() as _);
-    let caption = bgr(if dark { theme::FRAME_DARK } else { theme::FRAME_LIGHT });
+    let caption = bgr(if dark {
+        theme::FRAME_DARK
+    } else {
+        theme::FRAME_LIGHT
+    });
     let text = bgr(if dark { 0xebe6dc } else { 0x2b2924 });
     let dark_flag: i32 = dark.into();
     unsafe {
         let set = |attr, value: *const std::ffi::c_void, size: usize| {
             let _ = DwmSetWindowAttribute(hwnd, attr, value, size as u32);
         };
-        set(DWMWA_USE_IMMERSIVE_DARK_MODE, &dark_flag as *const _ as _, 4);
+        set(
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            &dark_flag as *const _ as _,
+            4,
+        );
         set(DWMWA_CAPTION_COLOR, &caption as *const _ as _, 4);
         set(DWMWA_TEXT_COLOR, &text as *const _ as _, 4);
         // Frosted toolbar: a black client background lets the window backdrop show through.
@@ -147,12 +162,25 @@ pub fn apply_backdrop(window: &Window, frosted: bool, dark: bool) {
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
     FROSTED.store(frosted, std::sync::atomic::Ordering::Relaxed);
-    let Ok(handle) = window.window_handle() else { return };
-    let RawWindowHandle::Win32(h) = handle.as_raw() else { return };
+    let Ok(handle) = window.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(h) = handle.as_raw() else {
+        return;
+    };
     let hwnd = HWND(h.hwnd.get() as _);
-    let kind = if frosted { DWMSBT_MAINWINDOW } else { DWMSBT_NONE };
+    let kind = if frosted {
+        DWMSBT_MAINWINDOW
+    } else {
+        DWMSBT_NONE
+    };
     let margin = if frosted { -1 } else { 0 };
-    let margins = MARGINS { cxLeftWidth: margin, cxRightWidth: margin, cyTopHeight: margin, cyBottomHeight: margin };
+    let margins = MARGINS {
+        cxLeftWidth: margin,
+        cxRightWidth: margin,
+        cyTopHeight: margin,
+        cyBottomHeight: margin,
+    };
     unsafe {
         let _ = DwmSetWindowAttribute(
             hwnd,
@@ -177,8 +205,8 @@ pub fn remove_caption(window: &Window) {
     use windows::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
     use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
     use windows::Win32::UI::WindowsAndMessaging::{
-        IsZoomed, SetWindowPos, NCCALCSIZE_PARAMS, SM_CXPADDEDBORDER, SM_CYFRAME,
-        SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WM_NCCALCSIZE,
+        IsZoomed, SetWindowPos, NCCALCSIZE_PARAMS, SM_CXPADDEDBORDER, SM_CYFRAME, SWP_FRAMECHANGED,
+        SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WM_NCCALCSIZE,
     };
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
@@ -207,8 +235,12 @@ pub fn remove_caption(window: &Window) {
         DefSubclassProc(hwnd, msg, wparam, lparam)
     }
 
-    let Ok(handle) = window.window_handle() else { return };
-    let RawWindowHandle::Win32(h) = handle.as_raw() else { return };
+    let Ok(handle) = window.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(h) = handle.as_raw() else {
+        return;
+    };
     let hwnd = HWND(h.hwnd.get() as _);
     unsafe {
         if SetWindowSubclass(hwnd, Some(proc), 1, 0).as_bool() {

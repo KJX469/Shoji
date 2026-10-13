@@ -111,9 +111,18 @@ impl Shield {
         }
         let mut set = FilterSet::new(true);
         for (text, trusted) in lists {
-            let permissions =
-                if trusted { PermissionMask::from_bits(1) } else { PermissionMask::default() };
-            set.add_filter_list(text, ParseOptions { permissions, ..ParseOptions::default() });
+            let permissions = if trusted {
+                PermissionMask::from_bits(1)
+            } else {
+                PermissionMask::default()
+            };
+            set.add_filter_list(
+                text,
+                ParseOptions {
+                    permissions,
+                    ..ParseOptions::default()
+                },
+            );
         }
         let mut engine = Engine::new_with_filter_set(set);
         let mut seen = std::collections::HashSet::new();
@@ -138,7 +147,12 @@ impl Shield {
     }
 
     /// [`Shield::rebuild`] with the user's own rules appended (trusted: they wrote them).
-    pub fn rebuild_with(&self, updater: &Updater, sources: &[ListSource], own_rules: &str) -> usize {
+    pub fn rebuild_with(
+        &self,
+        updater: &Updater,
+        sources: &[ListSource],
+        own_rules: &str,
+    ) -> usize {
         let mut lists: Vec<(String, bool)> = sources
             .iter()
             .filter_map(|s| updater.list_text(&s.id).map(|t| (t, s.trusted)))
@@ -174,7 +188,9 @@ impl Shield {
         if mode == Mode::Off || kind == RequestKind::Document {
             return (Decision::Allow, None);
         }
-        let Some(engine) = self.current() else { return (Decision::Allow, None) };
+        let Some(engine) = self.current() else {
+            return (Decision::Allow, None);
+        };
         let Ok(req) = Request::new(url, source_url, kind.name(), "GET") else {
             return (Decision::Allow, None);
         };
@@ -195,9 +211,14 @@ impl Shield {
 
     /// Raw cosmetic sets for diagnostics: (hide selectors, procedural actions).
     pub fn debug_cosmetic(&self, url: &str) -> (Vec<String>, Vec<String>) {
-        let Some(engine) = self.current() else { return Default::default() };
+        let Some(engine) = self.current() else {
+            return Default::default();
+        };
         let r = engine.url_cosmetic_resources(url);
-        (r.hide_selectors.into_iter().collect(), r.procedural_actions.into_iter().collect())
+        (
+            r.hide_selectors.into_iter().collect(),
+            r.procedural_actions.into_iter().collect(),
+        )
     }
 
     /// Cosmetic filters and scriptlets for the page at `url`.
@@ -205,7 +226,9 @@ impl Shield {
         if mode == Mode::Off {
             return CosmeticPayload::default();
         }
-        let Some(engine) = self.current() else { return CosmeticPayload::default() };
+        let Some(engine) = self.current() else {
+            return CosmeticPayload::default();
+        };
         let res = engine.url_cosmetic_resources(url);
         if let Ok(mut slot) = self.exceptions.write() {
             *slot = (url.to_string(), Arc::new(res.exceptions.clone()));
@@ -214,16 +237,34 @@ impl Shield {
         hide.sort_unstable();
         let mut procedural: Vec<String> = res.procedural_actions.into_iter().collect();
         procedural.sort_unstable();
-        CosmeticPayload { hide, procedural, script: res.injected_script, generichide: res.generichide }
+        CosmeticPayload {
+            hide,
+            procedural,
+            script: res.injected_script,
+            generichide: res.generichide,
+        }
     }
 
     /// Generic selectors that apply to the classes and ids a page at `url` actually uses.
-    pub fn generic_hide(&self, url: &str, classes: &[String], ids: &[String], mode: Mode) -> Vec<String> {
+    pub fn generic_hide(
+        &self,
+        url: &str,
+        classes: &[String],
+        ids: &[String],
+        mode: Mode,
+    ) -> Vec<String> {
         if mode == Mode::Off {
             return Vec::new();
         }
-        let Some(engine) = self.current() else { return Vec::new() };
-        let known = self.exceptions.read().ok().filter(|e| e.0 == url).map(|e| e.1.clone());
+        let Some(engine) = self.current() else {
+            return Vec::new();
+        };
+        let known = self
+            .exceptions
+            .read()
+            .ok()
+            .filter(|e| e.0 == url)
+            .map(|e| e.1.clone());
         let exceptions = match known {
             Some(e) => e,
             None => {
@@ -254,15 +295,30 @@ mod tests {
         let s = shield("||ads.example^$third-party\n##.banner\n");
         let page = "https://news.test/story";
         assert_eq!(
-            s.check("https://ads.example/x.js", page, RequestKind::Script, Mode::Standard),
+            s.check(
+                "https://ads.example/x.js",
+                page,
+                RequestKind::Script,
+                Mode::Standard
+            ),
             Decision::Block
         );
         assert_eq!(
-            s.check("https://news.test/app.js", page, RequestKind::Script, Mode::Standard),
+            s.check(
+                "https://news.test/app.js",
+                page,
+                RequestKind::Script,
+                Mode::Standard
+            ),
             Decision::Allow
         );
         assert_eq!(
-            s.check("https://ads.example/x.js", page, RequestKind::Script, Mode::Off),
+            s.check(
+                "https://ads.example/x.js",
+                page,
+                RequestKind::Script,
+                Mode::Off
+            ),
             Decision::Allow
         );
     }

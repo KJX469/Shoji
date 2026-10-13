@@ -341,7 +341,10 @@ impl Settings {
             self.appearance.theme = "system".to_string();
         }
         self.appearance.default_zoom_level = self.appearance.default_zoom_level.clamp(0.25, 3.0);
-        if !matches!(self.privacy.restore_session.as_str(), "ask" | "always" | "never") {
+        if !matches!(
+            self.privacy.restore_session.as_str(),
+            "ask" | "always" | "never"
+        ) {
             self.privacy.restore_session = "ask".to_string();
         }
         if !matches!(self.shield.mode.as_str(), "off" | "standard" | "aggressive") {

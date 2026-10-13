@@ -110,13 +110,20 @@ const TEMPLATE: &str = r#"<!DOCTYPE html>
 "#;
 
 pub fn installer_html(is_uninstall: bool) -> String {
-    let (install, uninstall) = if is_uninstall { ("", "active") } else { ("active", "") };
+    let (install, uninstall) = if is_uninstall {
+        ("", "active")
+    } else {
+        ("active", "")
+    };
     TEMPLATE
         .replace("{{THEME_CSS}}", &theme::css())
         .replace("{{CRANE}}", &theme::crane_svg("c", ""))
         .replace("{{INSTALL_ACTIVE}}", install)
         .replace("{{UNINSTALL_ACTIVE}}", uninstall)
-        .replace("data-accent=\"white\"", &format!("data-accent=\"{}\"", Accent::default().id()))
+        .replace(
+            "data-accent=\"white\"",
+            &format!("data-accent=\"{}\"", Accent::default().id()),
+        )
 }
 
 #[cfg(test)]

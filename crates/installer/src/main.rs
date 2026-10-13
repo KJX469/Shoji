@@ -70,10 +70,22 @@ mod registry {
             )
             .ok()?;
             for (name, value) in values {
-                let _ = RegSetValueExW(hkey, &HSTRING::from(*name), None, REG_SZ, Some(&wide(value)));
+                let _ = RegSetValueExW(
+                    hkey,
+                    &HSTRING::from(*name),
+                    None,
+                    REG_SZ,
+                    Some(&wide(value)),
+                );
             }
             for name in ["NoModify", "NoRepair"] {
-                let _ = RegSetValueExW(hkey, &HSTRING::from(name), None, REG_DWORD, Some(&1u32.to_le_bytes()));
+                let _ = RegSetValueExW(
+                    hkey,
+                    &HSTRING::from(name),
+                    None,
+                    REG_DWORD,
+                    Some(&1u32.to_le_bytes()),
+                );
             }
             let _ = RegCloseKey(hkey);
         }
@@ -111,7 +123,11 @@ impl ApplicationHandler<InstallerEvent> for InstallerApp {
         }
         let icon = Icon::from_rgba(shoji_brand::render_rgba(Default::default(), 64), 64, 64).ok();
         let attrs = WindowAttributes::default()
-            .with_title(if self.is_uninstall { "Uninstall Shoji" } else { "Shoji Setup" })
+            .with_title(if self.is_uninstall {
+                "Uninstall Shoji"
+            } else {
+                "Shoji Setup"
+            })
             .with_inner_size(LogicalSize::new(WIDTH, HEIGHT))
             .with_resizable(false)
             .with_window_icon(icon);
@@ -134,7 +150,9 @@ impl ApplicationHandler<InstallerEvent> for InstallerApp {
             .with_html(installer_ui::installer_html(self.is_uninstall))
             .with_incognito(true)
             .with_ipc_handler(move |req: wry::http::Request<String>| {
-                let Ok(val) = serde_json::from_str::<serde_json::Value>(req.body()) else { return };
+                let Ok(val) = serde_json::from_str::<serde_json::Value>(req.body()) else {
+                    return;
+                };
                 match val["action"].as_str().unwrap_or("") {
                     "cancel" => {
                         let _ = proxy.send_event(InstallerEvent::Exit);
@@ -178,7 +196,9 @@ impl ApplicationHandler<InstallerEvent> for InstallerApp {
             self.busy.store(false, Ordering::SeqCst);
         }
         let script = match event {
-            InstallerEvent::Progress(pct, text) => format!("window.updateProgress({pct}, {text:?})"),
+            InstallerEvent::Progress(pct, text) => {
+                format!("window.updateProgress({pct}, {text:?})")
+            }
             InstallerEvent::InstallComplete => "window.installComplete()".into(),
             InstallerEvent::InstallFailed(text) => format!(
                 "window.installFailed({})",
@@ -215,7 +235,9 @@ fn install(desktop: bool, start_menu: bool, proxy: EventLoopProxy<InstallerEvent
     }
     let exe = dir.join(EXE_NAME);
     if let Err(e) = std::fs::write(&exe, BROWSER_PAYLOAD) {
-        return fail(format!("Couldn't write {EXE_NAME} ({e}). If Shoji is open, close it and try again."));
+        return fail(format!(
+            "Couldn't write {EXE_NAME} ({e}). If Shoji is open, close it and try again."
+        ));
     }
     let uninstaller = dir.join("uninstall.exe");
     if let Ok(me) = std::env::current_exe() {
@@ -285,9 +307,8 @@ fn uninstall(remove_data: bool, proxy: EventLoopProxy<InstallerEvent>) {
         }
         // The browsing profile (logins, cache, history) lives under %LOCALAPPDATA%.
         if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-            let _ = std::fs::remove_dir_all(
-                std::path::PathBuf::from(local).join(shoji_core::APP_NAME),
-            );
+            let _ =
+                std::fs::remove_dir_all(std::path::PathBuf::from(local).join(shoji_core::APP_NAME));
         }
     }
     let _ = std::fs::remove_file(exe);
