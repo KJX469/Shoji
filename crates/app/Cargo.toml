@@ -10,7 +10,7 @@ license = "MIT"
 shoji-core = { path = "../core" }
 shoji-brand = { path = "../brand" }
 shoji-byobu = { path = "../byobu" }
-base64 = "0.22"
+base64 = "0.23"
 winit = "0.30"
 wry = { version = "0.57", features = ["devtools"] }
 serde_json = "1.0"
