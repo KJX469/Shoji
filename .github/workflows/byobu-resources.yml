@@ -1,0 +1,36 @@
+# Assembles uBlock Origin's scriptlets and redirect stubs into the JSON that Byobu's engine
+# loads, and publishes it as a release asset the browser downloads at runtime.
+#
+# uBlock Origin is GPLv3. The data lives in this separate release asset (never in the MIT
+# browser binary), and is a build of https://github.com/gorhill/uBlock/tree/master/src/js/resources.
+name: byobu-resources
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Assemble uBlock Origin resources
+        run: node scripts/byobu-assemble.mjs ubo-resources.json "$RUNNER_TEMP/ubo"
+      - name: Sanity check
+        run: |
+          node -e "const r=require('./ubo-resources.json'); if(!Array.isArray(r)||r.length<50) process.exit(1); console.log(r.length+' resources')"
+      - name: Publish release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view byobu-data >/dev/null 2>&1 || gh release create byobu-data \
+            --title "Byobu data" --prerelease \
+            --notes "uBlock Origin scriptlets and redirect resources, assembled from https://github.com/gorhill/uBlock (GPL-3.0). Downloaded by Shoji at runtime; not part of the MIT browser binary."
+          gh release upload byobu-data ubo-resources.json --clobber

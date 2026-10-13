@@ -1,0 +1,751 @@
+//! WebView2 integration below wry: keyboard accelerators, per-tab navigation events,
+//! favicons, permissions, downloads, TLS interstitials, crash detection, and suspension.
+//!
+//! Tab events carry only the [`TabId`]; the host resolves which window owns the tab when the
+//! event arrives. That is what lets a live webview move between windows (tab tear-off)
+//! without being rebuilt.
+
+use crate::keys::command_for;
+use crate::BrowserEvent;
+use shoji_core::tabs::TabId;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use webview2_com::Microsoft::Web::WebView2::Win32::*;
+use webview2_com::*;
+use windows::core::{Interface, BOOL, PCWSTR, PWSTR};
+use winit::event_loop::EventLoopProxy;
+use winit::window::WindowId;
+use wry::{WebView, WebViewExtWindows};
+
+/// Where a keyboard shortcut came from.
+#[derive(Debug, Clone, Copy)]
+pub enum Origin {
+    Window(WindowId),
+    Tab(TabId),
+}
+
+/// Take ownership of a COM-allocated string.
+fn take(pwstr: PWSTR) -> String {
+    if pwstr.is_null() {
+        return String::new();
+    }
+    let s = unsafe { pwstr.to_string() }.unwrap_or_default();
+    unsafe { windows::Win32::System::Com::CoTaskMemFree(Some(pwstr.0 as _)) };
+    s
+}
+
+fn is_reportable(uri: &str) -> bool {
+    !uri.is_empty() && !uri.starts_with("data:") && uri != "about:blank"
+}
+
+/* ---------- Keyboard ---------- */
+
+pub fn attach_accelerators(webview: &WebView, origin: Origin, proxy: EventLoopProxy<BrowserEvent>) {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_MENU, VK_SHIFT};
+    let handler = AcceleratorKeyPressedEventHandler::create(Box::new(move |_, args| {
+        let Some(args) = args else { return Ok(()) };
+        let mut kind = COREWEBVIEW2_KEY_EVENT_KIND(0);
+        unsafe { args.KeyEventKind(&mut kind)? };
+        if kind != COREWEBVIEW2_KEY_EVENT_KIND_KEY_DOWN
+            && kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN
+        {
+            return Ok(());
+        }
+        let mut vkey = 0;
+        unsafe { args.VirtualKey(&mut vkey)? };
+        let down = |vk: u16| unsafe { GetKeyState(vk as i32) } < 0;
+        if let Some(cmd) = command_for(
+            vkey,
+            down(VK_CONTROL.0),
+            down(VK_SHIFT.0),
+            down(VK_MENU.0),
+        ) {
+            unsafe { args.SetHandled(true)? };
+            let _ = proxy.send_event(BrowserEvent::Command(origin, cmd));
+        }
+        Ok(())
+    }));
+    let mut token = Default::default();
+    let _ = unsafe { webview.controller().add_AcceleratorKeyPressed(&handler, &mut token) };
+}
+
+/* ---------- Permissions ---------- */
+
+struct PendingPermission {
+    args: ICoreWebView2PermissionRequestedEventArgs,
+    deferral: ICoreWebView2Deferral,
+}
+// SAFETY: created and completed on the UI thread; the map only parks them in between.
+unsafe impl Send for PendingPermission {}
+
+static NEXT_PERMISSION_ID: AtomicU64 = AtomicU64::new(1);
+static PERMISSIONS: Mutex<Option<HashMap<u64, PendingPermission>>> = Mutex::new(None);
+
+pub fn resolve_permission(permission_id: u64, allow: bool) {
+    let pending = PERMISSIONS
+        .lock()
+        .ok()
+        .and_then(|mut m| m.as_mut()?.remove(&permission_id));
+    if let Some(p) = pending {
+        let state = if allow {
+            COREWEBVIEW2_PERMISSION_STATE_ALLOW
+        } else {
+            COREWEBVIEW2_PERMISSION_STATE_DENY
+        };
+        unsafe {
+            let _ = p.args.SetState(state);
+            let _ = p.deferral.Complete();
+        }
+    }
+}
+
+fn permission_name(kind: COREWEBVIEW2_PERMISSION_KIND) -> &'static str {
+    match kind {
+        COREWEBVIEW2_PERMISSION_KIND_MICROPHONE => "Microphone",
+        COREWEBVIEW2_PERMISSION_KIND_CAMERA => "Camera",
+        COREWEBVIEW2_PERMISSION_KIND_GEOLOCATION => "Geolocation",
+        COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS => "Notifications",
+        COREWEBVIEW2_PERMISSION_KIND_CLIPBOARD_READ => "Clipboard",
+        _ => "Site permission",
+    }
+}
+
+/* ---------- Downloads ---------- */
+
+struct DownloadOp(ICoreWebView2DownloadOperation);
+// SAFETY: only touched from the UI thread (event handlers and host commands).
+unsafe impl Send for DownloadOp {}
+
+static NEXT_DOWNLOAD_ID: AtomicU64 = AtomicU64::new(1);
+static DOWNLOADS: Mutex<Option<HashMap<u64, DownloadOp>>> = Mutex::new(None);
+static ASK_WHERE_TO_SAVE: AtomicBool = AtomicBool::new(true);
+static DOWNLOAD_FOLDER: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// Mirror the download preferences that COM handlers need without touching app state.
+pub fn set_download_prefs(ask: bool, folder: PathBuf) {
+    ASK_WHERE_TO_SAVE.store(ask, Ordering::Relaxed);
+    if let Ok(mut f) = DOWNLOAD_FOLDER.lock() {
+        *f = Some(folder);
+    }
+}
+
+pub fn cancel_download(id: u64) {
+    let op = DOWNLOADS.lock().ok().and_then(|mut m| m.as_mut()?.remove(&id));
+    if let Some(op) = op {
+        let _ = unsafe { op.0.Cancel() };
+    }
+}
+
+fn download_state(op: &ICoreWebView2DownloadOperation) -> (i64, i64, &'static str) {
+    let (mut received, mut total) = (0i64, 0i64);
+    let mut state = COREWEBVIEW2_DOWNLOAD_STATE(0);
+    unsafe {
+        let _ = op.BytesReceived(&mut received);
+        let _ = op.TotalBytesToReceive(&mut total);
+        let _ = op.State(&mut state);
+    }
+    let label = match state {
+        COREWEBVIEW2_DOWNLOAD_STATE_COMPLETED => "Completed",
+        COREWEBVIEW2_DOWNLOAD_STATE_INTERRUPTED => "Interrupted",
+        _ => "InProgress",
+    };
+    (received, total, label)
+}
+
+/* ---------- Tab events ---------- */
+
+/// Wire every per-tab WebView2 event to the host event loop.
+pub fn attach_tab_events(
+    webview: &WebView,
+    tab_id: TabId,
+    proxy: EventLoopProxy<BrowserEvent>,
+    allowed_cert_hosts: Arc<Mutex<HashSet<String>>>,
+) {
+    let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
+        return;
+    };
+
+    // Address + history buttons. SourceChanged covers redirects, pushState, back/forward;
+    // HistoryChanged keeps the back/forward buttons exact.
+    let send_nav = {
+        let core = core.clone();
+        let proxy = proxy.clone();
+        move || {
+            let (mut back, mut fwd) = (BOOL(0), BOOL(0));
+            let mut uri = PWSTR::null();
+            unsafe {
+                let _ = core.CanGoBack(&mut back);
+                let _ = core.CanGoForward(&mut fwd);
+                let _ = core.Source(&mut uri);
+            }
+            let uri = take(uri);
+            let _ = proxy.send_event(BrowserEvent::TabUpdate {
+                tab_id,
+                url: is_reportable(&uri).then_some(uri),
+                title: None,
+                history: Some((back.as_bool(), fwd.as_bool())),
+                favicon: None,
+            });
+        }
+    };
+    let on_source = send_nav.clone();
+    let mut token = Default::default();
+    unsafe {
+        let _ = core.add_SourceChanged(
+            &SourceChangedEventHandler::create(Box::new(move |_, _| {
+                on_source();
+                Ok(())
+            })),
+            &mut token,
+        );
+        let _ = core.add_HistoryChanged(
+            &HistoryChangedEventHandler::create(Box::new(move |_, _| {
+                send_nav();
+                Ok(())
+            })),
+            &mut token,
+        );
+    }
+
+    // Title
+    {
+        let core_t = core.clone();
+        let proxy = proxy.clone();
+        let handler = DocumentTitleChangedEventHandler::create(Box::new(move |_, _| {
+            let mut title = PWSTR::null();
+            unsafe { core_t.DocumentTitle(&mut title)? };
+            let title = take(title);
+            if !title.is_empty() {
+                let _ = proxy.send_event(BrowserEvent::TabUpdate {
+                    tab_id,
+                    url: None,
+                    title: Some(title),
+                    history: None,
+                    favicon: None,
+                });
+            }
+            Ok(())
+        }));
+        let _ = unsafe { core.add_DocumentTitleChanged(&handler, &mut token) };
+    }
+
+    // Favicon straight from the page (no third-party favicon service).
+    if let Ok(core15) = core.cast::<ICoreWebView2_15>() {
+        let core15_f = core15.clone();
+        let proxy = proxy.clone();
+        let handler = FaviconChangedEventHandler::create(Box::new(move |_, _| {
+            let mut uri = PWSTR::null();
+            unsafe { core15_f.FaviconUri(&mut uri)? };
+            let uri = take(uri);
+            let _ = proxy.send_event(BrowserEvent::TabUpdate {
+                tab_id,
+                url: None,
+                title: None,
+                history: None,
+                favicon: Some((uri.starts_with("https://") || uri.starts_with("http://")).then_some(uri)),
+            });
+            Ok(())
+        }));
+        let _ = unsafe { core15.add_FaviconChanged(&handler, &mut token) };
+    }
+
+    // target="_blank" and window.open() become tabs.
+    {
+        let proxy = proxy.clone();
+        let handler = NewWindowRequestedEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else { return Ok(()) };
+            let mut uri = PWSTR::null();
+            unsafe { args.Uri(&mut uri)? };
+            let uri = take(uri);
+            unsafe { args.SetHandled(true)? };
+            if !uri.is_empty() {
+                let _ = proxy.send_event(BrowserEvent::NewTabFrom(tab_id, uri));
+            }
+            Ok(())
+        }));
+        let _ = unsafe { core.add_NewWindowRequested(&handler, &mut token) };
+    }
+
+    // Permissions: deferred until the host applies the user's policy or the user answers.
+    {
+        let proxy = proxy.clone();
+        let handler = PermissionRequestedEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else { return Ok(()) };
+            let deferral = unsafe { args.GetDeferral()? };
+            let mut uri = PWSTR::null();
+            let mut kind = COREWEBVIEW2_PERMISSION_KIND(0);
+            unsafe {
+                let _ = args.Uri(&mut uri);
+                let _ = args.PermissionKind(&mut kind);
+            }
+            let uri = take(uri);
+            let id = NEXT_PERMISSION_ID.fetch_add(1, Ordering::Relaxed);
+            if let Ok(mut map) = PERMISSIONS.lock() {
+                map.get_or_insert_with(HashMap::new)
+                    .insert(id, PendingPermission { args: args.clone(), deferral });
+            }
+            let _ = proxy.send_event(BrowserEvent::PermissionPrompt {
+                tab_id,
+                permission_id: id,
+                origin: crate::extract_host(&uri).unwrap_or(uri),
+                kind: permission_name(kind),
+            });
+            Ok(())
+        }));
+        let _ = unsafe { core.add_PermissionRequested(&handler, &mut token) };
+    }
+
+    // Renderer / browser process failures
+    {
+        let proxy = proxy.clone();
+        let handler = ProcessFailedEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else { return Ok(()) };
+            let mut kind = COREWEBVIEW2_PROCESS_FAILED_KIND(0);
+            unsafe { args.ProcessFailedKind(&mut kind)? };
+            let _ = proxy.send_event(BrowserEvent::TabCrashed(tab_id, kind.0));
+            Ok(())
+        }));
+        let _ = unsafe { core.add_ProcessFailed(&handler, &mut token) };
+    }
+
+    // Strict TLS: cancel and show an interstitial unless the user bypassed this host.
+    if let Ok(core14) = core.cast::<ICoreWebView2_14>() {
+        let proxy = proxy.clone();
+        let handler = ServerCertificateErrorDetectedEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else { return Ok(()) };
+            let mut uri = PWSTR::null();
+            unsafe { args.RequestUri(&mut uri)? };
+            let uri = take(uri);
+            let host = crate::extract_host(&uri).unwrap_or_else(|| uri.clone());
+            let allowed = allowed_cert_hosts
+                .lock()
+                .map(|set| set.contains(&host))
+                .unwrap_or(false);
+            unsafe {
+                args.SetAction(if allowed {
+                    COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_ALWAYS_ALLOW
+                } else {
+                    COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_CANCEL
+                })?
+            };
+            if !allowed {
+                let _ = proxy.send_event(BrowserEvent::CertificateError { tab_id, host, uri });
+            }
+            Ok(())
+        }));
+        let _ = unsafe { core14.add_ServerCertificateErrorDetected(&handler, &mut token) };
+    }
+
+    // Downloads
+    if let Ok(core4) = core.cast::<ICoreWebView2_4>() {
+        let handler = DownloadStartingEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else { return Ok(()) };
+            let op = unsafe { args.DownloadOperation()? };
+            let mut path = PWSTR::null();
+            unsafe { op.ResultFilePath(&mut path)? };
+            let suggested = PathBuf::from(take(path));
+            let filename = suggested
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "download".into());
+
+            let target = if ASK_WHERE_TO_SAVE.load(Ordering::Relaxed) {
+                show_save_dialog(&filename)
+            } else {
+                DOWNLOAD_FOLDER
+                    .lock()
+                    .ok()
+                    .and_then(|f| f.clone())
+                    .map(|dir| unique_path(&dir, &filename))
+            };
+            let Some(target) = target else {
+                unsafe {
+                    args.SetCancel(true)?;
+                    args.SetHandled(true)?;
+                }
+                return Ok(());
+            };
+            let wide: Vec<u16> = target
+                .as_os_str()
+                .to_string_lossy()
+                .encode_utf16()
+                .chain(Some(0))
+                .collect();
+            unsafe {
+                args.SetResultFilePath(PCWSTR(wide.as_ptr()))?;
+                args.SetHandled(true)?;
+            }
+            let filename = target
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or(filename);
+
+            let id = NEXT_DOWNLOAD_ID.fetch_add(1, Ordering::Relaxed);
+            if let Ok(mut map) = DOWNLOADS.lock() {
+                map.get_or_insert_with(HashMap::new)
+                    .insert(id, DownloadOp(op.clone()));
+            }
+            let report = {
+                let op = op.clone();
+                let proxy = proxy.clone();
+                move || {
+                    let (received_bytes, total_bytes, state) = download_state(&op);
+                    if state != "InProgress" {
+                        if let Ok(mut map) = DOWNLOADS.lock() {
+                            map.as_mut().map(|m| m.remove(&id));
+                        }
+                    }
+                    let _ = proxy.send_event(BrowserEvent::DownloadProgress {
+                        download_id: id,
+                        filename: filename.clone(),
+                        received_bytes,
+                        total_bytes,
+                        state,
+                    });
+                }
+            };
+            let on_state = report.clone();
+            let mut token = Default::default();
+            unsafe {
+                op.add_BytesReceivedChanged(
+                    &BytesReceivedChangedEventHandler::create(Box::new(move |_, _| {
+                        report();
+                        Ok(())
+                    })),
+                    &mut token,
+                )?;
+                op.add_StateChanged(
+                    &StateChangedEventHandler::create(Box::new(move |_, _| {
+                        on_state();
+                        Ok(())
+                    })),
+                    &mut token,
+                )?;
+            }
+            let (_, total_bytes, _) = download_state(&op);
+            let _ = proxy.send_event(BrowserEvent::DownloadProgress {
+                download_id: id,
+                filename: target
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                received_bytes: 0,
+                total_bytes,
+                state: "InProgress",
+            });
+            Ok(())
+        }));
+        let _ = unsafe { core4.add_DownloadStarting(&handler, &mut token) };
+    }
+}
+
+/// `dir/name`, or `dir/name (2).ext` etc. if that file already exists.
+fn unique_path(dir: &std::path::Path, name: &str) -> PathBuf {
+    let candidate = dir.join(name);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let p = std::path::Path::new(name);
+    let stem = p.file_stem().map(|s| s.to_string_lossy()).unwrap_or_default();
+    let ext = p
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+    (2..)
+        .map(|n| dir.join(format!("{stem} ({n}){ext}")))
+        .find(|c| !c.exists())
+        .unwrap_or(candidate)
+}
+
+/* ---------- Visibility, memory and suspension ---------- */
+
+/// Show a tab: normal memory priority, resumed if it was suspended, focused.
+pub fn wake(webview: &WebView) {
+    let _ = webview.set_memory_usage_level(wry::MemoryUsageLevel::Normal);
+    let controller = webview.controller();
+    unsafe {
+        let _ = controller.NotifyParentWindowPositionChanged();
+        if let Ok(core3) = controller
+            .CoreWebView2()
+            .and_then(|c| c.cast::<ICoreWebView2_3>())
+        {
+            let mut suspended = BOOL(0);
+            if core3.IsSuspended(&mut suspended).is_ok() && suspended.as_bool() {
+                let _ = core3.Resume();
+            }
+        }
+    }
+}
+
+pub fn focus(webview: &WebView) {
+    let _ = unsafe {
+        webview
+            .controller()
+            .MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC)
+    };
+}
+
+/// Ask WebView2 to suspend a hidden tab. Pages playing audio or holding locks decline.
+pub fn try_suspend(webview: &WebView, tab_id: TabId, proxy: EventLoopProxy<BrowserEvent>) {
+    let Ok(core3) = (unsafe { webview.controller().CoreWebView2() })
+        .and_then(|c| c.cast::<ICoreWebView2_3>())
+    else {
+        return;
+    };
+    let handler = TrySuspendCompletedHandler::create(Box::new(move |result, suspended| {
+        if result.is_ok() && suspended {
+            let _ = proxy.send_event(BrowserEvent::TabSuspended(tab_id));
+        }
+        Ok(())
+    }));
+    let _ = unsafe { core3.TrySuspend(&handler) };
+}
+
+/* ---------- Native dialogs ---------- */
+
+fn show_save_dialog(default_name: &str) -> Option<PathBuf> {
+    use windows::core::HSTRING;
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
+    use windows::Win32::UI::Shell::{FileSaveDialog, IFileSaveDialog, SIGDN_FILESYSPATH};
+    unsafe {
+        let dialog: IFileSaveDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_ALL).ok()?;
+        let _ = dialog.SetFileName(&HSTRING::from(default_name));
+        if let Some(dir) = DOWNLOAD_FOLDER.lock().ok().and_then(|f| f.clone()) {
+            if let Ok(item) = windows::Win32::UI::Shell::SHCreateItemFromParsingName::<
+                _,
+                _,
+                windows::Win32::UI::Shell::IShellItem,
+            >(&HSTRING::from(dir.as_os_str()), None)
+            {
+                let _ = dialog.SetFolder(&item);
+            }
+        }
+        dialog.Show(None).ok()?;
+        let path = dialog.GetResult().ok()?.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        Some(PathBuf::from(take(path)))
+    }
+}
+
+/// Folder picker for the default download location.
+pub fn pick_folder(start: &std::path::Path) -> Option<PathBuf> {
+    use windows::core::HSTRING;
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
+    use windows::Win32::UI::Shell::{
+        FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName,
+        FOS_PICKFOLDERS, SIGDN_FILESYSPATH,
+    };
+    unsafe {
+        let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL).ok()?;
+        let _ = dialog.SetOptions(dialog.GetOptions().ok()? | FOS_PICKFOLDERS);
+        if let Ok(item) =
+            SHCreateItemFromParsingName::<_, _, IShellItem>(&HSTRING::from(start.as_os_str()), None)
+        {
+            let _ = dialog.SetFolder(&item);
+        }
+        dialog.Show(None).ok()?;
+        let path = dialog.GetResult().ok()?.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        Some(PathBuf::from(take(path)))
+    }
+}
+
+/* ---------- Engine settings, focus, failed navigations, DevTools protocol ---------- */
+
+/// Password saving / autofill (off in private mode) and the tracking-prevention level.
+/// Both are stored by the engine in the profile, encrypted for the current Windows user.
+pub fn configure_engine(webview: &WebView, passwords: bool, tracking: Tracking) {
+    let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
+        return;
+    };
+    if let Ok(settings) = unsafe { core.Settings() } {
+        if let Ok(s4) = settings.cast::<ICoreWebView2Settings4>() {
+            unsafe {
+                let _ = s4.SetIsPasswordAutosaveEnabled(passwords);
+                let _ = s4.SetIsGeneralAutofillEnabled(passwords);
+            }
+        }
+    }
+    set_tracking_prevention(webview, tracking);
+}
+
+/// The engine's built-in tracking prevention: switched off with the shield, otherwise strict
+/// (when the setting asks for it) or the engine's own default.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Tracking {
+    Off,
+    Default,
+    Strict,
+}
+
+pub fn set_tracking_prevention(webview: &WebView, tracking: Tracking) {
+    let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
+        return;
+    };
+    let level = match tracking {
+        Tracking::Off => COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_NONE,
+        Tracking::Default => COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_BALANCED,
+        Tracking::Strict => COREWEBVIEW2_TRACKING_PREVENTION_LEVEL_STRICT,
+    };
+    if let Ok(core13) = core.cast::<ICoreWebView2_13>() {
+        if let Ok(profile) = unsafe { core13.Profile() } {
+            if let Ok(p3) = profile.cast::<ICoreWebView2Profile3>() {
+                let _ = unsafe { p3.SetPreferredTrackingPreventionLevel(level) };
+            }
+        }
+    }
+}
+
+/// Delete every saved login and autofill entry from the profile. The engine offers no way to
+/// list them, so this is the management Shoji can honestly provide.
+pub fn clear_saved_logins(webview: &WebView) -> bool {
+    let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
+        return false;
+    };
+    let Ok(core13) = core.cast::<ICoreWebView2_13>() else { return false };
+    let Ok(profile) = (unsafe { core13.Profile() }) else { return false };
+    let Ok(p2) = profile.cast::<ICoreWebView2Profile2>() else { return false };
+    let handler = ClearBrowsingDataCompletedHandler::create(Box::new(|_| Ok(())));
+    let kinds = COREWEBVIEW2_BROWSING_DATA_KINDS(
+        COREWEBVIEW2_BROWSING_DATA_KINDS_PASSWORD_AUTOSAVE.0
+            | COREWEBVIEW2_BROWSING_DATA_KINDS_GENERAL_AUTOFILL.0,
+    );
+    unsafe { p2.ClearBrowsingData(kinds, &handler) }.is_ok()
+}
+
+/// Report when the user clicks into a tab (split view: the pane that was clicked becomes active).
+pub fn attach_focus(webview: &WebView, tab_id: TabId, proxy: EventLoopProxy<BrowserEvent>) {
+    let handler = FocusChangedEventHandler::create(Box::new(move |_, _| {
+        let _ = proxy.send_event(BrowserEvent::TabFocused(tab_id));
+        Ok(())
+    }));
+    let mut token = Default::default();
+    let _ = unsafe { webview.controller().add_GotFocus(&handler, &mut token) };
+}
+
+/// Report an https:// navigation that failed because the server couldn't be reached securely
+/// (certificate problems are handled separately by the TLS interstitial).
+pub fn attach_nav_failures(webview: &WebView, tab_id: TabId, proxy: EventLoopProxy<BrowserEvent>) {
+    let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
+        return;
+    };
+    let handler = NavigationCompletedEventHandler::create(Box::new(move |sender, args| {
+        let (Some(sender), Some(args)) = (sender, args) else { return Ok(()) };
+        let mut ok = BOOL(0);
+        unsafe { args.IsSuccess(&mut ok)? };
+        if ok.as_bool() {
+            return Ok(());
+        }
+        let mut status = COREWEBVIEW2_WEB_ERROR_STATUS(0);
+        unsafe { args.WebErrorStatus(&mut status)? };
+        // Everything except cancellations, name-resolution failures (HTTP won't help) and
+        // certificate / credential problems (handled by their own pages) counts.
+        let connect_failure = !matches!(
+            status,
+            COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED
+                | COREWEBVIEW2_WEB_ERROR_STATUS_HOST_NAME_NOT_RESOLVED
+                | COREWEBVIEW2_WEB_ERROR_STATUS_CERTIFICATE_COMMON_NAME_IS_INCORRECT
+                | COREWEBVIEW2_WEB_ERROR_STATUS_CERTIFICATE_EXPIRED
+                | COREWEBVIEW2_WEB_ERROR_STATUS_CERTIFICATE_IS_INVALID
+                | COREWEBVIEW2_WEB_ERROR_STATUS_CERTIFICATE_REVOKED
+                | COREWEBVIEW2_WEB_ERROR_STATUS_CLIENT_CERTIFICATE_CONTAINS_ERRORS
+                | COREWEBVIEW2_WEB_ERROR_STATUS_VALID_AUTHENTICATION_CREDENTIALS_REQUIRED
+                | COREWEBVIEW2_WEB_ERROR_STATUS_VALID_PROXY_AUTHENTICATION_REQUIRED
+        );
+        if !connect_failure {
+            return Ok(());
+        }
+        let mut uri = PWSTR::null();
+        unsafe { sender.Source(&mut uri)? };
+        let uri = take(uri);
+        if uri.starts_with("https://") {
+            let _ = proxy.send_event(BrowserEvent::NavFailed { tab_id, uri });
+        }
+        Ok(())
+    }));
+    let mut token = Default::default();
+    let _ = unsafe { core.add_NavigationCompleted(&handler, &mut token) };
+}
+
+/// Call a DevTools-protocol method on a tab (fire and forget).
+pub fn cdp(webview: &WebView, method: &str, params: &str) {
+    let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
+        return;
+    };
+    let m: Vec<u16> = method.encode_utf16().chain(Some(0)).collect();
+    let p: Vec<u16> = params.encode_utf16().chain(Some(0)).collect();
+    let _ = unsafe { core.CallDevToolsProtocolMethod(PCWSTR(m.as_ptr()), PCWSTR(p.as_ptr()), None) };
+}
+
+/* ---------- Document scripts, drag regions, z-order ---------- */
+
+/// Id of a script registered with `AddScriptToExecuteOnDocumentCreated`, filled in when
+/// WebView2 reports it (registration is asynchronous).
+pub type ScriptSlot = Arc<Mutex<Option<String>>>;
+
+/// Replace the script that runs at the start of every document in this webview.
+/// `None` removes it. Pages already open are not affected; callers evaluate separately.
+pub fn set_document_script(webview: &WebView, slot: &ScriptSlot, script: Option<&str>) {
+    set_document_script_core(&webview.webview(), slot, script);
+}
+
+/// Same as [`set_document_script`], for code that holds the core webview (event handlers).
+pub fn set_document_script_core(core: &ICoreWebView2, slot: &ScriptSlot, script: Option<&str>) {
+    if let Some(old) = slot.lock().ok().and_then(|mut s| s.take()) {
+        let id: Vec<u16> = old.encode_utf16().chain(Some(0)).collect();
+        let _ = unsafe { core.RemoveScriptToExecuteOnDocumentCreated(PCWSTR(id.as_ptr())) };
+    }
+    let Some(script) = script else { return };
+    let slot = slot.clone();
+    let handler = AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(
+        move |result, id| {
+            if result.is_ok() {
+                if let Ok(mut s) = slot.lock() {
+                    *s = Some(id);
+                }
+            }
+            Ok(())
+        },
+    ));
+    let wide: Vec<u16> = script.encode_utf16().chain(Some(0)).collect();
+    let _ = unsafe { core.AddScriptToExecuteOnDocumentCreated(PCWSTR(wide.as_ptr()), &handler) };
+}
+
+/// Let `app-region: drag` areas of this webview move the top-level window natively
+/// (and double-click to maximize, right-click for the system menu).
+pub fn enable_drag_regions(webview: &WebView) {
+    if let Ok(settings) = unsafe { webview.webview().Settings() } {
+        if let Ok(s9) = settings.cast::<ICoreWebView2Settings9>() {
+            let _ = unsafe { s9.SetIsNonClientRegionSupportEnabled(true) };
+        }
+    }
+}
+
+/// Clip a child webview's drawing and hit-testing to a rectangle, in physical pixels relative to
+/// its top-left corner. Cheap: unlike a resize, nothing has to be repainted.
+pub fn set_region(webview: &WebView, left: i32, top: i32, right: i32, bottom: i32) {
+    use windows::Win32::Graphics::Gdi::{CreateRectRgn, SetWindowRgn};
+    unsafe {
+        let region = CreateRectRgn(left, top, right, bottom);
+        // On success the window owns the region; it frees the previous one itself.
+        SetWindowRgn(webview.hwnd(), Some(region), true);
+    }
+}
+
+/// Raise a webview above its sibling child windows (used for floating panels).
+pub fn bring_to_top(webview: &WebView) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    };
+    let _ = unsafe {
+        SetWindowPos(
+            webview.hwnd(),
+            Some(HWND_TOP),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        )
+    };
+}

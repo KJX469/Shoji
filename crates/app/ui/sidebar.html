@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en" data-accent="{{ACCENT}}" data-mode="{{MODE}}" data-fonts="{{FONTS}}">
+<head>
+  <meta charset="UTF-8">
+  <title>Shoji panel</title>
+  <style>
+{{THEME_CSS}}
+    html, body { height: 100%; }
+    body { display: flex; flex-direction: column; font-size: 13px; user-select: none; background: var(--surface); border-left: 1px solid var(--line); overflow: hidden; }
+    button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+    button:focus:not(:focus-visible) { outline: none; }
+
+    header { display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 10px 0 18px; flex-shrink: 0; }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brand .crane { width: 24px; height: 24px; }
+    .wordmark { font-family: var(--font-display); font-size: 13px; font-weight: 600; letter-spacing: .32em; text-transform: lowercase; }
+    .icon-btn { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 7px; color: var(--ink-2); }
+    .icon-btn:hover { background: var(--hover); color: var(--ink); }
+
+    nav { display: flex; gap: 2px; margin: 0 12px; padding: 3px; border-radius: 9px; background: var(--surface-2); flex-shrink: 0; }
+    nav button { flex: 1; height: 28px; border-radius: 7px; font-size: 12px; color: var(--ink-2); transition: background .15s, color .15s; }
+    nav button:hover { color: var(--ink); }
+    nav button.active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px var(--line-strong); }
+
+    main { flex: 1; overflow-y: auto; padding: 14px 12px 20px; scrollbar-width: thin; }
+    .view { display: none; flex-direction: column; gap: 14px; }
+    .view.active { display: flex; }
+    .group { display: flex; flex-direction: column; }
+    .group .label { padding: 0 8px 6px; }
+    .item { display: flex; align-items: center; gap: 12px; height: 36px; padding: 0 10px; border-radius: 7px; color: var(--ink); text-align: left; width: 100%; }
+    .item:hover { background: var(--hover); }
+    .item svg.i { color: var(--ink-2); }
+    .item span:first-of-type { flex: 1; }
+    kbd { font: 11px var(--font); color: var(--ink-3); }
+    .rule { height: 1px; background: var(--line); margin: 6px 8px; }
+    .zoom { display: flex; align-items: center; gap: 4px; }
+    .zoom button { width: 26px; height: 24px; border-radius: 6px; background: var(--surface-2); }
+    .zoom button:hover { background: var(--press); }
+    #zoomVal { min-width: 44px; text-align: center; font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+    .note { font-family: var(--font-text); padding: 12px 14px; border-radius: 10px; background: var(--tint-soft); border: 1px solid var(--line); color: var(--ink-2); font-size: 12px; line-height: 1.55; }
+    .note strong { color: var(--ink); font-weight: 600; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 13px; }
+    .note.warn strong { color: var(--warn); }
+    .card { padding: 6px 14px; border-radius: 10px; border: 1px solid var(--line); }
+    .row { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; font-size: 12px; border-bottom: 1px solid var(--line); }
+    .row:last-child { border-bottom: 0; }
+    .row span:first-child { color: var(--ink-3); flex-shrink: 0; }
+    .row span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+    .mono { font-family: var(--mono); font-size: 11px; }
+    .wide-btn { width: 100%; height: 34px; border-radius: 8px; background: var(--surface-2); font-size: 12px; }
+    .wide-btn:hover { background: var(--press); }
+
+    .dl { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); display: flex; flex-direction: column; gap: 7px; }
+    .dl-top { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; }
+    .dl-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dl-size { color: var(--ink-3); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+    .bar { height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; }
+    .bar div { height: 100%; background: var(--accent); transition: width .2s linear; }
+    .dl-foot { display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-3); }
+    .dl-foot button { color: var(--danger); font-size: 11px; }
+    .big { font-size: 34px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; }
+    .sub { color: var(--ink-3); font-size: 12px; }
+    .switch-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; font-size: 13px; }
+    .sw { width: 34px; height: 20px; border-radius: 10px; background: var(--line-strong); position: relative; flex-shrink: 0; transition: background .15s; }
+    .sw::after { content: ""; position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); transition: transform .15s; }
+    .sw[aria-checked="true"] { background: var(--accent); }
+    .sw[aria-checked="true"]::after { transform: translateX(14px); }
+    .empty { padding: 48px 0; text-align: center; color: var(--ink-3); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">{{CRANE}}<span class="wordmark">shoji</span></div>
+    <button class="icon-btn" onclick="post('CloseSidebar')" title="Close (Esc)" aria-label="Close panel">
+      <svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </header>
+
+  <nav>
+    <button id="tab-menu" class="active" onclick="show('menu')">Menu</button>
+    <button id="tab-security" onclick="show('security')">Site</button>
+    <button id="tab-shield" onclick="show('shield')">Shield</button>
+    <button id="tab-downloads" onclick="show('downloads')">Downloads</button>
+  </nav>
+
+  <main>
+    <section class="view active" id="view-menu">
+      <div class="group">
+        <button class="item" onclick="post('CreateTab', { url: null })"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New tab</span><kbd>Ctrl+T</kbd></button>
+        <button class="item" onclick="post('OpenNewWindow')"><svg class="i" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 9h16"/></svg><span>New window</span><kbd>Ctrl+N</kbd></button>
+        <div class="rule"></div>
+        <div class="item" style="cursor:default"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5M8.5 11h5"/></svg><span>Zoom</span>
+          <div class="zoom"><button onclick="post('ZoomOut')" aria-label="Zoom out">−</button><span id="zoomVal" onclick="post('ZoomReset')" title="Reset">100%</span><button onclick="post('ZoomIn')" aria-label="Zoom in">+</button></div>
+        </div>
+        <button class="item" onclick="post('ToggleFindBar')"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg><span>Find in page</span><kbd>Ctrl+F</kbd></button>
+        <button class="item" onclick="show('downloads')"><svg class="i" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span>Downloads</span><kbd>Ctrl+J</kbd></button>
+        <div class="rule"></div>
+        <button class="item" onclick="post('OpenDevTools')"><svg class="i" viewBox="0 0 24 24"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"/></svg><span>Developer tools</span><kbd>F12</kbd></button>
+        <button class="item" onclick="post('OpenSettings')"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg><span>Settings</span></button>
+      </div>
+      <div class="note">
+        <strong>Your browsing data</strong>
+        Shoji remembers logins, history and cache like a normal browser. Turn on Private mode in Settings to forget everything when it closes.
+      </div>
+    </section>
+
+    <section class="view" id="view-security">
+      <div class="note" id="secNote"><strong id="secTitle"></strong><span id="secDesc"></span></div>
+      <div class="card" id="certCard">
+        <div class="row"><span>Site</span><span id="pHost"></span></div>
+        <div class="row"><span>Issued to</span><span id="pSubject"></span></div>
+        <div class="row"><span>Issued by</span><span id="pIssuer"></span></div>
+        <div class="row"><span>Valid</span><span id="pValid"></span></div>
+        <div class="row"><span>Signature</span><span id="pAlg"></span></div>
+        <div class="row"><span>Thumbprint</span><span class="mono" id="pThumb"></span></div>
+      </div>
+      <button class="wide-btn" id="certBtn" onclick="post('OpenCertificateDialog', { host: currentHost })">View certificate</button>
+      <div class="card">
+        <div class="row"><span>Cookies &amp; storage</span><span id="pStorage"></span></div>
+      </div>
+    </section>
+
+    <section class="view" id="view-shield">
+      <div class="card" style="padding:14px">
+        <div class="sub" id="shHost"></div>
+        <div class="big" id="shCount">0</div>
+        <div class="sub">blocked on this page · <span id="shWeek">0</span> this week</div>
+      </div>
+      <div class="card">
+        <div class="switch-row"><span>Shield on this site</span><button class="sw" id="shSwitch" role="switch" aria-checked="true" aria-label="Shield on this site"></button></div>
+        <div class="row"><span>Ads and trackers</span><span id="shBlocked">0</span></div>
+        <div class="row"><span>Scripts replaced or cleaned</span><span id="shReplaced">0</span></div>
+      </div>
+      <div class="group">
+        <button class="item" onclick="post('ShieldPickElement')"><svg class="i" viewBox="0 0 24 24"><path d="M5 5l6 14 2-6 6-2z"/></svg><span>Hide an element…</span></button>
+        <button class="item" onclick="post('CreateTab', { url: 'shoji://byobu' })"><svg class="i" viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h9"/></svg><span>See what was blocked</span></button>
+        <button class="item" onclick="post('OpenSettings')"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg><span>Filter lists and settings</span></button>
+      </div>
+      <div class="note" id="shNote" hidden></div>
+    </section>
+
+    <section class="view" id="view-downloads">
+      <div id="dlList"><div class="empty">No downloads this session</div></div>
+    </section>
+  </main>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    let currentHost = '';
+    function post(action, payload = null) {
+      if (window.ipc) window.ipc.postMessage(JSON.stringify({ action, payload }));
+    }
+    function show(mode) {
+      for (const m of ['menu', 'security', 'shield', 'downloads']) {
+        $('tab-' + m).classList.toggle('active', m === mode);
+        $('view-' + m).classList.toggle('active', m === mode);
+      }
+    }
+    const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    addEventListener('keydown', e => { if (e.key === 'Escape') post('CloseSidebar'); });
+    window.__applyTheme = t => { const r = document.documentElement; r.dataset.accent = t.accent; if (t.mode) r.dataset.mode = t.mode; if (t.fonts) r.dataset.fonts = t.fonts; };
+    let shieldHost = '', shieldPaused = [], shieldState = 'on';
+    window.__shieldPanel = (d, paused) => {
+      shieldHost = d.host; shieldPaused = paused || []; shieldState = d.state;
+      $('shHost').textContent = d.host || 'This page';
+      $('shCount').textContent = d.blocked + d.replaced;
+      $('shBlocked').textContent = d.blocked;
+      $('shReplaced').textContent = d.replaced;
+      $('shWeek').textContent = Number(d.week).toLocaleString();
+      $('shSwitch').setAttribute('aria-checked', String(d.state === 'on'));
+      $('shSwitch').disabled = d.state === 'off' || d.state === 'none';
+      const note = $('shNote');
+      note.hidden = d.state !== 'off' && d.ready;
+      note.textContent = d.state === 'off' ? 'Byōbu is turned off in Settings.' : 'Loading filter lists…';
+    };
+    $('shSwitch').onclick = () => {
+      if (!shieldHost) return;
+      const bare = shieldHost.replace(/^www\./, '');
+      const list = shieldPaused.filter(p => p !== bare && p !== shieldHost);
+      if (shieldState === 'on') list.push(bare);
+      post('SaveSettings', { patch: { shield: { paused_sites: list } } });
+    };
+    window.__syncZoom = f => { $('zoomVal').textContent = Math.round(f * 100) + '%'; };
+
+    window.__sidebarSync = function (msg) {
+      const data = msg && (msg.data || msg);
+      if (!data) return;
+      if (data.mode) show(data.mode);
+      const s = data.security_info;
+      if (!s) return;
+      currentHost = s.host;
+      const note = $('secNote');
+      note.className = 'note' + (!s.is_secure && !s.is_internal ? ' warn' : '');
+      if (s.is_internal) {
+        $('secTitle').textContent = 'Shoji page';
+        $('secDesc').textContent = 'This page is part of the browser and never touches the network.';
+      } else if (s.is_secure) {
+        $('secTitle').textContent = 'Connection is secure';
+        $('secDesc').textContent = 'Information you send to this site is encrypted in transit.';
+      } else {
+        $('secTitle').textContent = 'Connection is not secure';
+        $('secDesc').textContent = 'Avoid entering passwords or payment details — this connection can be read or altered.';
+      }
+      const showCert = s.is_secure && !s.is_internal;
+      $('certCard').hidden = !showCert;
+      $('certBtn').hidden = !showCert;
+      const pending = s.has_certificate ? '' : '…';
+      $('pHost').textContent = s.host;
+      $('pSubject').textContent = s.subject || pending;
+      $('pIssuer').textContent = s.issuer || pending;
+      $('pValid').textContent = s.valid_from ? `${s.valid_from} → ${s.valid_to}` : pending;
+      $('pAlg').textContent = s.signature_algorithm || pending;
+      $('pThumb').textContent = s.thumbprint || pending;
+      $('pStorage').textContent = s.is_internal ? '—' : (s.is_persistent ? 'Kept across sessions' : 'Cleared on exit');
+    };
+
+    const downloads = new Map();
+    window.__syncDownloads = function (d) {
+      downloads.set(d.download_id, d);
+      renderDownloads();
+    };
+    function renderDownloads() {
+      if (!downloads.size) { $('dlList').innerHTML = '<div class="empty">No downloads this session</div>'; return; }
+      const mb = b => (Math.max(b, 0) / 1048576).toFixed(1);
+      $('dlList').innerHTML = [...downloads.values()].reverse().map(d => {
+        const done = d.state === 'Completed';
+        const failed = d.state === 'Interrupted';
+        const pct = done ? 100 : (d.total_bytes > 0 ? Math.min(100, Math.round(d.received_bytes / d.total_bytes * 100)) : 0);
+        const status = done ? 'Done' : failed ? 'Stopped' : `${pct}%`;
+        const action = !done && !failed ? `<button onclick="post('CancelDownload', { download_id: ${Number(d.download_id)} })">Cancel</button>` : '';
+        return `<div class="dl"><div class="dl-top"><span class="dl-name" title="${esc(d.filename)}">${esc(d.filename)}</span>` +
+          `<span class="dl-size">${mb(d.received_bytes)} / ${mb(d.total_bytes)} MB</span></div>` +
+          `<div class="bar"><div style="width:${pct}%"></div></div><div class="dl-foot"><span>${status}</span>${action}</div></div>`;
+      }).join('');
+    }
+  </script>
+</body>
+</html>
