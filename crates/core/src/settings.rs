@@ -108,6 +108,8 @@ pub struct PerformanceSettings {
     /// Keep running in the notification area after the last window closes, so the shield's
     /// filter lists keep updating. Ignored in Private mode.
     pub run_in_background: bool,
+    /// Download new Shoji releases and install them while no window is open
+    pub auto_update: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -194,6 +196,7 @@ impl Default for PerformanceSettings {
         Self {
             sleep_after_secs: 300,
             run_in_background: true,
+            auto_update: true,
         }
     }
 }

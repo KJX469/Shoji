@@ -240,22 +240,56 @@ impl ApplicationHandler<InstallerEvent> for InstallerApp {
 }
 
 fn install(desktop: bool, start_menu: bool, proxy: EventLoopProxy<InstallerEvent>) {
-    let progress = |pct, text| {
+    let result = install_files(desktop, start_menu, false, &|pct, text| {
         let _ = proxy.send_event(InstallerEvent::Progress(pct, text));
-    };
-    let fail = |text: String| {
-        let _ = proxy.send_event(InstallerEvent::InstallFailed(text));
-    };
+    });
+    let _ = proxy.send_event(match result {
+        Ok(()) => InstallerEvent::InstallComplete,
+        Err(text) => InstallerEvent::InstallFailed(text),
+    });
+}
+
+/// `ShojiSetup.exe --update`: the browser starts this (from its tray) after downloading a newer
+/// installer. No window. Replaces the files and registration, leaves shortcuts alone, and starts
+/// the new version in the tray. Shoji is started again even if replacing failed.
+fn run_update() -> ! {
+    let ok = install_files(false, false, true, &|_, _| {}).is_ok();
+    let exe = install_dir().join(EXE_NAME);
+    if exe.exists() {
+        let mut cmd = Command::new(exe);
+        cmd.arg("--background");
+        #[cfg(windows)]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        let _ = cmd.spawn();
+    }
+    std::process::exit(if ok { 0 } else { 1 });
+}
+
+/// Copy Shoji into place and register it. With `update`, existing shortcuts are left as they
+/// are (they already point at the install folder).
+fn install_files(
+    desktop: bool,
+    start_menu: bool,
+    update: bool,
+    progress: &dyn Fn(u32, &'static str),
+) -> Result<(), String> {
     let dir = install_dir();
     progress(5, "Closing Shoji");
     close_running_copy(&dir.join(EXE_NAME));
     progress(10, "Copying files");
-    if let Err(e) = std::fs::create_dir_all(&dir) {
-        return fail(format!("Couldn't create {}: {e}", dir.display()));
-    }
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Couldn't create {}: {e}", dir.display()))?;
     let exe = dir.join(EXE_NAME);
-    if let Err(e) = std::fs::write(&exe, BROWSER_PAYLOAD) {
-        return fail(format!(
+    // The old copy may take a moment to exit and release the file.
+    let mut last = Ok(());
+    for _ in 0..20 {
+        last = std::fs::write(&exe, BROWSER_PAYLOAD);
+        if last.is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    if let Err(e) = last {
+        return Err(format!(
             "Couldn't write {EXE_NAME} ({e}). If Shoji is open, close it and try again."
         ));
     }
@@ -269,8 +303,11 @@ fn install(desktop: bool, start_menu: bool, proxy: EventLoopProxy<InstallerEvent
     {
         shoji_core::shell::init_com();
         let wanted = [
-            (desktop, shoji_core::shell::desktop_shortcut()),
-            (start_menu, shoji_core::shell::start_menu_shortcut()),
+            (desktop && !update, shoji_core::shell::desktop_shortcut()),
+            (
+                start_menu && !update,
+                shoji_core::shell::start_menu_shortcut(),
+            ),
         ];
         for (_, lnk) in wanted.iter().filter(|(on, _)| *on) {
             if let Some(lnk) = lnk {
@@ -294,7 +331,7 @@ fn install(desktop: bool, start_menu: bool, proxy: EventLoopProxy<InstallerEvent
         );
     }
     progress(100, "Done");
-    let _ = proxy.send_event(InstallerEvent::InstallComplete);
+    Ok(())
 }
 
 /// Delete a folder, retrying briefly: the engine's helper processes can outlive the browser
@@ -382,6 +419,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         std::process::exit(1);
+    }
+
+    if !is_uninstall && std::env::args().any(|a| a == "--update") {
+        run_update();
     }
 
     let event_loop = EventLoop::<InstallerEvent>::with_user_event().build()?;
