@@ -7,9 +7,17 @@ All notable changes to Shoji are recorded here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Runs in the tray.** Closing the last window keeps Shoji running in the notification area
+  (Open / Quit menu) so Byōbu's filter lists keep updating. Turn it off under Settings →
+  Performance. Private mode always quits.
+- **One copy per install.** Starting Shoji again opens a window in the running copy instead of a
+  second process. The installer and uninstaller ask a running copy to quit (`--quit`) first.
 - A red **Uninstall Shoji** button under Settings → Danger zone. After a warning that notes,
   logins and everything else will be erased, and typing `UNINSTALL`, it removes the app, its
   shortcuts, its Windows registration, and all settings and profile data.
+
+### Changed
+- Byōbu checks every filter list at launch and then every hour, instead of every 6–12 hours.
 
 ## [0.1.0] - 2026-10-12
 

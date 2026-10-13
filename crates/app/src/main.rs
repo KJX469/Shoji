@@ -6,6 +6,7 @@ mod icons;
 mod keys;
 mod pages;
 mod shield;
+mod tray;
 mod webview;
 mod window;
 
@@ -96,6 +97,8 @@ const LINK_PREVIEW_SCRIPT: &str = r#"(() => {
 
 #[derive(Debug)]
 pub(crate) enum BrowserEvent {
+    /// From the tray icon, or a later launch of Shoji handed to this copy
+    Tray(tray::Action),
     /// From the chrome strip or side panel of a window
     WindowIpc(WindowId, UiToHostMessage),
     /// From a page (already filtered: web content may only send harmless messages)
@@ -738,6 +741,8 @@ struct BrowserApp {
     favourites: shoji_core::userdata::Favourites,
     site_data: shoji_core::userdata::SiteData,
     session_path: PathBuf,
+    /// Instance window and tray icon (None if it could not be created)
+    tray: Option<tray::Tray>,
     /// Tabs from the previous run, waiting for the user's answer (or restored at startup)
     pending_session: Option<shoji_core::userdata::Session>,
     restore_on_start: bool,
@@ -826,6 +831,7 @@ impl BrowserApp {
             favourites,
             site_data,
             session_path,
+            tray: None,
             pending_session,
             restore_on_start,
             session_json: String::new(),
@@ -941,8 +947,65 @@ impl BrowserApp {
         }
         self.windows.remove(&id);
         if self.windows.is_empty() {
-            event_loop.exit();
+            // Keep running in the notification area so Byōbu keeps updating its lists. Private
+            // mode always quits: its in-memory data must not outlive the window.
+            let keep = self.settings.performance.run_in_background
+                && !self.settings.privacy.ephemeral_default;
+            match (&self.tray, keep) {
+                (Some(tray), true) => tray.show(),
+                _ => event_loop.exit(),
+            }
         }
+    }
+
+    /// Bring Shoji back to the front: show a window (restoring the closed session when that
+    /// is the user's choice) and open `url` in it if one was given.
+    fn reopen(&mut self, event_loop: &ActiveEventLoop, url: Option<String>) {
+        let url = url.and_then(|a| {
+            normalize_url(&a, self.settings.search_url_template())
+                .ok()
+                .filter(|_| self.settings.first_run_complete)
+        });
+        if let Some(id) = self.windows.keys().next().copied() {
+            if let Some(w) = self.windows.get(&id) {
+                w.window.set_minimized(false);
+                w.window.set_visible(true);
+                w.window.focus_window();
+            }
+            if url.is_some() {
+                self.create_tab(id, url);
+            }
+            return;
+        }
+        let restore = self.session_enabled() && self.settings.privacy.restore_session == "always";
+        if restore {
+            let previous = shoji_core::userdata::Session::load(&self.session_path);
+            if previous.has_pages() {
+                self.pending_session = Some(previous);
+            }
+        }
+        let restoring = restore && self.pending_session.is_some();
+        self.new_window(event_loop, if restoring { None } else { url.clone() });
+        if let Some(id) = self.windows.keys().next().copied() {
+            if restoring {
+                self.restore_session(id, event_loop);
+                if url.is_some() {
+                    self.create_tab(id, url);
+                }
+            }
+            if let Some(w) = self.windows.get(&id) {
+                w.window.focus_window();
+            }
+        }
+    }
+
+    /// Save the session and leave the event loop (tray menu, or the installer's `--quit`).
+    fn quit(&mut self, event_loop: &ActiveEventLoop) {
+        if !self.windows.is_empty() {
+            self.write_session(true);
+        }
+        self.windows.clear();
+        event_loop.exit();
     }
 
     /* ----- tabs ----- */
@@ -2882,6 +2945,9 @@ impl BrowserApp {
     }
 
     fn new_window(&mut self, event_loop: &ActiveEventLoop, url: Option<String>) {
+        if let Some(t) = &self.tray {
+            t.hide();
+        }
         if let Some(id) = self.create_window(event_loop) {
             self.create_tab(id, url);
             if let Some(win) = self.windows.get(&id) {
@@ -3137,6 +3203,8 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: BrowserEvent) {
         match event {
+            BrowserEvent::Tray(tray::Action::Open(url)) => self.reopen(event_loop, url),
+            BrowserEvent::Tray(tray::Action::Quit) => self.quit(event_loop),
             BrowserEvent::WindowIpc(win_id, msg) => self.handle_ipc(win_id, None, msg, event_loop),
             BrowserEvent::TabIpc(tab_id, msg) => {
                 if let Some(win_id) = self.owner(tab_id) {
@@ -3613,6 +3681,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    // One running copy per install: a later launch opens a window in it (or quits it, for
+    // `--quit`, which the installer uses) and exits.
+    let instance = tray::instance_name();
+    let quit_requested = args.iter().any(|a| a == "--quit");
+    if !tray::claim_instance(&instance) {
+        let url = args.iter().skip(1).find(|a| !a.starts_with('-'));
+        tray::forward_launch(&instance, quit_requested, url.map(String::as_str));
+        return Ok(());
+    }
+    if quit_requested {
+        return Ok(()); // nothing was running
+    }
+
     let data_dir = shoji_core::env::resolve_data_directory(&exe_dir);
     let webview_data = shoji_core::env::resolve_profile_directory(&data_dir);
     // Private mode with nothing on the keep list: drop anything remembered from before it was
@@ -3644,6 +3725,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let event_loop = EventLoop::<BrowserEvent>::with_user_event().build()?;
     let mut app = BrowserApp::new(event_loop.create_proxy(), data_dir, engine_version);
+    app.tray = tray::Tray::start(event_loop.create_proxy(), &instance);
     event_loop.run_app(&mut app)?;
     Ok(())
 }
