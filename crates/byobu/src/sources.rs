@@ -28,7 +28,7 @@ pub const RESOURCES_URL: &str =
 /// `byobu-resources` workflow (uBO ships them as ES modules, so there is no file to download
 /// from upstream). Kept out of the browser binary because uBlock Origin is GPLv3.
 pub const UBO_RESOURCES_URL: &str =
-    "https://github.com/KJX469/shoji/releases/download/byobu-data/ubo-resources.json";
+    "https://github.com/KJX469/Shoji/releases/download/byobu-data/ubo-resources.json";
 
 /// Brave's list catalog; its default-enabled lists are followed automatically.
 pub const CATALOG_URL: &str =
