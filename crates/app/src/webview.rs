@@ -572,6 +572,80 @@ pub fn pick_folder(start: &std::path::Path) -> Option<PathBuf> {
     }
 }
 
+/// File picker for a bookmarks export (`.html`).
+pub fn pick_html_file() -> Option<PathBuf> {
+    use windows::core::{w, HSTRING};
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
+    use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
+    use windows::Win32::UI::Shell::{FileOpenDialog, IFileOpenDialog, SIGDN_FILESYSPATH};
+    unsafe {
+        let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL).ok()?;
+        let filters = [
+            COMDLG_FILTERSPEC {
+                pszName: w!("Bookmarks (*.html;*.htm)"),
+                pszSpec: w!("*.html;*.htm"),
+            },
+            COMDLG_FILTERSPEC {
+                pszName: w!("All files"),
+                pszSpec: w!("*.*"),
+            },
+        ];
+        let _ = dialog.SetFileTypes(&filters);
+        let _ = dialog.SetTitle(&HSTRING::from("Choose a bookmarks file"));
+        dialog.Show(None).ok()?;
+        let path = dialog
+            .GetResult()
+            .ok()?
+            .GetDisplayName(SIGDN_FILESYSPATH)
+            .ok()?;
+        Some(PathBuf::from(take(path)))
+    }
+}
+
+/// Put cookies read from another browser into the engine's profile (shared by every persistent
+/// tab). Returns how many were accepted.
+pub fn add_cookies(webview: &WebView, cookies: &[shoji_core::import::Cookie]) -> usize {
+    use windows::core::HSTRING;
+    let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
+        return 0;
+    };
+    let Ok(core2) = core.cast::<ICoreWebView2_2>() else {
+        return 0;
+    };
+    let Ok(manager) = (unsafe { core2.CookieManager() }) else {
+        return 0;
+    };
+    let mut added = 0;
+    for c in cookies {
+        let Ok(cookie) = (unsafe {
+            manager.CreateCookie(
+                &HSTRING::from(c.name.as_str()),
+                &HSTRING::from(c.value.as_str()),
+                &HSTRING::from(c.host.as_str()),
+                &HSTRING::from(c.path.as_str()),
+            )
+        }) else {
+            continue;
+        };
+        unsafe {
+            if let Some(exp) = c.expires {
+                let _ = cookie.SetExpires(exp as f64);
+            }
+            let _ = cookie.SetIsHttpOnly(c.http_only);
+            let _ = cookie.SetIsSecure(c.secure);
+            let _ = cookie.SetSameSite(match c.same_site {
+                "strict" => COREWEBVIEW2_COOKIE_SAME_SITE_KIND_STRICT,
+                "none" => COREWEBVIEW2_COOKIE_SAME_SITE_KIND_NONE,
+                _ => COREWEBVIEW2_COOKIE_SAME_SITE_KIND_LAX,
+            });
+            if manager.AddOrUpdateCookie(&cookie).is_ok() {
+                added += 1;
+            }
+        }
+    }
+    added
+}
+
 /* ---------- Engine settings, focus, failed navigations, DevTools protocol ---------- */
 
 /// Password saving / autofill (off in private mode) and the tracking-prevention level.

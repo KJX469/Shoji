@@ -10,6 +10,10 @@ use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoTaskMemFree, IPersistFile, CLSCTX_INPROC_SERVER,
     COINIT_APARTMENTTHREADED, STGM_READWRITE,
 };
+use windows::Win32::System::Registry::{
+    RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegSetValueExW, HKEY, HKEY_CURRENT_USER,
+    KEY_WRITE, REG_OPTION_NON_VOLATILE, REG_SZ,
+};
 use windows::Win32::UI::Shell::{
     FOLDERID_Desktop, IShellLinkW, SHChangeNotify, SHGetKnownFolderPath, ShellLink,
     KF_FLAG_DEFAULT, SHCNE_ASSOCCHANGED, SHCNF_IDLIST,
@@ -112,6 +116,121 @@ pub fn all_shortcuts() -> Vec<PathBuf> {
 /// Ask Explorer to refresh cached icons.
 pub fn notify_icons_changed() {
     unsafe { SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None) };
+}
+
+/* ------------------------------------------------- registration as a web browser */
+
+/// ProgID Windows records when Shoji is the default for http and https.
+pub const URL_PROG_ID: &str = "ShojiURL";
+/// The name under which Shoji appears in Windows' default apps list.
+pub const REGISTERED_APP: &str = "Shoji";
+const CLIENT_KEY: &str = r"Software\Clients\StartMenuInternet\Shoji";
+const REGISTERED_APPS_KEY: &str = r"Software\RegisteredApplications";
+
+fn wide_bytes(s: &str) -> Vec<u8> {
+    s.encode_utf16()
+        .chain(Some(0))
+        .flat_map(|u| u.to_le_bytes())
+        .collect()
+}
+
+/// Set `name` (empty for the key's default value) under `HKCU\key`, creating the key.
+fn set_value(key: &str, name: &str, value: &str) -> windows::core::Result<()> {
+    unsafe {
+        let mut hkey = HKEY::default();
+        RegCreateKeyExW(
+            HKEY_CURRENT_USER,
+            &HSTRING::from(key),
+            None,
+            None,
+            REG_OPTION_NON_VOLATILE,
+            KEY_WRITE,
+            None,
+            &mut hkey,
+            None,
+        )
+        .ok()?;
+        let result = RegSetValueExW(
+            hkey,
+            &HSTRING::from(name),
+            None,
+            REG_SZ,
+            Some(&wide_bytes(value)),
+        )
+        .ok();
+        let _ = RegCloseKey(hkey);
+        result
+    }
+}
+
+/// Whether `exe` is the installed copy (`%LOCALAPPDATA%\Programs\Shoji`). Only that copy
+/// registers itself, so a build run from a source folder never becomes the default.
+pub fn is_installed_copy(exe: &Path) -> bool {
+    let Some(local) = std::env::var_os("LOCALAPPDATA") else {
+        return false;
+    };
+    let dir = PathBuf::from(local).join("Programs").join(crate::APP_NAME);
+    exe.parent().is_some_and(|p| {
+        p.to_string_lossy()
+            .eq_ignore_ascii_case(&dir.to_string_lossy())
+    })
+}
+
+/// Make Shoji appear in Windows' list of web browsers (Settings → Default apps), for the current
+/// user only. Safe to run again: it rewrites the same values. Windows decides what is the default;
+/// this only makes Shoji a choice.
+pub fn register_as_browser(exe: &Path) -> windows::core::Result<()> {
+    let exe = exe.to_string_lossy();
+    let open = format!("\"{exe}\" \"%1\"");
+    let icon = format!("{exe},0");
+    let caps = format!(r"{CLIENT_KEY}\Capabilities");
+
+    let class = format!(r"Software\Classes\{URL_PROG_ID}");
+    set_value(&class, "", "Shoji URL")?;
+    set_value(&class, "URL Protocol", "")?;
+    set_value(&format!(r"{class}\DefaultIcon"), "", &icon)?;
+    set_value(&format!(r"{class}\shell\open\command"), "", &open)?;
+
+    set_value(CLIENT_KEY, "", crate::APP_NAME)?;
+    set_value(&format!(r"{CLIENT_KEY}\DefaultIcon"), "", &icon)?;
+    set_value(
+        &format!(r"{CLIENT_KEY}\shell\open\command"),
+        "",
+        &format!("\"{exe}\""),
+    )?;
+    set_value(&caps, "ApplicationName", crate::APP_NAME)?;
+    set_value(
+        &caps,
+        "ApplicationDescription",
+        "A paper-thin, privacy-first browser",
+    )?;
+    set_value(&caps, "ApplicationIcon", &icon)?;
+    for scheme in ["http", "https"] {
+        set_value(&format!(r"{caps}\URLAssociations"), scheme, URL_PROG_ID)?;
+    }
+    set_value(
+        REGISTERED_APPS_KEY,
+        REGISTERED_APP,
+        &caps,
+    )
+}
+
+/// Undo [`register_as_browser`] (uninstall).
+pub fn unregister_browser() {
+    use windows::Win32::System::Registry::RegDeleteKeyValueW;
+    unsafe {
+        for key in [
+            format!(r"Software\Classes\{URL_PROG_ID}"),
+            CLIENT_KEY.to_string(),
+        ] {
+            let _ = RegDeleteTreeW(HKEY_CURRENT_USER, &HSTRING::from(key));
+        }
+        let _ = RegDeleteKeyValueW(
+            HKEY_CURRENT_USER,
+            &HSTRING::from(REGISTERED_APPS_KEY),
+            &HSTRING::from(REGISTERED_APP),
+        );
+    }
 }
 
 #[cfg(test)]

@@ -143,6 +143,34 @@ pub enum UiToHostMessage {
     },
     /// Close the first-run welcome page and start browsing
     FinishWelcome,
+    /// Import: the browsers that can be imported from, and which of them are installed
+    ListImportSources,
+    /// Read data from `source` (a catalogue id). `profile` indexes that source's profiles;
+    /// `path` is the file or folder the user picked for sources without a fixed location.
+    StartImport {
+        source: String,
+        #[serde(default)]
+        profile: usize,
+        #[serde(default)]
+        path: Option<String>,
+        #[serde(default)]
+        kinds: crate::import::Kinds,
+    },
+    /// Let the user pick a bookmarks file or profile folder for `source`
+    PickImportSource {
+        source: String,
+    },
+    /// Is Shoji the default browser? Answered with `__defaultBrowser(bool)` on the page.
+    CheckDefaultBrowser,
+    /// Open Windows' default apps settings on Shoji
+    SetDefaultBrowser,
+    /// Address-bar suggestions from history; answered with `__historyResults(seq, items)`
+    SearchHistory {
+        query: String,
+        seq: u64,
+    },
+    /// Forget all browsing history kept by Shoji
+    ClearHistory,
     /// Favourites
     ToggleFavourite,
     AddFavourite {

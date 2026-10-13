@@ -20,6 +20,7 @@ Rust crates resolved in [Cargo.lock](Cargo.lock), including:
 | [winit](https://github.com/rust-windowing/winit), [wry](https://github.com/tauri-apps/wry) | Apache-2.0 / MIT |
 | [windows](https://github.com/microsoft/windows-rs), webview2-com | MIT / Apache-2.0 |
 | [ureq](https://github.com/algesten/ureq), rustls | MIT / Apache-2.0 (rustls also ISC) |
+| [rusqlite](https://github.com/rusqlite/rusqlite) with bundled [SQLite](https://sqlite.org) (reads other browsers' data on import) | MIT; SQLite is public domain |
 | serde, serde_json and the other dependencies | MIT and/or Apache-2.0 |
 
 Run `cargo tree` for the full list. The MPL-2.0 source for `adblock` is available from its

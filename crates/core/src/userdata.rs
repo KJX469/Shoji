@@ -32,7 +32,7 @@ pub struct Favourite {
 }
 
 /// Cap so a runaway script can't grow the file without bound.
-const MAX_FAVOURITES: usize = 500;
+const MAX_FAVOURITES: usize = 5000;
 
 fn same_page(a: &str, b: &str) -> bool {
     a.trim_end_matches('/') == b.trim_end_matches('/')
@@ -87,6 +87,27 @@ impl Favourites {
         changed
     }
 
+    /// Add many at once (an import), saving once. Returns how many were new.
+    pub fn add_many(&mut self, list: &[Favourite]) -> usize {
+        let before = self.items.len();
+        for f in list {
+            let ok = f.url.starts_with("https://") || f.url.starts_with("http://");
+            if !ok || self.contains(&f.url) || self.items.len() >= MAX_FAVOURITES {
+                continue;
+            }
+            let title: String = f.title.trim().chars().take(120).collect();
+            self.items.push(Favourite {
+                url: f.url.clone(),
+                title: if title.is_empty() { f.url.clone() } else { title },
+            });
+        }
+        let added = self.items.len() - before;
+        if added > 0 {
+            self.save();
+        }
+        added
+    }
+
     /// Add if missing, remove if present. Returns true when it is now a favourite.
     pub fn toggle(&mut self, url: &str, title: &str) -> bool {
         if self.contains(url) {
@@ -99,6 +120,158 @@ impl Favourites {
 
     fn save(&self) {
         if let Ok(json) = serde_json::to_string_pretty(&self.items) {
+            let _ = write_atomic(&self.path, &json);
+        }
+    }
+}
+
+/* --------------------------------------------------------------- history */
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    pub url: String,
+    pub title: String,
+    pub visits: u32,
+    /// Unix milliseconds
+    pub last_visit: u64,
+}
+
+/// Cap so the file (read at startup) stays small.
+pub const MAX_HISTORY: usize = 50_000;
+
+/// Pages the user visited, newest first once saved. Feeds address-bar suggestions and the
+/// history list. Visits are batched in memory and written by [`History::flush`].
+#[derive(Debug, Default)]
+pub struct History {
+    path: PathBuf,
+    items: Vec<HistoryEntry>,
+    dirty: bool,
+}
+
+impl History {
+    pub fn load(path: PathBuf) -> Self {
+        let items: Vec<HistoryEntry> = read_json(&path);
+        Self {
+            path,
+            items,
+            dirty: false,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    pub fn items(&self) -> &[HistoryEntry] {
+        &self.items
+    }
+
+    /// Note a visit. Only web pages count.
+    pub fn record(&mut self, url: &str, title: &str, now_ms: u64) {
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            return;
+        }
+        let title: String = title.trim().chars().take(120).collect();
+        if let Some(e) = self.items.iter_mut().find(|e| e.url == url) {
+            e.visits = e.visits.saturating_add(1);
+            e.last_visit = now_ms;
+            if !title.is_empty() {
+                e.title = title;
+            }
+        } else {
+            self.items.push(HistoryEntry {
+                url: url.to_string(),
+                title,
+                visits: 1,
+                last_visit: now_ms,
+            });
+        }
+        self.dirty = true;
+    }
+
+    /// Fill in the title of a page just visited, without counting another visit.
+    pub fn set_title(&mut self, url: &str, title: &str) {
+        let title: String = title.trim().chars().take(120).collect();
+        if title.is_empty() {
+            return;
+        }
+        if let Some(e) = self.items.iter_mut().rev().take(50).find(|e| e.url == url) {
+            if e.title != title {
+                e.title = title;
+                self.dirty = true;
+            }
+        }
+    }
+
+    /// Merge an import: known pages keep the larger visit count and later time. Returns how many
+    /// pages were new.
+    pub fn merge(&mut self, list: Vec<HistoryEntry>) -> usize {
+        let mut known: std::collections::HashMap<String, usize> = self
+            .items
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e.url.clone(), i))
+            .collect();
+        let mut added = 0;
+        for h in list {
+            match known.get(&h.url) {
+                Some(&i) => {
+                    let e = &mut self.items[i];
+                    e.visits = e.visits.max(h.visits);
+                    e.last_visit = e.last_visit.max(h.last_visit);
+                    if e.title.is_empty() {
+                        e.title = h.title;
+                    }
+                }
+                None => {
+                    known.insert(h.url.clone(), self.items.len());
+                    self.items.push(h);
+                    added += 1;
+                }
+            }
+        }
+        self.dirty = true;
+        self.flush();
+        added
+    }
+
+    /// Entries matching every word of `query` in title or address: most recent first.
+    pub fn search(&self, query: &str, limit: usize) -> Vec<&HistoryEntry> {
+        let words: Vec<String> = query.to_lowercase().split_whitespace().map(String::from).collect();
+        let mut hits: Vec<&HistoryEntry> = self
+            .items
+            .iter()
+            .filter(|e| {
+                let hay = format!("{} {}", e.title, e.url).to_lowercase();
+                words.iter().all(|w| hay.contains(w))
+            })
+            .collect();
+        hits.sort_by(|a, b| (b.visits.min(20), b.last_visit).cmp(&(a.visits.min(20), a.last_visit)));
+        hits.truncate(limit);
+        hits
+    }
+
+    pub fn clear(&mut self) {
+        self.items.clear();
+        self.dirty = true;
+        self.flush();
+    }
+
+    /// Write to disk if anything changed, keeping the newest [`MAX_HISTORY`].
+    pub fn flush(&mut self) {
+        if !self.dirty {
+            return;
+        }
+        self.dirty = false;
+        if self.items.len() > MAX_HISTORY {
+            self.items.sort_by(|a, b| b.last_visit.cmp(&a.last_visit));
+            self.items.truncate(MAX_HISTORY);
+        }
+        if let Ok(json) = serde_json::to_string(&self.items) {
             let _ = write_atomic(&self.path, &json);
         }
     }
@@ -261,4 +434,68 @@ fn read_json_or<T: for<'de> Deserialize<'de>>(path: &Path, default: impl FnOnce(
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_else(default)
+}
+
+#[cfg(test)]
+mod history_tests {
+    use super::*;
+
+    fn path(n: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("shoji_hist_{}_{n}.json", std::process::id()))
+    }
+
+    #[test]
+    fn records_merges_and_searches() {
+        let p = path("a");
+        let _ = std::fs::remove_file(&p);
+        let mut h = History::load(p.clone());
+        h.record("https://rust-lang.org/", "Rust", 10);
+        h.record("https://rust-lang.org/", "", 20);
+        h.record("shoji://newtab", "New tab", 30);
+        assert_eq!(h.len(), 1);
+        assert_eq!((h.items()[0].visits, h.items()[0].last_visit), (2, 20));
+        let added = h.merge(vec![
+            HistoryEntry { url: "https://rust-lang.org/".into(), title: "x".into(), visits: 9, last_visit: 5 },
+            HistoryEntry { url: "https://example.com/".into(), title: "Example".into(), visits: 1, last_visit: 50 },
+        ]);
+        assert_eq!(added, 1);
+        assert_eq!(h.items()[0].visits, 9);
+        assert_eq!(h.items()[0].last_visit, 20);
+        assert_eq!(h.search("rust lang", 5).len(), 1);
+        assert!(h.search("nothing", 5).is_empty());
+        // merge() saved it
+        assert_eq!(History::load(p.clone()).len(), 2);
+        h.clear();
+        assert!(History::load(p.clone()).is_empty());
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn keeps_only_the_newest_when_over_the_cap() {
+        let p = path("b");
+        let mut h = History::load(p.clone());
+        let list: Vec<_> = (0..MAX_HISTORY as u64 + 10)
+            .map(|i| HistoryEntry { url: format!("https://x.test/{i}"), title: String::new(), visits: 1, last_visit: i })
+            .collect();
+        h.merge(list);
+        assert_eq!(h.len(), MAX_HISTORY);
+        assert!(h.items().iter().all(|e| e.last_visit >= 10));
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn favourites_add_many_skips_duplicates_and_junk() {
+        let p = path("fav");
+        let _ = std::fs::remove_file(&p);
+        let mut f = Favourites::load(p.clone());
+        let n = f.add_many(&[
+            Favourite { url: "https://a.com".into(), title: "A".into() },
+            Favourite { url: "https://a.com/".into(), title: "dup".into() },
+            Favourite { url: "ftp://x".into(), title: "no".into() },
+            Favourite { url: "http://b.com".into(), title: "".into() },
+        ]);
+        assert_eq!(n, 2);
+        assert_eq!(f.items()[1].title, "http://b.com");
+        let _ = std::fs::remove_file(&p);
+    }
 }
