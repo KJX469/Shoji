@@ -30,5 +30,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $v = "${{ github.ref_name }}".TrimStart('v')
+          $notes = (Get-Content CHANGELOG.md -Raw) -split '(?m)^## ' |
+            Where-Object { $_.StartsWith("[$v]") } | Select-Object -First 1
+          if (-not $notes) { $notes = "Release $v" }
+          ($notes -replace '(?s)^[^\n]*\n', '').Trim() | Set-Content -Encoding utf8 notes.md
           gh release create "${{ github.ref_name }}" dist/ShojiSetup.exe dist/ShojiSetup.exe.sha256 `
-            --title "Shoji ${{ github.ref_name }}" --generate-notes
+            --title "Shoji ${{ github.ref_name }}" --notes-file notes.md
