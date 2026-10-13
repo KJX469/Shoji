@@ -10,3 +10,5 @@
 - The app is Windows-only; only the portable crates can be tested on Linux.
 - **Git identity:** commit and push as the user (`KJX469`), never as Claude: no Claude author and no
   Co-Authored-By/attribution trailers. If pushing as the user isn't possible, don't push.
+- **Authorship:** never add any `Co-authored-by`/`Co-Authored-By` line, naming anyone (including the user),
+  and never imply the user didn't write the work. One author: `KJX469`.
