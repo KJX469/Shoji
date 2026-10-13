@@ -4,7 +4,13 @@ All notable changes to Shoji are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.2.0] - 2026-10-13
+
+### Added
+- **Clean links.** Tracker redirects (Google, Facebook, Reddit, YouTube and others) are skipped and
+  tracking parameters (`utm_*`, `fbclid`, `gclid`, ...) are removed before a page loads.
+- **Global Privacy Control.** Every request carries `Sec-GPC: 1`.
+- Both are on by default, with switches under Settings → Privacy.
 
 ### Fixed
 - Version number now matches the release, so the updater no longer re-offers the current build.

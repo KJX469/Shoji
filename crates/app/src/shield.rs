@@ -8,6 +8,7 @@ use shoji_core::settings::ShieldSettings;
 use shoji_core::tabs::TabId;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
@@ -321,8 +322,13 @@ pub fn init(proxy: EventLoopProxy<BrowserEvent>) {
     }
 }
 
+static CLEAN_LINKS: AtomicBool = AtomicBool::new(true);
+static SEND_GPC: AtomicBool = AtomicBool::new(true);
+
 /// Apply the user's shield settings (custom lists, disabled lists, own rules).
 pub fn apply_settings(s: &ShieldSettings) {
+    CLEAN_LINKS.store(s.clean_links, Ordering::Relaxed);
+    SEND_GPC.store(s.send_gpc, Ordering::Relaxed);
     let new = Config {
         custom: s.custom_lists.clone(),
         disabled: s.disabled_lists.clone(),
@@ -563,6 +569,12 @@ pub fn attach(webview: &WebView, shield: Shield, mode_for: ModeFor, tab_id: TabI
             {
                 return Ok(());
             }
+            if SEND_GPC.load(Ordering::Relaxed) {
+                if let Ok(headers) = unsafe { request.Headers() } {
+                    let (name, value) = (wide("Sec-GPC"), wide("1"));
+                    let _ = unsafe { headers.SetHeader(PCWSTR(name.as_ptr()), PCWSTR(value.as_ptr())) };
+                }
+            }
             let mut ctx = COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL;
             unsafe { args.ResourceContext(&mut ctx)? };
             let mut kind = kind_of(ctx);
@@ -700,6 +712,16 @@ pub fn attach(webview: &WebView, shield: Shield, mode_for: ModeFor, tab_id: TabI
             let mut uri = PWSTR::null();
             unsafe { args.Uri(&mut uri)? };
             let url = take(uri);
+            if CLEAN_LINKS.load(Ordering::Relaxed) && mode_for(&url) != Mode::Off {
+                if let Some(clean) = shoji_byobu::links::clean(&url) {
+                    // Cancel and go to the cleaned address; it passes through here again
+                    // and is left alone, since there is nothing more to clean.
+                    unsafe { args.SetCancel(true)? };
+                    let w = wide(&clean);
+                    let _ = unsafe { core_nav.Navigate(PCWSTR(w.as_ptr())) };
+                    return Ok(());
+                }
+            }
             if let Ok(mut t) = top_target.lock() {
                 *t = url.clone();
             }
