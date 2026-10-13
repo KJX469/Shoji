@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shoji — a paper-thin browser for Windows</title>
+<meta name="description" content="Shoji is a small Rust shell around the WebView2 engine Windows already keeps up to date. Quiet, private when you want it, and light enough to forget it's running.">
+<link rel="icon" href="assets/crane/Blue.svg" type="image/svg+xml" id="favicon">
+<meta property="og:title" content="Shoji — a paper-thin browser for Windows">
+<meta property="og:description" content="A ~6 MB browser with a built-in ad shield, dark websites and seven origami cranes.">
+<meta property="og:image" content="https://kjx469.github.io/Shoji/assets/newtab-dark.png">
+<style>
+@font-face{font-family:"Instrument Sans";src:url(assets/fonts/InstrumentSans.woff2) format("woff2");font-weight:400 700;font-display:swap}
+@font-face{font-family:"Newsreader";src:url(assets/fonts/Newsreader.woff2) format("woff2");font-weight:300 800;font-display:swap}
+
+:root{
+  --accent:#397AFF; --accent-hi:#8BB4FF; --accent-deep:#2054D3;
+  --bg:#f2efe8; --frame:#e9e5dc; --card:#fbf9f4; --ink:#1b1a18; --ink-2:#57534b; --ink-3:#8a857b;
+  --line:rgba(27,26,24,.12); --shadow:0 20px 50px -20px rgba(27,26,24,.28);
+  --serif:"Newsreader",Georgia,serif; --sans:"Instrument Sans","Segoe UI",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#1b1a18; --frame:#151413; --card:#232220; --ink:#f2efe8; --ink-2:#b5afa2; --ink-3:#8a857b;
+    --line:rgba(242,239,232,.13); --shadow:0 24px 60px -24px rgba(0,0,0,.8);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#1b1a18; --frame:#151413; --card:#232220; --ink:#f2efe8; --ink-2:#b5afa2; --ink-3:#8a857b;
+  --line:rgba(242,239,232,.13); --shadow:0 24px 60px -24px rgba(0,0,0,.8);
+}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 17px/1.6 var(--sans);-webkit-font-smoothing:antialiased;transition:background .3s}
+a{color:inherit}
+.wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+h1,h2,h3{font-family:var(--serif);font-weight:500;letter-spacing:-.01em;line-height:1.1;margin:0}
+.label{font:600 11.5px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--accent-deep);margin-bottom:14px;display:block}
+:root[data-theme="dark"] .label{color:var(--accent-hi)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .label{color:var(--accent-hi)}}
+
+/* soft colour wash behind everything, tinted by the chosen crane */
+.wash{position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:
+    radial-gradient(60% 50% at 85% -5%,color-mix(in srgb,var(--accent) 22%,transparent),transparent 70%),
+    radial-gradient(50% 40% at 0% 30%,color-mix(in srgb,var(--accent-hi) 16%,transparent),transparent 70%);
+  transition:background .4s}
+
+/* nav */
+nav{position:sticky;top:0;z-index:10;backdrop-filter:blur(14px);background:color-mix(in srgb,var(--bg) 78%,transparent);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;gap:22px;height:60px}
+.brand{display:flex;align-items:center;gap:10px;font:500 22px var(--serif);text-decoration:none}
+.brand img{width:30px;height:30px}
+.brand small{font:400 13px var(--sans);color:var(--ink-3)}
+nav .links{margin-left:auto;display:flex;gap:20px;font-size:14.5px;color:var(--ink-2)}
+nav .links a{text-decoration:none}
+nav .links a:hover{color:var(--ink)}
+@media(max-width:640px){nav .links a:not(.gh){display:none}.brand small{display:none}}
+.btn{display:inline-flex;align-items:center;gap:10px;padding:14px 24px;border-radius:999px;font:600 16px var(--sans);text-decoration:none;
+  background:linear-gradient(135deg,var(--accent-hi),var(--accent));color:#fff;border:0;cursor:pointer;
+  box-shadow:0 10px 28px -10px var(--accent);transition:transform .15s,box-shadow .15s;text-shadow:0 1px 0 rgba(0,0,0,.12)}
+.btn:hover{transform:translateY(-2px);box-shadow:0 16px 34px -10px var(--accent)}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line);box-shadow:none;text-shadow:none}
+.btn.ghost:hover{border-color:var(--accent)}
+.btn svg{width:20px;height:20px}
+
+/* hero */
+.hero{padding:76px 0 30px;text-align:center;position:relative}
+.hero .crane{width:112px;height:112px;margin:0 auto 18px;animation:float 6s ease-in-out infinite;filter:drop-shadow(0 14px 18px color-mix(in srgb,var(--accent) 35%,transparent))}
+@keyframes float{50%{transform:translateY(-10px) rotate(-2deg)}}
+@media (prefers-reduced-motion:reduce){.hero .crane{animation:none}}
+.hero h1{font-size:clamp(44px,8vw,84px);font-weight:400}
+.hero h1 em{font-style:italic;background:linear-gradient(120deg,var(--accent-hi),var(--accent-deep));-webkit-background-clip:text;background-clip:text;color:transparent;padding-right:.06em}
+.hero .jp{font:400 15px var(--sans);color:var(--ink-3);letter-spacing:.3em;margin-bottom:18px;display:block}
+.hero p.lede{max-width:600px;margin:22px auto 0;font-size:19px;color:var(--ink-2)}
+.cta{margin-top:34px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.meta{margin-top:16px;font-size:14px;color:var(--ink-3);min-height:22px}
+.meta b{color:var(--ink-2);font-weight:600}
+.meta code{font-size:12px}
+
+.shots{margin:54px auto 0;display:grid;grid-template-columns:1fr 1fr;gap:18px;max-width:1040px}
+.shots img{width:100%;display:block;border-radius:14px;border:1px solid var(--line);box-shadow:var(--shadow)}
+.shots img:last-child{margin-top:34px}
+@media(max-width:700px){.shots{grid-template-columns:1fr}.shots img:last-child{margin-top:0}}
+
+section{padding:84px 0 0}
+section>.wrap>h2{font-size:clamp(32px,4.6vw,48px);margin-bottom:16px}
+.sub{max-width:660px;color:var(--ink-2);margin:0 0 36px}
+
+/* idea cards */
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media(max-width:900px){.grid4{grid-template-columns:1fr 1fr}.grid3{grid-template-columns:1fr}}
+@media(max-width:520px){.grid4{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:24px;position:relative;overflow:hidden;transition:transform .2s,border-color .2s}
+.card:hover{transform:translateY(-3px);border-color:color-mix(in srgb,var(--accent) 55%,var(--line))}
+.card::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,var(--accent-hi),var(--accent))}
+.card h3{font-size:23px;margin-bottom:8px}
+.card p{margin:0;color:var(--ink-2);font-size:15.5px}
+.card .k{display:block;font:600 12px var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin-bottom:10px}
+.num{font:400 42px var(--serif);background:linear-gradient(120deg,var(--accent-hi),var(--accent-deep));-webkit-background-clip:text;background-clip:text;color:transparent}
+
+/* cranes */
+.cranes{display:flex;gap:10px;flex-wrap:wrap;margin:26px 0 8px}
+.cranes button{all:unset;cursor:pointer;display:grid;justify-items:center;gap:6px;padding:14px 12px 10px;width:104px;border-radius:18px;border:1px solid var(--line);background:var(--card);
+  font-size:13px;color:var(--ink-2);transition:transform .15s,border-color .15s}
+.cranes button:hover{transform:translateY(-3px)}
+.cranes button[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent);color:var(--ink)}
+.cranes button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.cranes img{width:60px;height:60px}
+.hint{font-size:14px;color:var(--ink-3)}
+
+/* features */
+.feat{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media(max-width:900px){.feat{grid-template-columns:1fr 1fr}}
+@media(max-width:560px){.feat{grid-template-columns:1fr}}
+.feat .card h3{font-size:20px}
+.feat .ico{font-size:26px;margin-bottom:10px;display:block}
+
+/* shield pipeline */
+.pipe{display:grid;grid-template-columns:1fr auto 1.1fr auto 1fr;gap:12px;align-items:center;margin-top:8px}
+.pipe .node{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;text-align:center;font-size:15px}
+.pipe .node.core{background:linear-gradient(135deg,var(--accent-hi),var(--accent));color:#fff;border:0;font-weight:600;box-shadow:0 14px 30px -14px var(--accent)}
+.pipe .arrow{color:var(--ink-3);font-size:22px}
+.pipe .outs{display:grid;gap:8px}
+.pipe .outs span{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 14px;font-size:14px}
+.pipe .outs b{color:var(--accent-deep)}
+:root[data-theme="dark"] .pipe .outs b{color:var(--accent-hi)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .pipe .outs b{color:var(--accent-hi)}}
+@media(max-width:760px){.pipe{grid-template-columns:1fr}.pipe .arrow{transform:rotate(90deg);text-align:center}}
+ul.tick{list-style:none;padding:0;margin:30px 0 0;display:grid;gap:12px}
+ul.tick li{padding-left:30px;position:relative;color:var(--ink-2)}
+ul.tick li::before{content:"";position:absolute;left:0;top:.5em;width:14px;height:14px;border-radius:4px;background:linear-gradient(135deg,var(--accent-hi),var(--accent));transform:rotate(45deg) scale(.8)}
+ul.tick b{color:var(--ink)}
+
+/* install */
+.install{background:linear-gradient(135deg,color-mix(in srgb,var(--accent-hi) 26%,var(--card)),var(--card));border:1px solid var(--line);border-radius:28px;padding:44px;display:grid;grid-template-columns:1.2fr 1fr;gap:34px;align-items:center;box-shadow:var(--shadow)}
+@media(max-width:800px){.install{grid-template-columns:1fr;padding:28px}}
+.install h2{font-size:clamp(30px,4vw,42px);margin-bottom:12px}
+.install p{color:var(--ink-2);margin:0 0 18px}
+.note{background:color-mix(in srgb,var(--accent) 10%,transparent);border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 12px 12px 0;font-size:15px;color:var(--ink-2);margin:0 0 22px}
+.reqs{list-style:none;margin:0;padding:0;display:grid;gap:10px;font-size:15px;color:var(--ink-2)}
+.reqs li{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 16px}
+.reqs b{color:var(--ink);display:block;font-size:12px;letter-spacing:.1em;text-transform:uppercase;font-weight:600;color:var(--ink-3)}
+
+/* tables */
+table{width:100%;border-collapse:separate;border-spacing:0;background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;font-size:15.5px}
+td,th{padding:11px 18px;text-align:left;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+td:last-child{color:var(--ink-2)}
+.num-col td:last-child{text-align:right;font-variant-numeric:tabular-nums;color:var(--ink);font-weight:600}
+kbd{font:600 12.5px var(--sans);background:var(--frame);border:1px solid var(--line);border-bottom-width:2px;border-radius:7px;padding:2px 7px;white-space:nowrap}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+@media(max-width:860px){.two{grid-template-columns:1fr}}
+.foot{font-size:13px;color:var(--ink-3);margin-top:12px}
+
+footer{margin-top:96px;border-top:1px solid var(--line);padding:40px 0 60px;color:var(--ink-3);font-size:14px}
+footer .wrap{display:grid;gap:14px}
+footer a{color:var(--ink-2)}
+footer ul{margin:0;padding-left:18px;display:grid;gap:5px}
+code{font:500 .9em ui-monospace,Consolas,monospace;background:var(--frame);padding:1px 6px;border-radius:6px}
+.themebtn{all:unset;cursor:pointer;font-size:14px;color:var(--ink-2);padding:6px 10px;border-radius:999px;border:1px solid var(--line)}
+.themebtn:focus-visible{outline:2px solid var(--accent)}
+</style>
+</head>
+<body>
+<div class="wash"></div>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#top"><img id="navcrane" src="assets/crane/Blue.svg" alt="">Shoji <small>障子</small></a>
+    <div class="links">
+      <a href="#features">Features</a><a href="#byobu">Byōbu</a><a href="#install">Install</a><a href="#numbers">Numbers</a>
+      <a class="gh" href="https://github.com/KJX469/Shoji">GitHub</a>
+    </div>
+    <button class="themebtn" id="theme" aria-label="Toggle light and dark">◐</button>
+  </div>
+</nav>
+
+<header class="hero wrap" id="top">
+  <img class="crane" id="herocrane" src="assets/crane/Blue.svg" alt="Shoji's origami crane">
+  <span class="jp">障 子</span>
+  <h1>A <em>paper-thin</em><br>browser for Windows.</h1>
+  <p class="lede">A small Rust shell around the WebView2 engine Windows already keeps up to date.
+    Quiet, private when you want it, and light enough to forget it's running.</p>
+  <div class="cta">
+    <a class="btn" id="dl" href="https://github.com/KJX469/Shoji/releases/latest/download/ShojiSetup.exe">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
+      Download for Windows
+    </a>
+    <a class="btn ghost" href="https://github.com/KJX469/Shoji/releases/latest">All releases</a>
+  </div>
+  <div class="meta" id="meta">Windows 10 &amp; 11 · free · MIT licensed</div>
+
+  <div class="shots">
+    <img src="assets/newtab-dark.png" alt="New tab in the dark Sumi theme with a blue crane">
+    <img src="assets/settings-light.png" alt="Settings in the light Washi theme with a green crane">
+  </div>
+</header>
+
+<section id="idea"><div class="wrap">
+  <span class="label">The idea</span>
+  <h2>Light comes through. Very little stays.</h2>
+  <p class="sub">A <i>shoji</i> is the sliding paper screen of a Japanese room: a thin frame that lets light through and keeps very little for itself.
+    Shoji doesn't ship a browser engine. It uses the Microsoft Edge WebView2 runtime that Windows 10 and 11 already install and patch,
+    and adds only what a browser needs around it — tabs, an address bar, a side panel, settings — drawn in a calm paper-and-ink interface.</p>
+  <div class="grid4">
+    <div class="card"><span class="k">Small</span><h3>~6 MB</h3><p>Fonts and ad shield included. No bundled engine, no updater service.</p></div>
+    <div class="card"><span class="k">Quiet</span><h3>No telemetry</h3><p>No account, no sync server. Favicons come from the pages themselves.</p></div>
+    <div class="card"><span class="k">Private on request</span><h3>One switch</h3><p>Remembers like a normal browser by default; Private mode keeps every tab in memory only.</p></div>
+    <div class="card"><span class="k">Light</span><h3>Naps tabs</h3><p>Background tabs drop to low memory priority at once and are suspended after a few idle minutes.</p></div>
+  </div>
+</div></section>
+
+<section id="features"><div class="wrap">
+  <span class="label">Look and feel</span>
+  <h2>Seven cranes. Pick one.</h2>
+  <p class="sub">Choose a colour on first launch. The interface takes a soft pastel tint, and the icon in the title bar, taskbar, Start menu and desktop follows. Change it any time in Settings.</p>
+  <div class="cranes" id="cranes" role="group" aria-label="Try a crane colour"></div>
+  <p class="hint">↑ Try them — this page changes colour too.</p>
+
+  <div class="feat" style="margin-top:36px">
+    <div class="card"><span class="ico">🌗</span><h3>Washi &amp; Sumi</h3><p>A warm paper theme for light mode and an ink theme for dark, following Windows or set by hand.</p></div>
+    <div class="card"><span class="ico">Aa</span><h3>Three sets of type</h3><p><i>Shinbun</i> (Newsreader over Instrument Sans), <i>Kinari</i> (soft Fraunces over Literata) or <i>Hon</i> (Literata throughout).</p></div>
+    <div class="card"><span class="ico">▭</span><h3>Tabs in the title bar</h3><p>Native shadow, snapping and resize edges stay; the caption goes.</p></div>
+  </div>
+
+  <h2 style="margin-top:72px;font-size:clamp(28px,4vw,40px)">Browsing, without the weight</h2>
+  <div class="feat" style="margin-top:26px">
+    <div class="card"><span class="ico">🌙</span><h3>Dark websites</h3><p>One moon button darkens every site (built on a modified Dark Reader), leaves already-dark pages alone, and remembers sites you'd rather see in their own colours.</p></div>
+    <div class="card"><span class="ico">◧</span><h3>Reader, split &amp; groups</h3><p>Read an article without the chrome, put two pages side by side, and keep related tabs together.</p></div>
+    <div class="card"><span class="ico">⌘</span><h3>Command palette</h3><p><kbd>Ctrl</kbd>+<kbd>K</kbd> jumps to tabs, pages and actions. Favourites are one click away.</p></div>
+    <div class="card"><span class="ico">📝</span><h3>Quick notes</h3><p>The notepad button unfolds a sheet of ruled paper in the corner; just start typing. Pages are kept locally as a small diary.</p></div>
+    <div class="card"><span class="ico">🪽</span><h3>Tear-off tabs</h3><p>Drag a tab out of the window and the live page moves as it is, without reloading.</p></div>
+    <div class="card"><span class="ico">🔒</span><h3>HTTPS-only &amp; more</h3><p>Session restore, HTTPS-only mode and per-site zoom — the small things, done.</p></div>
+  </div>
+</div></section>
+
+<section id="byobu"><div class="wrap">
+  <span class="label">Byōbu · 屏風</span>
+  <h2>A folding screen for the web.</h2>
+  <p class="sub">Byōbu is Shoji's built-in ad and tracker blocker. It uses Brave's open-source <code>adblock</code> matcher with uBlock Origin and Brave filter lists, fetched at runtime and refreshed in the background — nothing to install, nothing to keep up to date by hand.</p>
+
+  <div class="pipe" aria-label="How Byōbu handles a request">
+    <div class="node">Page requests<br>a resource</div>
+    <div class="arrow">→</div>
+    <div class="node core">Byōbu engine<br><small style="font-weight:400;opacity:.9">uBlock Origin · EasyList · Brave lists</small></div>
+    <div class="arrow">→</div>
+    <div class="outs">
+      <span><b>Block</b> when a rule matches</span>
+      <span><b>Redirect</b> to a harmless stub</span>
+      <span><b>Strip</b> tracking parameters</span>
+      <span><b>Allow</b> everything else</span>
+    </div>
+  </div>
+
+  <ul class="tick">
+    <li><b>Toolbar shield</b> with a live count for the page, struck through when paused on that site.</li>
+    <li><b>Side panel:</b> this page's blocks, a per-site switch, <i>Hide an element…</i> (point at it and it's gone), the request log, and settings.</li>
+    <li><b>Modes:</b> off, standard or aggressive. Add your own lists by URL, or write rules in uBlock syntax.</li>
+    <li><b>Request log</b> shows what was acted on and which filter matched, so a broken page is a quick fix instead of a mystery.</li>
+  </ul>
+</div></section>
+
+<section id="privacy"><div class="wrap">
+  <span class="label">Privacy</span>
+  <h2>Yours, and stays yours.</h2>
+  <div class="grid3" style="margin-top:28px">
+    <div class="card"><h3>On your machine</h3><p>Logins, cookies, cache and history live in your Windows profile, encrypted by the engine with your Windows credentials.</p></div>
+    <div class="card"><h3>Private mode</h3><p>Everything stays in memory and vanishes when you close the window; sites you pick can still keep you signed in.</p></div>
+    <div class="card"><h3>No telemetry</h3><p>Apart from the pages you open, Shoji's own requests are filter-list refreshes and, if on, your search engine's suggestions as you type.</p></div>
+  </div>
+</div></section>
+
+<section id="install"><div class="wrap">
+  <div class="install">
+    <div>
+      <span class="label">Install</span>
+      <h2>Ready in a few seconds.</h2>
+      <p>Download <b>ShojiSetup.exe</b> from the latest release. It installs for your user only into <code>%LOCALAPPDATA%\Programs\Shoji</code> — no administrator prompt — adds Start menu and desktop shortcuts, and registers an uninstaller under <i>Settings → Apps</i>.</p>
+      <div class="note">Shoji isn't code-signed yet, so SmartScreen may say the app is unrecognized. Choose <b>More info → Run anyway</b>.</div>
+      <a class="btn" id="dl2" href="https://github.com/KJX469/Shoji/releases/latest/download/ShojiSetup.exe">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
+        Download <span id="ver2">latest</span>
+      </a>
+    </div>
+    <ul class="reqs">
+      <li><b>System</b>Windows 10 or 11, x64</li>
+      <li><b>Runtime</b>WebView2 — already included with current Windows</li>
+      <li><b>Updates</b>Shoji updates itself from GitHub releases while it sits in the tray</li>
+      <li><b>Verify</b>A SHA-256 file sits beside the installer on every release</li>
+    </ul>
+  </div>
+</div></section>
+
+<section id="numbers"><div class="wrap">
+  <div class="two">
+    <div>
+      <span class="label">Measured</span>
+      <h2 style="font-size:clamp(28px,4vw,40px);margin-bottom:22px">Small on disk, honest in memory.</h2>
+      <table class="num-col">
+        <tr><td>Browser executable</td><td>6.3 MB</td></tr>
+        <tr><td>Installer</td><td>7.1 MB</td></tr>
+        <tr><td>One new tab, total private memory ¹</td><td>287 MB</td></tr>
+        <tr><td>Six Wikipedia tabs, just loaded (private / working set) ¹</td><td>680 / 463 MB</td></tr>
+        <tr><td>Same, after 75 s with five in the background ¹ ²</td><td>656 / 547 MB</td></tr>
+      </table>
+      <p class="foot">Release build on Windows 11; totals include the host and all WebView2 processes. ¹ Measured before Byōbu was added; page memory is dominated by the WebView2 engine. ² Rest timer set to 1 minute for this run; the default is 5.</p>
+    </div>
+    <div>
+      <span class="label">Shortcuts</span>
+      <h2 style="font-size:clamp(28px,4vw,40px);margin-bottom:22px">Keyboard first.</h2>
+      <table>
+        <tr><td>New tab / window</td><td><kbd>Ctrl+T</kbd> <kbd>Ctrl+N</kbd></td></tr>
+        <tr><td>Reopen closed tab</td><td><kbd>Ctrl+Shift+T</kbd></td></tr>
+        <tr><td>Close tab</td><td><kbd>Ctrl+W</kbd> or middle-click</td></tr>
+        <tr><td>Next / previous tab</td><td><kbd>Ctrl+Tab</kbd> <kbd>Ctrl+Shift+Tab</kbd></td></tr>
+        <tr><td>Go to tab 1–8 / last</td><td><kbd>Ctrl+1</kbd>…<kbd>8</kbd> / <kbd>Ctrl+9</kbd></td></tr>
+        <tr><td>Address bar</td><td><kbd>Ctrl+L</kbd> <kbd>Ctrl+E</kbd> <kbd>Ctrl+K</kbd></td></tr>
+        <tr><td>Find in page</td><td><kbd>Ctrl+F</kbd></td></tr>
+        <tr><td>Downloads</td><td><kbd>Ctrl+J</kbd></td></tr>
+        <tr><td>Zoom</td><td><kbd>Ctrl++</kbd> <kbd>Ctrl+-</kbd> <kbd>Ctrl+0</kbd></td></tr>
+        <tr><td>Developer tools</td><td><kbd>F12</kbd></td></tr>
+      </table>
+    </div>
+  </div>
+</div></section>
+
+<footer>
+  <div class="wrap">
+    <div><b style="color:var(--ink)">Shoji</b> is <a href="https://github.com/KJX469/Shoji/blob/main/LICENSE">MIT</a> licensed ·
+      <a href="https://github.com/KJX469/Shoji">Source</a> ·
+      <a href="https://github.com/KJX469/Shoji/blob/main/docs/architecture.md">Architecture</a> ·
+      <a href="https://github.com/KJX469/Shoji/blob/main/CHANGELOG.md">Changelog</a> ·
+      <a href="https://github.com/KJX469/Shoji/issues">Issues</a></div>
+    <ul>
+      <li><a href="https://github.com/darkreader/darkreader">Dark Reader</a> (MIT) powers dark websites.</li>
+      <li><a href="https://github.com/brave/adblock-rust">adblock-rust</a> (MPL-2.0) is Byōbu's matching engine.</li>
+      <li>uBlock Origin's filter lists and scriptlets (GPLv3) are downloaded at runtime and are not part of the Shoji binary.</li>
+      <li>Fonts: Instrument Sans, Newsreader, Fraunces and Literata, under the SIL Open Font License 1.1.</li>
+      <li>Web content is rendered by Microsoft WebView2. Microsoft and WebView2 are trademarks of the Microsoft group of companies.</li>
+    </ul>
+  </div>
+</footer>
+
+<script>
+(function(){
+  var REPO = "KJX469/Shoji";
+  var $ = function(id){ return document.getElementById(id); };
+  var store = { get:function(k){try{return localStorage.getItem(k)}catch(e){return null}}, set:function(k,v){try{localStorage.setItem(k,v)}catch(e){}} };
+
+  /* crane palettes from crates/brand: [light, base, deep] */
+  var CRANES = {
+    White:["#FFFFFF","#B9C0D0","#6C768C"], Blue:["#8BB4FF","#397AFF","#2054D3"], Cyan:["#84F2F5","#25C7DD","#0797BD"],
+    Green:["#78E9A0","#21B86E","#12884E"], Gold:["#FFE074","#F8B42C","#DB8016"], Purple:["#D2A0FF","#9D55EF","#772DC5"],
+    Red:["#FF7074","#ED3049","#BD183D"]
+  };
+  var box = $("cranes");
+  Object.keys(CRANES).forEach(function(name){
+    var b = document.createElement("button");
+    b.type = "button"; b.setAttribute("aria-pressed","false"); b.dataset.name = name;
+    b.innerHTML = '<img src="assets/crane/'+name+'.svg" alt=""><span>'+name+'</span>';
+    b.addEventListener("click", function(){ pick(name); store.set("shoji-crane", name); });
+    box.appendChild(b);
+  });
+  function pick(name){
+    var c = CRANES[name]; if(!c) return;
+    var r = document.documentElement.style;
+    r.setProperty("--accent-hi", c[0]); r.setProperty("--accent", c[1]); r.setProperty("--accent-deep", c[2]);
+    var src = "assets/crane/"+name+".svg";
+    $("herocrane").src = src; $("navcrane").src = src; $("favicon").href = src;
+    Array.prototype.forEach.call(box.children, function(b){ b.setAttribute("aria-pressed", String(b.dataset.name===name)); });
+  }
+  var saved = store.get("shoji-crane");
+  pick(CRANES[saved] ? saved : "Blue");
+
+  /* theme toggle */
+  var root = document.documentElement;
+  var t = store.get("shoji-theme"); if(t==="light"||t==="dark") root.setAttribute("data-theme", t);
+  $("theme").addEventListener("click", function(){
+    var dark = root.getAttribute("data-theme")==="dark" ||
+      (!root.getAttribute("data-theme") && matchMedia("(prefers-color-scheme: dark)").matches);
+    var next = dark ? "light" : "dark";
+    root.setAttribute("data-theme", next); store.set("shoji-theme", next);
+  });
+
+  /* latest release: the button links to /releases/latest/download/ShojiSetup.exe, which always works;
+     the API only adds the version, date and size. */
+  fetch("https://api.github.com/repos/"+REPO+"/releases/latest", {headers:{Accept:"application/vnd.github+json"}})
+    .then(function(r){ if(!r.ok) throw 0; return r.json(); })
+    .then(function(rel){
+      var asset = (rel.assets||[]).filter(function(a){ return /^ShojiSetup\.exe$/i.test(a.name); })[0];
+      if(asset){ $("dl").href = asset.browser_download_url; $("dl2").href = asset.browser_download_url; }
+      var v = rel.tag_name || "";
+      var mb = asset ? (asset.size/1048576).toFixed(1)+" MB" : "";
+      var d = rel.published_at ? new Date(rel.published_at).toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"}) : "";
+      var bits = ['<b>'+v+'</b>']; if(mb) bits.push(mb); if(d) bits.push(d); bits.push("Windows 10 &amp; 11");
+      $("meta").innerHTML = bits.join(" · ") + ' · <a href="'+rel.html_url+'">release notes</a>';
+      if(v) $("ver2").textContent = v;
+    })
+    .catch(function(){ /* keep the static fallback text and link */ });
+})();
+</script>
+</body>
+</html>
