@@ -23,6 +23,18 @@ $env:SHOJI_DUMP = "$PWD\target\pages"; cargo test -p shoji dump_pages -- --ignor
 
 [docs/architecture.md](docs/architecture.md) explains how the crates and pages fit together.
 
+## Workflow
+
+`main` is protected: nobody pushes to it directly. Branch, push the branch, and open a pull
+request; the maintainer reviews and merges it. Releases (`v*` tags) are cut by the maintainer only.
+
+```powershell
+git pull
+git checkout -b my-change
+# edit, commit
+git push -u origin my-change
+```
+
 ## Before you open a pull request
 
 - `cargo fmt --all` leaves no changes, and `cargo clippy --workspace --all-targets` shows no new
