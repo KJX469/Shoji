@@ -2,6 +2,8 @@
 //! Shoji — a paper-thin browser shell around the system WebView2 runtime.
 
 mod cert;
+mod default_browser;
+mod import_win;
 mod icons;
 mod keys;
 mod pages;
@@ -100,6 +102,16 @@ const LINK_PREVIEW_SCRIPT: &str = r#"(() => {
 pub(crate) enum BrowserEvent {
     /// From the tray icon, or a later launch of Shoji handed to this copy
     Tray(tray::Action),
+    /// Progress text from an import running on a worker thread
+    ImportProgress {
+        win: WindowId,
+        text: String,
+    },
+    /// An import finished reading; its data is ready to be applied
+    ImportDone {
+        win: WindowId,
+        imported: Box<shoji_core::import::Imported>,
+    },
     /// A newer, checksum-verified installer has been downloaded
     UpdateReady {
         version: String,
@@ -745,6 +757,10 @@ struct BrowserApp {
     notebook: shoji_core::notes::Notebook,
     shield: shoji_byobu::Shield,
     favourites: shoji_core::userdata::Favourites,
+    history: shoji_core::userdata::History,
+    /// Cookies read by an import, waiting for a tab that uses the real profile (internal pages
+    /// run in a throwaway one)
+    pending_cookies: Mutex<Vec<shoji_core::import::Cookie>>,
     site_data: shoji_core::userdata::SiteData,
     session_path: PathBuf,
     /// Instance window and tray icon (None if it could not be created)
@@ -778,6 +794,7 @@ impl BrowserApp {
         );
         let favourites = shoji_core::userdata::Favourites::load(data_dir.join("favourites.json"));
         let site_data = shoji_core::userdata::SiteData::load(data_dir.join("sitedata.json"));
+        let history = shoji_core::userdata::History::load(data_dir.join("history.json"));
 
         // Tabs from the last run. Private mode keeps none; otherwise a crash or force-close
         // (clean_exit still false) is offered for restore, or restored outright if so chosen.
@@ -838,6 +855,8 @@ impl BrowserApp {
             last_engine_restart: None,
             notebook: shoji_core::notes::Notebook::load(data_dir.join("notes.json")),
             favourites,
+            history,
+            pending_cookies: Mutex::new(Vec::new()),
             site_data,
             session_path,
             tray: None,
@@ -1038,8 +1057,30 @@ impl BrowserApp {
         }
     }
 
+    /// Run a script in the welcome and settings pages of a window.
+    fn eval_welcome_and_settings(&self, win_id: WindowId, js: &str) {
+        if let Some(win) = self.windows.get(&win_id) {
+            win.eval_internal_tabs(js);
+        }
+    }
+
+    /// Hand cookies waiting from an import to `view`, which must use the real profile.
+    fn apply_pending_cookies(&self, view: &wry::WebView) -> usize {
+        let cookies = self
+            .pending_cookies
+            .lock()
+            .map(|mut c| std::mem::take(&mut *c))
+            .unwrap_or_default();
+        if cookies.is_empty() {
+            0
+        } else {
+            webview::add_cookies(view, &cookies)
+        }
+    }
+
     /// Save the session and leave the event loop (tray menu, or the installer's `--quit`).
     fn quit(&mut self, event_loop: &ActiveEventLoop) {
+        self.history.flush();
         if !self.windows.is_empty() {
             self.write_session(true);
         }
@@ -1142,6 +1183,9 @@ impl BrowserApp {
             .build_as_child(window)
             .map_err(|e| eprintln!("Failed to create tab: {e:?}"))
             .ok()?;
+        if persistent {
+            self.apply_pending_cookies(&view);
+        }
         let dark_script = webview::ScriptSlot::default();
         if let Some(script) = pages::dark_document_script(&self.settings) {
             webview::set_document_script(&view, &dark_script, Some(&script));
@@ -1569,6 +1613,7 @@ impl BrowserApp {
     }
 
     fn write_session(&mut self, clean: bool) {
+        self.history.flush();
         if !self.session_enabled() {
             return;
         }
@@ -2680,6 +2725,101 @@ impl BrowserApp {
                     }
                 }
             }
+            M::ListImportSources => {
+                let json = serde_json::to_string(&import_win::detect()).unwrap_or_else(|_| "[]".into());
+                self.eval_welcome_and_settings(
+                    win_id,
+                    &format!("window.__importSources && window.__importSources({json})"),
+                );
+            }
+            M::PickImportSource { source } => {
+                if let Some(src) = shoji_core::import::catalog::find(&source) {
+                    let picked = if src.family == shoji_core::import::catalog::Family::HtmlFile {
+                        webview::pick_html_file()
+                    } else {
+                        webview::pick_folder(&import_win::picker_start(src))
+                    };
+                    if let Some(path) = picked {
+                        self.eval_welcome_and_settings(
+                            win_id,
+                            &format!(
+                                "window.__importPicked && window.__importPicked({},{})",
+                                js_string(&source),
+                                js_string(&path.to_string_lossy())
+                            ),
+                        );
+                    }
+                }
+            }
+            M::StartImport {
+                source,
+                profile,
+                path,
+                mut kinds,
+            } => {
+                let Some(src) = shoji_core::import::catalog::find(&source) else {
+                    return;
+                };
+                // Private mode keeps no history or sign-ins, so there is nothing to put them in.
+                if self.settings.privacy.ephemeral_default {
+                    kinds.history = false;
+                    kinds.cookies = false;
+                }
+                let chosen = import_win::profiles_for(src, path.as_deref())
+                    .into_iter()
+                    .nth(profile);
+                let Some(chosen) = chosen else {
+                    self.eval_welcome_and_settings(
+                        win_id,
+                        &format!(
+                            "window.__importFailed && window.__importFailed({})",
+                            js_string(&format!("Couldn't find {} on this PC.", src.name))
+                        ),
+                    );
+                    return;
+                };
+                let proxy = self.proxy.clone();
+                std::thread::spawn(move || {
+                    let progress_proxy = proxy.clone();
+                    let mut progress = |text: &str| {
+                        let _ = progress_proxy.send_event(BrowserEvent::ImportProgress {
+                            win: win_id,
+                            text: text.to_string(),
+                        });
+                    };
+                    let imported = import_win::read(src, &chosen, kinds, &mut progress);
+                    let _ = proxy.send_event(BrowserEvent::ImportDone {
+                        win: win_id,
+                        imported: Box::new(imported),
+                    });
+                });
+            }
+            M::CheckDefaultBrowser => {
+                let on = default_browser::is_default();
+                self.eval_welcome_and_settings(
+                    win_id,
+                    &format!("window.__defaultBrowser && window.__defaultBrowser({on})"),
+                );
+            }
+            M::SetDefaultBrowser => default_browser::open_settings(),
+            M::SearchHistory { query, seq } => {
+                let items: Vec<serde_json::Value> = if self.settings.privacy.ephemeral_default {
+                    Vec::new()
+                } else {
+                    self.history
+                        .search(&query, 5)
+                        .iter()
+                        .map(|h| serde_json::json!({ "url": h.url, "title": h.title }))
+                        .collect()
+                };
+                if let Some(win) = self.windows.get(&win_id) {
+                    win.eval_chrome(&format!(
+                        "window.__historyResults && window.__historyResults({seq},{})",
+                        serde_json::Value::Array(items)
+                    ));
+                }
+            }
+            M::ClearHistory => self.history.clear(),
             M::ToggleFavourite => {
                 let page = self
                     .windows
@@ -3255,6 +3395,50 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
         match event {
             BrowserEvent::Tray(tray::Action::Open(url)) => self.reopen(event_loop, url),
             BrowserEvent::Tray(tray::Action::Quit) => self.quit(event_loop),
+            BrowserEvent::ImportProgress { win, text } => {
+                self.eval_welcome_and_settings(
+                    win,
+                    &format!(
+                        "window.__importProgress && window.__importProgress({})",
+                        js_string(&text)
+                    ),
+                );
+            }
+            BrowserEvent::ImportDone { win, imported } => {
+                let imported = *imported;
+                let favourites = self.favourites.add_many(&imported.favourites);
+                let history = self.history.merge(imported.history);
+                let cookies = imported.cookies.len();
+                if cookies > 0 {
+                    if let Ok(mut pending) = self.pending_cookies.lock() {
+                        pending.extend(imported.cookies);
+                    }
+                    // A tab that already uses the real profile can take them now.
+                    let view = self.windows.values().find_map(|w| {
+                        w.tabs
+                            .tabs()
+                            .iter()
+                            .find(|t| !is_internal(&t.url))
+                            .and_then(|t| w.views.get(&t.id))
+                    });
+                    if let Some(tab) = view {
+                        self.apply_pending_cookies(&tab.view);
+                    }
+                }
+                self.push_data();
+                let r = imported.report;
+                let summary = serde_json::json!({
+                    "favourites": favourites,
+                    "history": history,
+                    "cookies": cookies,
+                    "notes": r.notes,
+                    "locked": r.locked,
+                });
+                self.eval_welcome_and_settings(
+                    win,
+                    &format!("window.__importDone && window.__importDone({summary})"),
+                );
+            }
             BrowserEvent::UpdateReady { version, installer } => {
                 self.pending_update = Some((version, installer));
                 self.apply_update();
@@ -3304,6 +3488,12 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                             }
                             win.reader.remove(&tab_id);
                             state.url = url.into_owned();
+                            if !self.settings.privacy.ephemeral_default && !is_internal(&state.url) {
+                                let now = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map_or(0, |d| d.as_millis() as u64);
+                                self.history.record(&state.url, &state.title, now);
+                            }
                             if state.status == TabStatus::Crashed {
                                 state.status = TabStatus::Active;
                             }
@@ -3314,6 +3504,9 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 }
                 if let Some(title) = title {
                     if state.title != title {
+                        if !self.settings.privacy.ephemeral_default && !is_internal(&state.url) {
+                            self.history.set_title(&state.url, &title);
+                        }
                         state.title = title;
                         changed = true;
                     }
@@ -3749,6 +3942,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if quit_requested {
         return Ok(()); // nothing was running
+    }
+
+    // The installed copy lists itself in Windows' browser list (this also covers versions installed
+    // before Shoji could be a default browser).
+    if let Ok(exe) = std::env::current_exe() {
+        if shoji_core::shell::is_installed_copy(&exe) {
+            let _ = shoji_core::shell::register_as_browser(&exe);
+        }
     }
 
     let data_dir = shoji_core::env::resolve_data_directory(&exe_dir);

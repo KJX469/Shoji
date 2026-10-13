@@ -36,6 +36,10 @@ pub struct ShieldSettings {
     pub custom_lists: Vec<String>,
     /// The user's own filters, one per line (element picker rules land here)
     pub custom_rules: String,
+    /// Skip tracker redirects and drop tracking parameters from links you open
+    pub clean_links: bool,
+    /// Tell sites not to sell or share your data (Global Privacy Control)
+    pub send_gpc: bool,
 }
 
 impl Default for ShieldSettings {
@@ -46,6 +50,8 @@ impl Default for ShieldSettings {
             disabled_lists: Vec::new(),
             custom_lists: Vec::new(),
             custom_rules: String::new(),
+            clean_links: true,
+            send_gpc: true,
         }
     }
 }
