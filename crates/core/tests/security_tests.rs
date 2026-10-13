@@ -353,7 +353,8 @@ fn test_security_v7_bounded_history_capacity() {
 fn test_security_v9_installer_path_and_registry_safety() {
     // Verify that uninstall command formatting is strictly quoted
     // to protect against unquoted service path / command injection (CWE-428).
-    let sample_uninstaller = PathBuf::from(r"C:\Users\Some One\AppData\Local\Programs\Shoji\uninstall.exe");
+    let sample_uninstaller =
+        PathBuf::from(r"C:\Users\Some One\AppData\Local\Programs\Shoji\uninstall.exe");
     let formatted_cmd = format!("\"{}\" --uninstall", sample_uninstaller.display());
 
     assert!(formatted_cmd.starts_with('"'));
@@ -368,17 +369,34 @@ fn test_security_v9_installer_path_and_registry_safety() {
 #[test]
 fn test_security_v10_web_content_ipc_allowlist() {
     let privileged = [
-        UiToHostMessage::BypassCertificateError { tab_id: TabId(1), host: "evil.com".into(), url: "https://evil.com".into() },
-        UiToHostMessage::SaveSettings { patch: serde_json::json!({ "privacy": { "ephemeral_default": false } }) },
-        UiToHostMessage::SetAccent { accent: "red".into() },
-        UiToHostMessage::Navigate { url: "https://x.com".into() },
+        UiToHostMessage::BypassCertificateError {
+            tab_id: TabId(1),
+            host: "evil.com".into(),
+            url: "https://evil.com".into(),
+        },
+        UiToHostMessage::SaveSettings {
+            patch: serde_json::json!({ "privacy": { "ephemeral_default": false } }),
+        },
+        UiToHostMessage::SetAccent {
+            accent: "red".into(),
+        },
+        UiToHostMessage::Navigate {
+            url: "https://x.com".into(),
+        },
         UiToHostMessage::OpenNewWindow,
         UiToHostMessage::CreateTab { url: None },
         UiToHostMessage::ChangeDownloadFolder,
         UiToHostMessage::FinishWelcome,
     ];
     for msg in privileged {
-        assert!(!msg.allowed_from_web_content(), "{msg:?} must be blocked from web pages");
+        assert!(
+            !msg.allowed_from_web_content(),
+            "{msg:?} must be blocked from web pages"
+        );
     }
-    assert!(UiToHostMessage::FindResult { current: 1, total: 2 }.allowed_from_web_content());
+    assert!(UiToHostMessage::FindResult {
+        current: 1,
+        total: 2
+    }
+    .allowed_from_web_content());
 }

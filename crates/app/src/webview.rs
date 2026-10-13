@@ -56,19 +56,19 @@ pub fn attach_accelerators(webview: &WebView, origin: Origin, proxy: EventLoopPr
         let mut vkey = 0;
         unsafe { args.VirtualKey(&mut vkey)? };
         let down = |vk: u16| unsafe { GetKeyState(vk as i32) } < 0;
-        if let Some(cmd) = command_for(
-            vkey,
-            down(VK_CONTROL.0),
-            down(VK_SHIFT.0),
-            down(VK_MENU.0),
-        ) {
+        if let Some(cmd) = command_for(vkey, down(VK_CONTROL.0), down(VK_SHIFT.0), down(VK_MENU.0))
+        {
             unsafe { args.SetHandled(true)? };
             let _ = proxy.send_event(BrowserEvent::Command(origin, cmd));
         }
         Ok(())
     }));
     let mut token = Default::default();
-    let _ = unsafe { webview.controller().add_AcceleratorKeyPressed(&handler, &mut token) };
+    let _ = unsafe {
+        webview
+            .controller()
+            .add_AcceleratorKeyPressed(&handler, &mut token)
+    };
 }
 
 /* ---------- Permissions ---------- */
@@ -132,7 +132,10 @@ pub fn set_download_prefs(ask: bool, folder: PathBuf) {
 }
 
 pub fn cancel_download(id: u64) {
-    let op = DOWNLOADS.lock().ok().and_then(|mut m| m.as_mut()?.remove(&id));
+    let op = DOWNLOADS
+        .lock()
+        .ok()
+        .and_then(|mut m| m.as_mut()?.remove(&id));
     if let Some(op) = op {
         let _ = unsafe { op.0.Cancel() };
     }
@@ -244,7 +247,9 @@ pub fn attach_tab_events(
                 url: None,
                 title: None,
                 history: None,
-                favicon: Some((uri.starts_with("https://") || uri.starts_with("http://")).then_some(uri)),
+                favicon: Some(
+                    (uri.starts_with("https://") || uri.starts_with("http://")).then_some(uri),
+                ),
             });
             Ok(())
         }));
@@ -283,8 +288,13 @@ pub fn attach_tab_events(
             let uri = take(uri);
             let id = NEXT_PERMISSION_ID.fetch_add(1, Ordering::Relaxed);
             if let Ok(mut map) = PERMISSIONS.lock() {
-                map.get_or_insert_with(HashMap::new)
-                    .insert(id, PendingPermission { args: args.clone(), deferral });
+                map.get_or_insert_with(HashMap::new).insert(
+                    id,
+                    PendingPermission {
+                        args: args.clone(),
+                        deferral,
+                    },
+                );
             }
             let _ = proxy.send_event(BrowserEvent::PermissionPrompt {
                 tab_id,
@@ -313,28 +323,29 @@ pub fn attach_tab_events(
     // Strict TLS: cancel and show an interstitial unless the user bypassed this host.
     if let Ok(core14) = core.cast::<ICoreWebView2_14>() {
         let proxy = proxy.clone();
-        let handler = ServerCertificateErrorDetectedEventHandler::create(Box::new(move |_, args| {
-            let Some(args) = args else { return Ok(()) };
-            let mut uri = PWSTR::null();
-            unsafe { args.RequestUri(&mut uri)? };
-            let uri = take(uri);
-            let host = crate::extract_host(&uri).unwrap_or_else(|| uri.clone());
-            let allowed = allowed_cert_hosts
-                .lock()
-                .map(|set| set.contains(&host))
-                .unwrap_or(false);
-            unsafe {
-                args.SetAction(if allowed {
-                    COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_ALWAYS_ALLOW
-                } else {
-                    COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_CANCEL
-                })?
-            };
-            if !allowed {
-                let _ = proxy.send_event(BrowserEvent::CertificateError { tab_id, host, uri });
-            }
-            Ok(())
-        }));
+        let handler =
+            ServerCertificateErrorDetectedEventHandler::create(Box::new(move |_, args| {
+                let Some(args) = args else { return Ok(()) };
+                let mut uri = PWSTR::null();
+                unsafe { args.RequestUri(&mut uri)? };
+                let uri = take(uri);
+                let host = crate::extract_host(&uri).unwrap_or_else(|| uri.clone());
+                let allowed = allowed_cert_hosts
+                    .lock()
+                    .map(|set| set.contains(&host))
+                    .unwrap_or(false);
+                unsafe {
+                    args.SetAction(if allowed {
+                        COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_ALWAYS_ALLOW
+                    } else {
+                        COREWEBVIEW2_SERVER_CERTIFICATE_ERROR_ACTION_CANCEL
+                    })?
+                };
+                if !allowed {
+                    let _ = proxy.send_event(BrowserEvent::CertificateError { tab_id, host, uri });
+                }
+                Ok(())
+            }));
         let _ = unsafe { core14.add_ServerCertificateErrorDetected(&handler, &mut token) };
     }
 
@@ -448,7 +459,10 @@ fn unique_path(dir: &std::path::Path, name: &str) -> PathBuf {
         return candidate;
     }
     let p = std::path::Path::new(name);
-    let stem = p.file_stem().map(|s| s.to_string_lossy()).unwrap_or_default();
+    let stem = p
+        .file_stem()
+        .map(|s| s.to_string_lossy())
+        .unwrap_or_default();
     let ext = p
         .extension()
         .map(|e| format!(".{}", e.to_string_lossy()))
@@ -489,8 +503,8 @@ pub fn focus(webview: &WebView) {
 
 /// Ask WebView2 to suspend a hidden tab. Pages playing audio or holding locks decline.
 pub fn try_suspend(webview: &WebView, tab_id: TabId, proxy: EventLoopProxy<BrowserEvent>) {
-    let Ok(core3) = (unsafe { webview.controller().CoreWebView2() })
-        .and_then(|c| c.cast::<ICoreWebView2_3>())
+    let Ok(core3) =
+        (unsafe { webview.controller().CoreWebView2() }).and_then(|c| c.cast::<ICoreWebView2_3>())
     else {
         return;
     };
@@ -523,7 +537,11 @@ fn show_save_dialog(default_name: &str) -> Option<PathBuf> {
             }
         }
         dialog.Show(None).ok()?;
-        let path = dialog.GetResult().ok()?.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let path = dialog
+            .GetResult()
+            .ok()?
+            .GetDisplayName(SIGDN_FILESYSPATH)
+            .ok()?;
         Some(PathBuf::from(take(path)))
     }
 }
@@ -533,8 +551,8 @@ pub fn pick_folder(start: &std::path::Path) -> Option<PathBuf> {
     use windows::core::HSTRING;
     use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
     use windows::Win32::UI::Shell::{
-        FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName,
-        FOS_PICKFOLDERS, SIGDN_FILESYSPATH,
+        FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName, FOS_PICKFOLDERS,
+        SIGDN_FILESYSPATH,
     };
     unsafe {
         let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL).ok()?;
@@ -545,7 +563,11 @@ pub fn pick_folder(start: &std::path::Path) -> Option<PathBuf> {
             let _ = dialog.SetFolder(&item);
         }
         dialog.Show(None).ok()?;
-        let path = dialog.GetResult().ok()?.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let path = dialog
+            .GetResult()
+            .ok()?
+            .GetDisplayName(SIGDN_FILESYSPATH)
+            .ok()?;
         Some(PathBuf::from(take(path)))
     }
 }
@@ -602,9 +624,15 @@ pub fn clear_saved_logins(webview: &WebView) -> bool {
     let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
         return false;
     };
-    let Ok(core13) = core.cast::<ICoreWebView2_13>() else { return false };
-    let Ok(profile) = (unsafe { core13.Profile() }) else { return false };
-    let Ok(p2) = profile.cast::<ICoreWebView2Profile2>() else { return false };
+    let Ok(core13) = core.cast::<ICoreWebView2_13>() else {
+        return false;
+    };
+    let Ok(profile) = (unsafe { core13.Profile() }) else {
+        return false;
+    };
+    let Ok(p2) = profile.cast::<ICoreWebView2Profile2>() else {
+        return false;
+    };
     let handler = ClearBrowsingDataCompletedHandler::create(Box::new(|_| Ok(())));
     let kinds = COREWEBVIEW2_BROWSING_DATA_KINDS(
         COREWEBVIEW2_BROWSING_DATA_KINDS_PASSWORD_AUTOSAVE.0
@@ -630,7 +658,9 @@ pub fn attach_nav_failures(webview: &WebView, tab_id: TabId, proxy: EventLoopPro
         return;
     };
     let handler = NavigationCompletedEventHandler::create(Box::new(move |sender, args| {
-        let (Some(sender), Some(args)) = (sender, args) else { return Ok(()) };
+        let (Some(sender), Some(args)) = (sender, args) else {
+            return Ok(());
+        };
         let mut ok = BOOL(0);
         unsafe { args.IsSuccess(&mut ok)? };
         if ok.as_bool() {
@@ -674,7 +704,8 @@ pub fn cdp(webview: &WebView, method: &str, params: &str) {
     };
     let m: Vec<u16> = method.encode_utf16().chain(Some(0)).collect();
     let p: Vec<u16> = params.encode_utf16().chain(Some(0)).collect();
-    let _ = unsafe { core.CallDevToolsProtocolMethod(PCWSTR(m.as_ptr()), PCWSTR(p.as_ptr()), None) };
+    let _ =
+        unsafe { core.CallDevToolsProtocolMethod(PCWSTR(m.as_ptr()), PCWSTR(p.as_ptr()), None) };
 }
 
 /* ---------- Document scripts, drag regions, z-order ---------- */
@@ -697,16 +728,15 @@ pub fn set_document_script_core(core: &ICoreWebView2, slot: &ScriptSlot, script:
     }
     let Some(script) = script else { return };
     let slot = slot.clone();
-    let handler = AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(
-        move |result, id| {
+    let handler =
+        AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(move |result, id| {
             if result.is_ok() {
                 if let Ok(mut s) = slot.lock() {
                     *s = Some(id);
                 }
             }
             Ok(())
-        },
-    ));
+        }));
     let wide: Vec<u16> = script.encode_utf16().chain(Some(0)).collect();
     let _ = unsafe { core.AddScriptToExecuteOnDocumentCreated(PCWSTR(wide.as_ptr()), &handler) };
 }

@@ -136,16 +136,10 @@ fn test_tab_manager_suspension_and_audio() {
     assert!(tm.tabs()[0].is_audio_playing);
 
     tm.set_tab_suspended(tab_id, true);
-    assert_eq!(
-        tm.tabs()[0].status,
-        shoji_core::tabs::TabStatus::Suspended
-    );
+    assert_eq!(tm.tabs()[0].status, shoji_core::tabs::TabStatus::Suspended);
 
     tm.set_tab_suspended(tab_id, false);
-    assert_eq!(
-        tm.tabs()[0].status,
-        shoji_core::tabs::TabStatus::Inactive
-    );
+    assert_eq!(tm.tabs()[0].status, shoji_core::tabs::TabStatus::Inactive);
 }
 
 #[test]
@@ -218,18 +212,12 @@ fn test_tab_manager_crash_and_snapshot_restore() {
     let id1 = tm.create_tab("https://alpha.example", 100);
     let _id2 = tm.create_tab("https://beta.example", 200);
 
-    assert_eq!(
-        tm.tabs()[0].status,
-        shoji_core::tabs::TabStatus::Inactive
-    );
+    assert_eq!(tm.tabs()[0].status, shoji_core::tabs::TabStatus::Inactive);
     assert_eq!(tm.tabs()[1].status, shoji_core::tabs::TabStatus::Active);
 
     // Mark tab 1 crashed
     tm.mark_tab_crashed(id1);
-    assert_eq!(
-        tm.tabs()[0].status,
-        shoji_core::tabs::TabStatus::Crashed
-    );
+    assert_eq!(tm.tabs()[0].status, shoji_core::tabs::TabStatus::Crashed);
 
     // Snapshot
     let snapshot = tm.snapshot();
@@ -347,7 +335,11 @@ fn test_private_mode_choice_and_legacy_files() {
     let path = dir.join("settings.json");
 
     // An old file that only carries the previous "forget everything" default is not a choice.
-    std::fs::write(&path, r#"{"privacy":{"ephemeral_default":true,"persistent_sites":[]}}"#).unwrap();
+    std::fs::write(
+        &path,
+        r#"{"privacy":{"ephemeral_default":true,"persistent_sites":[]}}"#,
+    )
+    .unwrap();
     let loaded = Settings::load_from_path(&path);
     assert!(!loaded.privacy.ephemeral_default);
 
@@ -391,31 +383,62 @@ fn test_profile_migration_moves_once_and_never_overwrites() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-
 #[test]
 fn test_ipc_serde_roundtrip() {
     let variants = vec![
         UiToHostMessage::ChromeReady,
-        UiToHostMessage::CreateTab { url: Some("https://test.com".into()) },
+        UiToHostMessage::CreateTab {
+            url: Some("https://test.com".into()),
+        },
         UiToHostMessage::CreateTab { url: None },
         UiToHostMessage::SwitchTab { id: TabId(42) },
-        UiToHostMessage::Navigate { url: "https://nav.com".into() },
-        UiToHostMessage::ReorderTab { from_index: 0, to_index: 2 },
-        UiToHostMessage::DetachTabToNewWindow { tab_id: TabId(3), screen_x: Some(1.0), screen_y: None },
-        UiToHostMessage::FindInPage { query: "q".into(), forward: true },
-        UiToHostMessage::SaveSettings { patch: serde_json::json!({ "search_engine": "bing" }) },
-        UiToHostMessage::SetAccent { accent: "gold".into() },
-        UiToHostMessage::SetTheme { theme: "dark".into() },
+        UiToHostMessage::Navigate {
+            url: "https://nav.com".into(),
+        },
+        UiToHostMessage::ReorderTab {
+            from_index: 0,
+            to_index: 2,
+        },
+        UiToHostMessage::DetachTabToNewWindow {
+            tab_id: TabId(3),
+            screen_x: Some(1.0),
+            screen_y: None,
+        },
+        UiToHostMessage::FindInPage {
+            query: "q".into(),
+            forward: true,
+        },
+        UiToHostMessage::SaveSettings {
+            patch: serde_json::json!({ "search_engine": "bing" }),
+        },
+        UiToHostMessage::SetAccent {
+            accent: "gold".into(),
+        },
+        UiToHostMessage::SetTheme {
+            theme: "dark".into(),
+        },
         UiToHostMessage::FinishWelcome,
-        UiToHostMessage::BypassCertificateError { tab_id: TabId(1), host: "a.com".into(), url: "https://a.com".into() },
+        UiToHostMessage::BypassCertificateError {
+            tab_id: TabId(1),
+            host: "a.com".into(),
+            url: "https://a.com".into(),
+        },
     ];
     for msg in variants {
         let json = serde_json::to_string(&msg).unwrap();
         assert_eq!(serde_json::from_str::<UiToHostMessage>(&json).unwrap(), msg);
     }
-    let sync = HostToUiMessage::TabStateSync { tabs: vec![], active_tab_id: None, groups: vec![], split: None };
+    let sync = HostToUiMessage::TabStateSync {
+        tabs: vec![],
+        active_tab_id: None,
+        groups: vec![],
+        split: None,
+    };
     let json = serde_json::to_string(&sync).unwrap();
-    assert_eq!(serde_json::from_str::<HostToUiMessage>(&json).unwrap(), sync);
+    assert_eq!(
+        serde_json::from_str::<HostToUiMessage>(&json).unwrap(),
+        sync
+    );
 }
 
 #[test]
@@ -428,7 +451,10 @@ fn test_settings_apply_patch_merges_nested_objects() {
     })));
     assert_eq!(s.search_engine, "google");
     assert!(!s.downloads.ask_where_to_save);
-    assert!(s.downloads.show_progress_toolbar, "sibling fields untouched");
+    assert!(
+        s.downloads.show_progress_toolbar,
+        "sibling fields untouched"
+    );
     assert_eq!(s.appearance.accent, "purple", "accent ids are normalized");
     assert_eq!(s.appearance.default_zoom_level, 1.0);
 }
@@ -456,7 +482,10 @@ fn test_settings_persistent_sites_are_normalized() {
     s.apply_patch(&serde_json::json!({
         "privacy": { "persistent_sites": ["GitHub.com", " accounts.google.com ", "", "github.com"] }
     }));
-    assert_eq!(s.privacy.persistent_sites, vec!["github.com", "accounts.google.com"]);
+    assert_eq!(
+        s.privacy.persistent_sites,
+        vec!["github.com", "accounts.google.com"]
+    );
     assert!(s.is_site_persistent("https://github.com"));
     assert!(s.is_site_persistent("https://accounts.google.com"));
 }

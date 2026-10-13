@@ -67,7 +67,11 @@ impl Favourites {
         let title: String = title.trim().chars().take(120).collect();
         self.items.push(Favourite {
             url: url.to_string(),
-            title: if title.is_empty() { url.to_string() } else { title },
+            title: if title.is_empty() {
+                url.to_string()
+            } else {
+                title
+            },
         });
         self.save();
         true
@@ -160,13 +164,22 @@ impl SiteData {
             .permissions
             .entry(host.to_string())
             .or_default()
-            .insert(kind.to_string(), if allow { "allow" } else { "block" }.to_string());
+            .insert(
+                kind.to_string(),
+                if allow { "allow" } else { "block" }.to_string(),
+            );
         self.save();
     }
 
     /// Number of remembered choices (zoom levels and permissions), for Settings.
     pub fn count(&self) -> usize {
-        self.data.zoom.len() + self.data.permissions.values().map(|p| p.len()).sum::<usize>()
+        self.data.zoom.len()
+            + self
+                .data
+                .permissions
+                .values()
+                .map(|p| p.len())
+                .sum::<usize>()
     }
 
     pub fn clear(&mut self) {
@@ -212,7 +225,10 @@ pub struct Session {
 
 impl Default for Session {
     fn default() -> Self {
-        Self { clean_exit: true, windows: Vec::new() }
+        Self {
+            clean_exit: true,
+            windows: Vec::new(),
+        }
     }
 }
 

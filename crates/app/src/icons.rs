@@ -6,13 +6,17 @@ use shoji_brand::{ico, Accent, ICO_SIZES};
 use std::path::{Path, PathBuf};
 
 fn icon_path(data_dir: &Path, accent: Accent) -> PathBuf {
-    data_dir.join("icons").join(format!("shoji-{}.ico", accent.id()))
+    data_dir
+        .join("icons")
+        .join(format!("shoji-{}.ico", accent.id()))
 }
 
 #[cfg(windows)]
 pub fn retint_shortcuts(data_dir: PathBuf, accent: Accent) {
     std::thread::spawn(move || {
-        let Ok(exe) = std::env::current_exe() else { return };
+        let Ok(exe) = std::env::current_exe() else {
+            return;
+        };
         let shortcuts: Vec<PathBuf> = shoji_core::shell::all_shortcuts()
             .into_iter()
             .filter(|p| p.exists())

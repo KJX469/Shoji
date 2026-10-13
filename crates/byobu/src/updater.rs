@@ -29,7 +29,10 @@ pub struct Refresh {
 }
 
 fn now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 impl Updater {
@@ -54,11 +57,21 @@ impl Updater {
     }
 
     fn read_meta(path: &Path) -> Meta {
-        fs::read_to_string(path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+        fs::read_to_string(path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
     }
 
     /// Fetch one file if it is due (or `force`). `Ok(true)` when the cached copy changed.
-    fn fetch(&self, id: &str, ext: &str, url: &str, every: u64, force: bool) -> Result<bool, String> {
+    fn fetch(
+        &self,
+        id: &str,
+        ext: &str,
+        url: &str,
+        every: u64,
+        force: bool,
+    ) -> Result<bool, String> {
         let file = self.file(id, ext);
         let meta_path = self.meta_path(id);
         let mut meta = Self::read_meta(&meta_path);
@@ -82,15 +95,23 @@ impl Updater {
             304 => false,
             200 => {
                 let hv = |n: &str| {
-                    resp.headers().get(n).and_then(|v| v.to_str().ok()).map(str::to_owned)
+                    resp.headers()
+                        .get(n)
+                        .and_then(|v| v.to_str().ok())
+                        .map(str::to_owned)
                 };
                 meta.etag = hv("etag");
                 meta.last_modified = hv("last-modified");
-                let body = resp.body_mut().read_to_string().map_err(|e| e.to_string())?;
+                let body = resp
+                    .body_mut()
+                    .read_to_string()
+                    .map_err(|e| e.to_string())?;
                 if body.trim().is_empty() {
                     return Err("empty response".into());
                 }
-                let same = fs::read_to_string(&file).map(|old| old == body).unwrap_or(false);
+                let same = fs::read_to_string(&file)
+                    .map(|old| old == body)
+                    .unwrap_or(false);
                 if !same {
                     let tmp = file.with_extension("tmp");
                     fs::write(&tmp, body).map_err(|e| e.to_string())?;
@@ -154,7 +175,13 @@ impl Updater {
             Err(_) => r.failed += 1,
         };
         tally(self.fetch("resources", "json", sources::RESOURCES_URL, 6 * 3600, force));
-        tally(self.fetch("ubo-resources", "json", sources::UBO_RESOURCES_URL, 6 * 3600, force));
+        tally(self.fetch(
+            "ubo-resources",
+            "json",
+            sources::UBO_RESOURCES_URL,
+            6 * 3600,
+            force,
+        ));
         for s in &all {
             tally(self.fetch(&s.id, "txt", &s.url, s.refresh_secs, force));
         }

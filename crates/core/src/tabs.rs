@@ -238,7 +238,11 @@ impl TabManager {
         let name: String = name.trim().chars().take(40).collect();
         self.groups.push(TabGroup {
             id,
-            name: if name.is_empty() { "Group".to_string() } else { name },
+            name: if name.is_empty() {
+                "Group".to_string()
+            } else {
+                name
+            },
             color: color.to_string(),
         });
         id
@@ -283,7 +287,8 @@ impl TabManager {
 
     pub fn prune_groups(&mut self) {
         let tabs = &self.tabs;
-        self.groups.retain(|g| tabs.iter().any(|t| t.group == Some(g.id)));
+        self.groups
+            .retain(|g| tabs.iter().any(|t| t.group == Some(g.id)));
     }
 
     pub fn reorder_tab(&mut self, from_idx: usize, to_idx: usize) -> bool {
@@ -422,11 +427,15 @@ pub fn normalize_url(input: &str, search_template: &str) -> Result<String, Strin
 /// Hosts that are never upgraded to HTTPS: local machines and networks, which rarely have
 /// certificates (localhost, single-label names, `.local`/`.test`/`.internal`, IP addresses).
 pub fn is_local_host(host: &str) -> bool {
-    let host = host.trim_matches(|c| c == '[' || c == ']').to_ascii_lowercase();
+    let host = host
+        .trim_matches(|c| c == '[' || c == ']')
+        .to_ascii_lowercase();
     host.is_empty()
         || !host.contains('.')
         || host.contains(':')
-        || host.split('.').all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+        || host
+            .split('.')
+            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
         || ["localhost", "local", "test", "internal", "lan", "home.arpa"]
             .iter()
             .any(|s| host == *s || host.ends_with(&format!(".{s}")))
@@ -434,7 +443,9 @@ pub fn is_local_host(host: &str) -> bool {
 
 /// The https:// version of a plain-HTTP web address, or `None` if it isn't HTTP or is a local host.
 pub fn upgrade_to_https(url: &str) -> Option<String> {
-    let rest = url.strip_prefix("http://").or_else(|| url.strip_prefix("HTTP://"))?;
+    let rest = url
+        .strip_prefix("http://")
+        .or_else(|| url.strip_prefix("HTTP://"))?;
     let authority = rest.split(['/', '?', '#']).next()?;
     let host = authority.rsplit('@').next()?;
     // A literal port means the site expects plain HTTP on that port.
