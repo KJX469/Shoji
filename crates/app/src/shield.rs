@@ -395,8 +395,13 @@ fn save_stats(dir: &std::path::Path) {
     let _ = std::fs::write(dir.join("stats.json"), json);
 }
 
-/// Keep the engine fresh: serve the cache at once, then refresh whatever is due (hourly at
-/// the fastest), and rebuild whenever a list, a setting or the user's own rules change.
+/// How often Byōbu re-checks its lists while the browser is running.
+const UPDATE_INTERVAL_SECS: u64 = 3600;
+/// How soon to retry after a pass in which a fetch failed.
+const UPDATE_RETRY_SECS: u64 = 600;
+
+/// Keep the engine fresh: serve the cache at once, check every list at launch and then hourly,
+/// and rebuild whenever a list, a setting or the user's own rules change.
 /// Runs on its own thread; a rebuilt engine is swapped in atomically.
 pub fn spawn_updater(shield: Shield, dir: PathBuf) {
     let (tx, rx) = mpsc::channel::<bool>();
@@ -410,12 +415,14 @@ pub fn spawn_updater(shield: Shield, dir: PathBuf) {
             load_stats(&dir);
             let mut built: Option<Config> = None;
             let mut next_check = Instant::now();
-            // Check every list once per launch. These are conditional requests, so an unchanged
-            // list costs a 304 and nothing is downloaded.
+            // Check every list at launch and then every hour, whether or not a window is open.
+            // These are conditional requests, so an unchanged list costs a 304 and nothing is
+            // downloaded.
             let mut force = true;
             loop {
                 let cfg = hub().config.lock().map(|c| c.clone()).unwrap_or_default();
-                let due = force || Instant::now() >= next_check;
+                let hourly = Instant::now() >= next_check;
+                let due = force || hourly;
                 let config_changed = built.as_ref() != Some(&cfg);
                 if due || config_changed || !shield.is_ready() {
                     if let Ok(mut h) = hub().inner.lock() {
@@ -431,7 +438,8 @@ pub fn spawn_updater(shield: Shield, dir: PathBuf) {
                             .collect();
                         shield.rebuild_with(&updater, &cached, &cfg.rules);
                     }
-                    let (sources, r) = updater.refresh_with(force, &cfg.custom, &cfg.disabled);
+                    let (sources, r) =
+                        updater.refresh_with(force || hourly, &cfg.custom, &cfg.disabled);
                     if r.changed > 0 || config_changed || built.is_none() {
                         shield.rebuild_with(&updater, &sources, &cfg.rules);
                     }
@@ -458,8 +466,12 @@ pub fn spawn_updater(shield: Shield, dir: PathBuf) {
                         h.updating = false;
                         h.ready = shield.is_ready();
                     }
-                    let wait = updater.next_due_in(&sources).min(3600);
-                    let wait = if r.failed > 0 { wait.min(900) } else { wait };
+                    // Every hour; sooner after a failed fetch (offline, or the host was down).
+                    let wait = if r.failed > 0 {
+                        UPDATE_RETRY_SECS
+                    } else {
+                        UPDATE_INTERVAL_SECS
+                    };
                     next_check = Instant::now() + Duration::from_secs(wait);
                     force = false;
                     hub().touch(0);
