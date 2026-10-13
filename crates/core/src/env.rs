@@ -40,7 +40,11 @@ pub fn local_app_directory() -> Option<PathBuf> {
 pub fn delayed_purge_script(dirs: &[PathBuf], files: &[PathBuf]) -> Option<String> {
     fn usable(p: &Path) -> bool {
         let s = p.to_string_lossy();
-        p.parent().is_some() && p.file_name().is_some() && !s.contains('"') && !s.contains('%')
+        p.parent().is_some()
+            && p.file_name().is_some()
+            && !s.contains('"')
+            && !s.contains('%')
+            && !s.ends_with(['\\', '/'])
     }
     let mut steps = vec!["ping -n 4 127.0.0.1 >nul".to_string()];
     for d in dirs.iter().filter(|p| usable(p)) {

@@ -175,12 +175,16 @@ fn test_tab_manager_reorder() {
 
 #[test]
 fn test_is_process_elevated_returns_false_unelevated() {
-    // Under normal user runs or developer testing, this process is not elevated.
+    // Developer runs are unelevated. GitHub's Windows runners run elevated, so CI only checks
+    // that the query works and is stable.
     let elevated = is_process_elevated();
-    assert!(
-        !elevated,
-        "Process expected to run unelevated in standard environment"
-    );
+    assert_eq!(elevated, is_process_elevated());
+    if std::env::var_os("CI").is_none() {
+        assert!(
+            !elevated,
+            "Process expected to run unelevated in standard environment"
+        );
+    }
 }
 
 #[test]
