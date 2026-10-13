@@ -10,11 +10,11 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use winit::event_loop::EventLoopProxy;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::*;
 use windows::core::{Interface, PCWSTR, PWSTR};
 use windows::Win32::UI::Shell::SHCreateMemStream;
+use winit::event_loop::EventLoopProxy;
 use wry::{WebView, WebViewExtWindows};
 
 /// Looks up the shield mode that applies to a page URL (reads the live settings).
@@ -91,7 +91,10 @@ pub struct Hub {
 const LOG_CAP: usize = 3000;
 
 fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 pub fn hub() -> &'static Hub {
@@ -122,7 +125,10 @@ impl Hub {
         };
         let day = now_ms() / 86_400_000;
         if let Ok(mut h) = self.inner.lock() {
-            let stats = h.tabs.entry(tab).or_insert(TabStats { blocked: 0, replaced: 0 });
+            let stats = h.tabs.entry(tab).or_insert(TabStats {
+                blocked: 0,
+                replaced: 0,
+            });
             match decision {
                 Decision::Block => stats.blocked += 1,
                 _ => stats.replaced += 1,
@@ -160,7 +166,13 @@ impl Hub {
 
     fn reset_tab(&self, tab: u64) {
         if let Ok(mut h) = self.inner.lock() {
-            h.tabs.insert(tab, TabStats { blocked: 0, replaced: 0 });
+            h.tabs.insert(
+                tab,
+                TabStats {
+                    blocked: 0,
+                    replaced: 0,
+                },
+            );
             h.tokens.remove(&tab);
         }
         self.touch(tab);
@@ -183,7 +195,9 @@ impl Hub {
 
     /// True when `state` differs from what was last pushed under `key` (and remembers it).
     pub fn changed(&self, key: &str, state: &str) -> bool {
-        let Ok(mut h) = self.inner.lock() else { return true };
+        let Ok(mut h) = self.inner.lock() else {
+            return true;
+        };
         if h.synced.get(key).map(String::as_str) == Some(state) {
             return false;
         }
@@ -200,12 +214,17 @@ impl Hub {
 
     fn week(h: &Inner) -> u64 {
         let today = now_ms() / 86_400_000;
-        h.days.range(today.saturating_sub(6)..=today).map(|(_, n)| n).sum()
+        h.days
+            .range(today.saturating_sub(6)..=today)
+            .map(|(_, n)| n)
+            .sum()
     }
 
     /// Everything the settings and logger pages show. `log_tab`: only that tab's log entries.
     pub fn state_json(&self, with_log: bool, log_tab: Option<u64>) -> String {
-        let Ok(h) = self.inner.lock() else { return "{}".into() };
+        let Ok(h) = self.inner.lock() else {
+            return "{}".into();
+        };
         let lists: Vec<_> = h
             .lists
             .iter()
@@ -256,12 +275,16 @@ impl Hub {
 
     /// Start the element picker in a tab; returns the token the page must echo back.
     pub fn begin_pick(&self, tab: u64) -> String {
-        let token = format!("{:016x}{:016x}", now_ms().wrapping_mul(0x9E37_79B9_7F4A_7C15), {
-            let t = std::time::Instant::now();
-            // Not cryptographic, but unguessable from page script: it never leaves the host
-            // until the picker is injected.
-            (t.elapsed().as_nanos() as u64) ^ (tab.wrapping_mul(0xBF58_476D_1CE4_E5B9))
-        });
+        let token = format!(
+            "{:016x}{:016x}",
+            now_ms().wrapping_mul(0x9E37_79B9_7F4A_7C15),
+            {
+                let t = std::time::Instant::now();
+                // Not cryptographic, but unguessable from page script: it never leaves the host
+                // until the picker is injected.
+                (t.elapsed().as_nanos() as u64) ^ (tab.wrapping_mul(0xBF58_476D_1CE4_E5B9))
+            }
+        );
         if let Ok(mut h) = self.inner.lock() {
             h.tokens.insert(tab, token.clone());
         }
@@ -269,7 +292,9 @@ impl Hub {
     }
 
     fn take_token(&self, tab: u64, presented: &str) -> bool {
-        let Ok(mut h) = self.inner.lock() else { return false };
+        let Ok(mut h) = self.inner.lock() else {
+            return false;
+        };
         match h.tokens.get(&tab) {
             Some(t) if t == presented => {
                 h.tokens.remove(&tab);
@@ -330,8 +355,12 @@ fn kind_name(k: RequestKind) -> &'static str {
 }
 
 fn load_stats(dir: &std::path::Path) {
-    let Ok(text) = std::fs::read_to_string(dir.join("stats.json")) else { return };
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else { return };
+    let Ok(text) = std::fs::read_to_string(dir.join("stats.json")) else {
+        return;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return;
+    };
     if let Ok(mut h) = hub().inner.lock() {
         h.total = v.get("total").and_then(|t| t.as_u64()).unwrap_or(0);
         if let Some(days) = v.get("days").and_then(|d| d.as_object()) {
@@ -346,7 +375,9 @@ fn load_stats(dir: &std::path::Path) {
 
 fn save_stats(dir: &std::path::Path) {
     let json = {
-        let Ok(mut h) = hub().inner.lock() else { return };
+        let Ok(mut h) = hub().inner.lock() else {
+            return;
+        };
         if !h.dirty {
             return;
         }
@@ -354,8 +385,11 @@ fn save_stats(dir: &std::path::Path) {
         let today = now_ms() / 86_400_000;
         let keep = today.saturating_sub(13);
         h.days.retain(|d, _| *d >= keep);
-        let days: serde_json::Map<String, serde_json::Value> =
-            h.days.iter().map(|(d, n)| (d.to_string(), (*n).into())).collect();
+        let days: serde_json::Map<String, serde_json::Value> = h
+            .days
+            .iter()
+            .map(|(d, n)| (d.to_string(), (*n).into()))
+            .collect();
         serde_json::json!({ "total": h.total, "days": days }).to_string()
     };
     let _ = std::fs::write(dir.join("stats.json"), json);
@@ -369,69 +403,73 @@ pub fn spawn_updater(shield: Shield, dir: PathBuf) {
     if let Ok(mut w) = hub().wake.lock() {
         *w = Some(tx);
     }
-    let _ = std::thread::Builder::new().name("byobu-updater".into()).spawn(move || {
-        let updater = Updater::new(&dir);
-        load_stats(&dir);
-        let mut built: Option<Config> = None;
-        let mut next_check = Instant::now();
-        let mut force = false;
-        loop {
-            let cfg = hub().config.lock().map(|c| c.clone()).unwrap_or_default();
-            let due = force || Instant::now() >= next_check;
-            let config_changed = built.as_ref() != Some(&cfg);
-            if due || config_changed || !shield.is_ready() {
-                if let Ok(mut h) = hub().inner.lock() {
-                    h.updating = true;
+    let _ = std::thread::Builder::new()
+        .name("byobu-updater".into())
+        .spawn(move || {
+            let updater = Updater::new(&dir);
+            load_stats(&dir);
+            let mut built: Option<Config> = None;
+            let mut next_check = Instant::now();
+            let mut force = false;
+            loop {
+                let cfg = hub().config.lock().map(|c| c.clone()).unwrap_or_default();
+                let due = force || Instant::now() >= next_check;
+                let config_changed = built.as_ref() != Some(&cfg);
+                if due || config_changed || !shield.is_ready() {
+                    if let Ok(mut h) = hub().inner.lock() {
+                        h.updating = true;
+                    }
+                    hub().touch(0);
+                    // Serve from the cache before the network, so a cold start isn't unprotected.
+                    if !shield.is_ready() {
+                        let cached = updater.sources_with(false, &cfg.custom);
+                        let cached: Vec<_> = cached
+                            .into_iter()
+                            .filter(|s| !cfg.disabled.contains(&s.id))
+                            .collect();
+                        shield.rebuild_with(&updater, &cached, &cfg.rules);
+                    }
+                    let (sources, r) = updater.refresh_with(force, &cfg.custom, &cfg.disabled);
+                    if r.changed > 0 || config_changed || built.is_none() {
+                        shield.rebuild_with(&updater, &sources, &cfg.rules);
+                    }
+                    built = Some(cfg.clone());
+                    let all = updater.sources_with(false, &cfg.custom);
+                    let infos: Vec<ListInfo> = all
+                        .iter()
+                        .map(|s| {
+                            let (bytes, rules, checked) = updater.list_stats(&s.id);
+                            ListInfo {
+                                id: s.id.clone(),
+                                title: s.title.clone(),
+                                url: s.url.clone(),
+                                enabled: !cfg.disabled.contains(&s.id),
+                                custom: s.id.starts_with("custom-"),
+                                bytes,
+                                rules,
+                                checked,
+                            }
+                        })
+                        .collect();
+                    if let Ok(mut h) = hub().inner.lock() {
+                        h.lists = infos;
+                        h.updating = false;
+                        h.ready = shield.is_ready();
+                    }
+                    let wait = updater.next_due_in(&sources).min(3600);
+                    let wait = if r.failed > 0 { wait.min(900) } else { wait };
+                    next_check = Instant::now() + Duration::from_secs(wait);
+                    force = false;
+                    hub().touch(0);
                 }
-                hub().touch(0);
-                // Serve from the cache before the network, so a cold start isn't unprotected.
-                if !shield.is_ready() {
-                    let cached = updater.sources_with(false, &cfg.custom);
-                    let cached: Vec<_> =
-                        cached.into_iter().filter(|s| !cfg.disabled.contains(&s.id)).collect();
-                    shield.rebuild_with(&updater, &cached, &cfg.rules);
+                save_stats(&dir);
+                match rx.recv_timeout(Duration::from_secs(60)) {
+                    Ok(f) => force |= f,
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(mpsc::RecvTimeoutError::Disconnected) => return,
                 }
-                let (sources, r) = updater.refresh_with(force, &cfg.custom, &cfg.disabled);
-                if r.changed > 0 || config_changed || built.is_none() {
-                    shield.rebuild_with(&updater, &sources, &cfg.rules);
-                }
-                built = Some(cfg.clone());
-                let all = updater.sources_with(false, &cfg.custom);
-                let infos: Vec<ListInfo> = all
-                    .iter()
-                    .map(|s| {
-                        let (bytes, rules, checked) = updater.list_stats(&s.id);
-                        ListInfo {
-                            id: s.id.clone(),
-                            title: s.title.clone(),
-                            url: s.url.clone(),
-                            enabled: !cfg.disabled.contains(&s.id),
-                            custom: s.id.starts_with("custom-"),
-                            bytes,
-                            rules,
-                            checked,
-                        }
-                    })
-                    .collect();
-                if let Ok(mut h) = hub().inner.lock() {
-                    h.lists = infos;
-                    h.updating = false;
-                    h.ready = shield.is_ready();
-                }
-                let wait = updater.next_due_in(&sources).min(3600);
-                let wait = if r.failed > 0 { wait.min(900) } else { wait };
-                next_check = Instant::now() + Duration::from_secs(wait);
-                force = false;
-                hub().touch(0);
             }
-            save_stats(&dir);
-            match rx.recv_timeout(Duration::from_secs(60)) {
-                Ok(f) => force |= f,
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => return,
-            }
-        }
-    });
+        });
 }
 
 fn kind_of(ctx: COREWEBVIEW2_WEB_RESOURCE_CONTEXT) -> RequestKind {
@@ -470,7 +508,9 @@ fn decode_data_url(url: &str) -> Option<(String, Vec<u8>)> {
     let (meta, payload) = rest.split_once(',')?;
     let mime = meta.split(';').next().unwrap_or("text/plain").to_string();
     let bytes = if meta.ends_with(";base64") {
-        base64::engine::general_purpose::STANDARD.decode(payload).ok()?
+        base64::engine::general_purpose::STANDARD
+            .decode(payload)
+            .ok()?
     } else {
         payload.as_bytes().to_vec()
     };
@@ -480,8 +520,12 @@ fn decode_data_url(url: &str) -> Option<(String, Vec<u8>)> {
 /// Subscribe a tab to the shield: block requests, and register the page's cosmetic filters
 /// and scriptlets before each navigation commits.
 pub fn attach(webview: &WebView, shield: Shield, mode_for: ModeFor, tab_id: TabId) {
-    let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else { return };
-    let Ok(core2) = core.cast::<ICoreWebView2_2>() else { return };
+    let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
+        return;
+    };
+    let Ok(core2) = core.cast::<ICoreWebView2_2>() else {
+        return;
+    };
     let mut token = Default::default();
     // WebView2 reports iframes as DOCUMENT too; the main frame is the navigation target.
     let top_target: Arc<Mutex<String>> = Arc::default();
@@ -594,12 +638,21 @@ pub fn attach(webview: &WebView, shield: Shield, mode_for: ModeFor, tab_id: TabI
                 accept_rule(&core_msg, tab, body);
                 return Ok(());
             }
-            let Some(body) = msg.strip_prefix("byobu:") else { return Ok(()) };
-            let Ok(ask) = serde_json::from_str::<serde_json::Value>(body) else { return Ok(()) };
+            let Some(body) = msg.strip_prefix("byobu:") else {
+                return Ok(());
+            };
+            let Ok(ask) = serde_json::from_str::<serde_json::Value>(body) else {
+                return Ok(());
+            };
             let strings = |key: &str| -> Vec<String> {
                 ask.get(key)
                     .and_then(|v| v.as_array())
-                    .map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_owned)).take(1000).collect())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|s| s.as_str().map(str::to_owned))
+                            .take(1000)
+                            .collect()
+                    })
                     .unwrap_or_default()
             };
             let (classes, ids) = (strings("c"), strings("i"));
@@ -652,7 +705,8 @@ const COSMETIC_RUNTIME: &str = include_str!("../ui/byobu-cosmetic.js");
 
 /// Document-start script for `url`: hides elements and runs scriptlets, only on that host.
 fn cosmetic_script(shield: &Shield, mode_for: &ModeFor, url: &str) -> Option<String> {
-    if !(url.starts_with("http://") || url.starts_with("https://")) || url.starts_with("http://shoji.")
+    if !(url.starts_with("http://") || url.starts_with("https://"))
+        || url.starts_with("http://shoji.")
     {
         return None;
     }
@@ -674,7 +728,10 @@ fn cosmetic_script(shield: &Shield, mode_for: &ModeFor, url: &str) -> Option<Str
         "generic": !payload.generichide,
     });
     // JSON is valid JS except for these two line separators.
-    let data = data.to_string().replace('\u{2028}', "\\u2028").replace('\u{2029}', "\\u2029");
+    let data = data
+        .to_string()
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029");
     let mut js = COSMETIC_RUNTIME.replace("__BYOBU_PAYLOAD__", &data);
     if !payload.script.is_empty() {
         // Scriptlets run in the page's world at document start; one failing never stops the rest.
@@ -712,8 +769,8 @@ fn register(core: &ICoreWebView2, state: &Arc<Mutex<DocScript>>, script: Option<
     };
     let Some(script) = script else { return };
     let (state, core_done) = (state.clone(), core.clone());
-    let handler = AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(
-        move |result, id| {
+    let handler =
+        AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(move |result, id| {
             if result.is_ok() {
                 let current = state.lock().map(|mut st| {
                     let live = st.generation == generation;
@@ -730,8 +787,7 @@ fn register(core: &ICoreWebView2, state: &Arc<Mutex<DocScript>>, script: Option<
                 }
             }
             Ok(())
-        },
-    ));
+        }));
     let w = wide(script);
     let _ = unsafe { core.AddScriptToExecuteOnDocumentCreated(PCWSTR(w.as_ptr()), &handler) };
 }
@@ -749,10 +805,13 @@ pub fn pick_element(view: &WebView, tab: TabId) {
 /// A rule the picker sent back. Accepted only with the tab's one-time token, for the page's
 /// own host, and only in the plain `host##selector` shape.
 fn accept_rule(core: &ICoreWebView2, tab: u64, body: &str) {
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else { return };
-    let (Some(token), Some(selector)) =
-        (v.get("t").and_then(|t| t.as_str()), v.get("s").and_then(|s| s.as_str()))
-    else {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
+        return;
+    };
+    let (Some(token), Some(selector)) = (
+        v.get("t").and_then(|t| t.as_str()),
+        v.get("s").and_then(|s| s.as_str()),
+    ) else {
         return;
     };
     if !hub().take_token(tab, token) {
@@ -771,7 +830,9 @@ fn accept_rule(core: &ICoreWebView2, tab: u64, body: &str) {
     if unsafe { core.Source(&mut src) }.is_err() {
         return;
     }
-    let Some(host) = crate::extract_host(&take(src)) else { return };
+    let Some(host) = crate::extract_host(&take(src)) else {
+        return;
+    };
     let host = host.strip_prefix("www.").unwrap_or(&host).to_string();
     if let Ok(p) = hub().proxy.lock() {
         if let Some(p) = p.as_ref() {

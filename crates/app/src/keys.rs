@@ -119,17 +119,50 @@ mod tests {
 
     #[test]
     fn common_shortcuts() {
-        assert_eq!(command_for('T' as u32, true, false, false), Some(Command::NewTab));
-        assert_eq!(command_for('T' as u32, true, true, false), Some(Command::ReopenClosedTab));
-        assert_eq!(command_for('3' as u32, true, false, false), Some(Command::SelectTab(2)));
-        assert_eq!(command_for('9' as u32, true, false, false), Some(Command::SelectTab(usize::MAX)));
-        assert_eq!(command_for(VK_TAB, true, true, false), Some(Command::PrevTab));
-        assert_eq!(command_for(VK_LEFT, false, false, true), Some(Command::Back));
-        assert_eq!(command_for(VK_F12, false, false, false), Some(Command::DevTools));
-        assert_eq!(command_for('K' as u32, true, false, false), Some(Command::Palette));
-        assert_eq!(command_for('L' as u32, true, false, false), Some(Command::FocusAddress));
-        assert_eq!(command_for('D' as u32, true, false, false), Some(Command::ToggleFavourite));
-        assert_eq!(command_for(VK_F9, false, false, false), Some(Command::Reader));
+        assert_eq!(
+            command_for('T' as u32, true, false, false),
+            Some(Command::NewTab)
+        );
+        assert_eq!(
+            command_for('T' as u32, true, true, false),
+            Some(Command::ReopenClosedTab)
+        );
+        assert_eq!(
+            command_for('3' as u32, true, false, false),
+            Some(Command::SelectTab(2))
+        );
+        assert_eq!(
+            command_for('9' as u32, true, false, false),
+            Some(Command::SelectTab(usize::MAX))
+        );
+        assert_eq!(
+            command_for(VK_TAB, true, true, false),
+            Some(Command::PrevTab)
+        );
+        assert_eq!(
+            command_for(VK_LEFT, false, false, true),
+            Some(Command::Back)
+        );
+        assert_eq!(
+            command_for(VK_F12, false, false, false),
+            Some(Command::DevTools)
+        );
+        assert_eq!(
+            command_for('K' as u32, true, false, false),
+            Some(Command::Palette)
+        );
+        assert_eq!(
+            command_for('L' as u32, true, false, false),
+            Some(Command::FocusAddress)
+        );
+        assert_eq!(
+            command_for('D' as u32, true, false, false),
+            Some(Command::ToggleFavourite)
+        );
+        assert_eq!(
+            command_for(VK_F9, false, false, false),
+            Some(Command::Reader)
+        );
         // Plain typing and Escape pass through to the page.
         assert_eq!(command_for('T' as u32, false, false, false), None);
         assert_eq!(command_for(0x1B, false, false, false), None);

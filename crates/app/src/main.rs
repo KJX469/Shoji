@@ -133,7 +133,10 @@ pub(crate) enum BrowserEvent {
     /// Byobu blocked something for this tab (or its lists changed: tab 0)
     ShieldTouched(TabId),
     /// The element picker produced a rule for `host`
-    ShieldRule { host: String, selector: String },
+    ShieldRule {
+        host: String,
+        selector: String,
+    },
     /// The user clicked into a tab's page (split view: that pane becomes the active one)
     TabFocused(TabId),
     /// An https:// navigation could not connect (HTTPS-only mode may offer a fallback)
@@ -205,10 +208,7 @@ fn font_response(request: &wry::http::Request<Vec<u8>>) -> wry::http::Response<C
 /// `http://shoji.settings/` -> `shoji://settings`
 fn display_url(source: &str) -> Cow<'_, str> {
     match source.strip_prefix(INTERNAL_ORIGIN) {
-        Some(rest) => Cow::Owned(format!(
-            "{INTERNAL_SCHEME}{}",
-            rest.trim_end_matches('/')
-        )),
+        Some(rest) => Cow::Owned(format!("{INTERNAL_SCHEME}{}", rest.trim_end_matches('/'))),
         None => Cow::Borrowed(source),
     }
 }
@@ -283,13 +283,19 @@ fn next_group_color(win: &BrowserWindow) -> &'static str {
 /// The display tone of a group's colour.
 fn group_tone(win: &BrowserWindow, gid: u32) -> Option<String> {
     let g = win.tabs.groups().iter().find(|g| g.id == gid)?;
-    Some(shoji_brand::theme::tones(Accent::from_id(&g.color)).0.to_string())
+    Some(
+        shoji_brand::theme::tones(Accent::from_id(&g.color))
+            .0
+            .to_string(),
+    )
 }
 
 /// Move `tab` next to the other members of its group, so a group stays contiguous in the strip.
 fn gather_group(win: &mut BrowserWindow, tab: TabId, gid: u32) {
     let tabs = win.tabs.tabs();
-    let Some(from) = tabs.iter().position(|t| t.id == tab) else { return };
+    let Some(from) = tabs.iter().position(|t| t.id == tab) else {
+        return;
+    };
     let Some(last) = tabs
         .iter()
         .enumerate()
@@ -335,7 +341,10 @@ fn parse_css_color(input: &str) -> Option<String> {
     if nums.get(3).is_some_and(|a| *a < 0.5) {
         return None;
     }
-    Some(format!("#{:02x}{:02x}{:02x}", nums[0] as u8, nums[1] as u8, nums[2] as u8))
+    Some(format!(
+        "#{:02x}{:02x}{:02x}",
+        nums[0] as u8, nums[1] as u8, nums[2] as u8
+    ))
 }
 
 fn js_string(s: &str) -> String {
@@ -437,7 +446,11 @@ impl BrowserWindow {
     /// Where tab `id` sits: the whole page area, or its half in split view.
     fn rect_for(&self, id: TabId) -> Rect {
         let top = self.chrome_height();
-        let width = if self.sidebar_open { self.width - SIDEBAR_WIDTH } else { self.width };
+        let width = if self.sidebar_open {
+            self.width - SIDEBAR_WIDTH
+        } else {
+            self.width
+        };
         let height = self.height - top;
         match self.split_showing() {
             Some([a, b]) if id == a || id == b => {
@@ -496,10 +509,19 @@ impl BrowserWindow {
     /// top-right corner of the page area.
     fn notes_desk(&self) -> Frame {
         let top = self.chrome_height() + NOTES_MARGIN;
-        let sidebar = if self.sidebar_open { SIDEBAR_WIDTH } else { 0.0 };
+        let sidebar = if self.sidebar_open {
+            SIDEBAR_WIDTH
+        } else {
+            0.0
+        };
         let right = self.width - sidebar - NOTES_MARGIN;
         let width = NOTES_EXPANDED_MAX_WIDTH.min(right - NOTES_MARGIN).max(1.0);
-        [right - width, top, width, (self.height - top - NOTES_MARGIN).max(1.0)]
+        [
+            right - width,
+            top,
+            width,
+            (self.height - top - NOTES_MARGIN).max(1.0),
+        ]
     }
 
     /// Resting place of the sheet within the desk: the top-right corner, or all of it when expanded.
@@ -534,10 +556,16 @@ impl BrowserWindow {
 
     /// Advance the notepad animation one frame. Returns true while it is still running.
     fn step_notes(&mut self) -> bool {
-        let Some(anim) = &self.notes_anim else { return false };
+        let Some(anim) = &self.notes_anim else {
+            return false;
+        };
         let t = (anim.start.elapsed().as_secs_f32() / anim.duration.as_secs_f32()).min(1.0);
         // Ease out when unrolling or resizing, ease in when rolling up.
-        let e = if anim.closing { t * t * t } else { 1.0 - (1.0 - t).powi(3) } as f64;
+        let e = if anim.closing {
+            t * t * t
+        } else {
+            1.0 - (1.0 - t).powi(3)
+        } as f64;
         let mut f = [0.0; 4];
         for (i, v) in f.iter_mut().enumerate() {
             *v = anim.from[i] + (anim.to[i] - anim.from[i]) * e;
@@ -724,11 +752,7 @@ struct BrowserApp {
 }
 
 impl BrowserApp {
-    fn new(
-        proxy: EventLoopProxy<BrowserEvent>,
-        data_dir: PathBuf,
-        engine_version: String,
-    ) -> Self {
+    fn new(proxy: EventLoopProxy<BrowserEvent>, data_dir: PathBuf, engine_version: String) -> Self {
         let settings_path = data_dir.join("settings.json");
         let settings = Settings::load_from_path(&settings_path);
         webview::set_download_prefs(
@@ -761,7 +785,11 @@ impl BrowserApp {
             && previous.has_pages()
             && (!previous.clean_exit || mode == "always");
         let restore_on_start = offer && mode == "always";
-        let restore_tabs = if offer && !restore_on_start { previous.tab_count() } else { 0 };
+        let restore_tabs = if offer && !restore_on_start {
+            previous.tab_count()
+        } else {
+            0
+        };
         let pending_session = offer.then_some(previous);
 
         let pages = Arc::new(RwLock::new(PageContext {
@@ -843,7 +871,11 @@ impl BrowserApp {
             .with_custom_protocol("shoji".into(), |_, request| font_response(&request))
             .with_incognito(true)
             .with_transparent(frosted)
-            .with_background_color(if frosted { (0, 0, 0, 0) } else { window::page_rgba(dark) })
+            .with_background_color(if frosted {
+                (0, 0, 0, 0)
+            } else {
+                window::page_rgba(dark)
+            })
             .with_theme(window::webview_theme(&self.settings.appearance.theme))
             .with_ipc_handler(move |req: wry::http::Request<String>| {
                 if let Ok(msg) = serde_json::from_str(req.body()) {
@@ -966,7 +998,10 @@ impl BrowserApp {
                 if nav.starts_with("http://")
                     && !nav.starts_with(INTERNAL_ORIGIN)
                     && shoji_core::tabs::upgrade_to_https(&nav).is_some()
-                    && nav_pages.read().map(|c| c.settings.privacy.https_only).unwrap_or(false)
+                    && nav_pages
+                        .read()
+                        .map(|c| c.settings.privacy.https_only)
+                        .unwrap_or(false)
                 {
                     let allowed = extract_host(&nav)
                         .map(|h| nav_insecure.lock().map(|s| s.contains(&h)).unwrap_or(false))
@@ -1046,13 +1081,17 @@ impl BrowserApp {
         let url = url.unwrap_or_else(|| format!("{INTERNAL_SCHEME}newtab"));
         let tab_id = TabId(self.next_tab_id);
         self.next_tab_id += 1;
-        let Some(win) = self.windows.get(&win_id) else { return };
+        let Some(win) = self.windows.get(&win_id) else {
+            return;
+        };
         let window = win.window.clone();
         let rect = win.content_bounds();
         let Some(tab) = self.build_view(&window, tab_id, &url, rect) else {
             return;
         };
-        let Some(win) = self.windows.get_mut(&win_id) else { return };
+        let Some(win) = self.windows.get_mut(&win_id) else {
+            return;
+        };
         let title = match url.as_str() {
             "shoji://settings" => "Settings",
             "shoji://welcome" => "Welcome",
@@ -1086,15 +1125,23 @@ impl BrowserApp {
     }
 
     fn close_tab(&mut self, win_id: WindowId, tab_id: TabId, event_loop: &ActiveEventLoop) {
-        let Some(win) = self.windows.get_mut(&win_id) else { return };
+        let Some(win) = self.windows.get_mut(&win_id) else {
+            return;
+        };
         // Remember it for the new tab page's "recently closed" list.
         if let Some(state) = win.tabs.get_tab_by_id(tab_id).cloned() {
-            if !is_internal(&state.url) && !state.url.is_empty() && !state.url.starts_with("edge://") {
+            if !is_internal(&state.url)
+                && !state.url.is_empty()
+                && !state.url.starts_with("edge://")
+            {
                 if let Ok(mut ctx) = self.pages.write() {
                     ctx.recent.retain(|c| c.url != state.url);
                     ctx.recent.insert(
                         0,
-                        shoji_core::tabs::ClosedTab { url: state.url, title: state.title },
+                        shoji_core::tabs::ClosedTab {
+                            url: state.url,
+                            title: state.title,
+                        },
                     );
                     ctx.recent.truncate(20);
                 }
@@ -1146,12 +1193,18 @@ impl BrowserApp {
         if target == "shoji://settings" {
             return self.open_internal(win_id, "settings");
         }
-        let Some(active) = self.windows.get(&win_id).and_then(|w| w.tabs.active_tab_id()) else {
+        let Some(active) = self
+            .windows
+            .get(&win_id)
+            .and_then(|w| w.tabs.active_tab_id())
+        else {
             return;
         };
         let target = self.upgrade_target(active, target);
         let zoom = self.zoom_for(&target);
-        let Some(win) = self.windows.get_mut(&win_id) else { return };
+        let Some(win) = self.windows.get_mut(&win_id) else {
+            return;
+        };
         let wants_persistent = !is_internal(&target) && self.settings.is_site_persistent(&target);
         win.tabs.update_url(active, target.clone());
         win.tabs.update_favicon(active, None);
@@ -1179,14 +1232,20 @@ impl BrowserApp {
     }
 
     fn reload(&mut self, win_id: WindowId, hard: bool) {
-        let Some(win) = self.windows.get(&win_id) else { return };
-        let Some(state) = win.tabs.active_tab().cloned() else { return };
+        let Some(win) = self.windows.get(&win_id) else {
+            return;
+        };
+        let Some(state) = win.tabs.active_tab().cloned() else {
+            return;
+        };
         let partition_ok = win.views.get(&state.id).map(|t| t.persistent)
             == Some(!is_internal(&state.url) && self.settings.is_site_persistent(&state.url));
         if !partition_ok {
             return self.navigate(win_id, &state.url);
         }
-        let Some(tab) = win.views.get(&state.id) else { return };
+        let Some(tab) = win.views.get(&state.id) else {
+            return;
+        };
         if state.status == TabStatus::Crashed {
             let _ = tab.view.load_url(&engine_url(&state.url));
         } else if hard {
@@ -1230,7 +1289,9 @@ impl BrowserApp {
         if target.is_none() && only_tab {
             return; // dragging the last tab out of its own window: nothing to do
         }
-        let Some(win) = self.windows.get_mut(&src) else { return };
+        let Some(win) = self.windows.get_mut(&src) else {
+            return;
+        };
         let (Some(state), Some(tab)) = (win.tabs.extract_tab(tab_id), win.views.remove(&tab_id))
         else {
             return;
@@ -1244,17 +1305,22 @@ impl BrowserApp {
             Some(id) => id,
             None => return,
         };
-        let Some(dst_win) = self.windows.get_mut(&dst) else { return };
-        if let Ok(handle) = winit::raw_window_handle::HasWindowHandle::window_handle(dst_win.window.as_ref()) {
+        let Some(dst_win) = self.windows.get_mut(&dst) else {
+            return;
+        };
+        if let Ok(handle) =
+            winit::raw_window_handle::HasWindowHandle::window_handle(dst_win.window.as_ref())
+        {
             if let winit::raw_window_handle::RawWindowHandle::Win32(h) = handle.as_raw() {
                 let _ = tab.view.reparent(h.hwnd.get());
             }
         }
         if target.is_none() {
             if let Some((x, y)) = screen {
-                dst_win
-                    .window
-                    .set_outer_position(LogicalPosition::new((x - 120.0).max(0.0), (y - 16.0).max(0.0)));
+                dst_win.window.set_outer_position(LogicalPosition::new(
+                    (x - 120.0).max(0.0),
+                    (y - 16.0).max(0.0),
+                ));
             }
         }
         for other in dst_win.views.values_mut() {
@@ -1296,10 +1362,18 @@ impl BrowserApp {
         if !self.settings.privacy.https_only {
             return target;
         }
-        let (Some(up), Some(host)) = (shoji_core::tabs::upgrade_to_https(&target), extract_host(&target)) else {
+        let (Some(up), Some(host)) = (
+            shoji_core::tabs::upgrade_to_https(&target),
+            extract_host(&target),
+        ) else {
             return target;
         };
-        if self.insecure_hosts.lock().map(|s| s.contains(&host)).unwrap_or(false) {
+        if self
+            .insecure_hosts
+            .lock()
+            .map(|s| s.contains(&host))
+            .unwrap_or(false)
+        {
             return target;
         }
         // A site that redirects https -> http would loop forever: let the second attempt through.
@@ -1316,7 +1390,9 @@ impl BrowserApp {
     /// Push favourites, recently closed tabs and remembered-choice counts to every surface.
     fn push_data(&mut self) {
         let (favs, recent, restore) = {
-            let Ok(mut ctx) = self.pages.write() else { return };
+            let Ok(mut ctx) = self.pages.write() else {
+                return;
+            };
             ctx.favourites = self.favourites.items().to_vec();
             ctx.site_choices = self.site_data.count();
             (ctx.favourites.clone(), ctx.recent.clone(), ctx.restore_tabs)
@@ -1327,7 +1403,11 @@ impl BrowserApp {
         );
         let home = format!(
             "window.__homeData && window.__homeData({})",
-            pages::home_json(&pages::HomeData { favourites: &favs, recent: &recent, restore_tabs: restore })
+            pages::home_json(&pages::HomeData {
+                favourites: &favs,
+                recent: &recent,
+                restore_tabs: restore
+            })
         );
         for win in self.windows.values() {
             win.eval_chrome(&chrome);
@@ -1349,13 +1429,24 @@ impl BrowserApp {
                 if Some(t.id) == active_id {
                     active = tabs.len();
                 }
-                tabs.push(SessionTab { url: t.url.clone(), title: t.title.clone(), group: t.group });
+                tabs.push(SessionTab {
+                    url: t.url.clone(),
+                    title: t.title.clone(),
+                    group: t.group,
+                });
             }
             if !tabs.is_empty() {
-                windows.push(SessionWindow { tabs, active, groups: win.tabs.groups().to_vec() });
+                windows.push(SessionWindow {
+                    tabs,
+                    active,
+                    groups: win.tabs.groups().to_vec(),
+                });
             }
         }
-        let mut session = Session { clean_exit: clean, windows };
+        let mut session = Session {
+            clean_exit: clean,
+            windows,
+        };
         // Until the user answers the restore offer, never overwrite the old tabs with nothing.
         if !session.has_pages() {
             if let Some(previous) = &self.pending_session {
@@ -1413,12 +1504,17 @@ impl BrowserApp {
         // A lone blank new-tab page is replaced by the restored tabs.
         let blank = self.windows.get(&win_id).and_then(|w| {
             let tabs = w.tabs.tabs();
-            (tabs.len() == 1 && tabs[0].url == format!("{INTERNAL_SCHEME}newtab")).then(|| tabs[0].id)
+            (tabs.len() == 1 && tabs[0].url == format!("{INTERNAL_SCHEME}newtab"))
+                .then(|| tabs[0].id)
         });
         let mut ids = Vec::new();
         for t in &saved.tabs {
             self.create_tab(win_id, Some(t.url.clone()));
-            if let Some(id) = self.windows.get(&win_id).and_then(|w| w.tabs.active_tab_id()) {
+            if let Some(id) = self
+                .windows
+                .get(&win_id)
+                .and_then(|w| w.tabs.active_tab_id())
+            {
                 ids.push(id);
             }
         }
@@ -1445,7 +1541,9 @@ impl BrowserApp {
     }
 
     fn restore_session(&mut self, win_id: WindowId, event_loop: &ActiveEventLoop) {
-        let Some(session) = self.pending_session.take() else { return };
+        let Some(session) = self.pending_session.take() else {
+            return;
+        };
         if let Ok(mut ctx) = self.pages.write() {
             ctx.restore_tabs = 0;
         }
@@ -1469,7 +1567,9 @@ impl BrowserApp {
     /* ----- overlay: suggestions, command palette, menus, prompts ----- */
 
     fn ensure_overlay(&mut self, win_id: WindowId) {
-        let Some(win) = self.windows.get_mut(&win_id) else { return };
+        let Some(win) = self.windows.get_mut(&win_id) else {
+            return;
+        };
         if win.overlay.is_some() {
             return;
         }
@@ -1507,7 +1607,9 @@ impl BrowserApp {
         value: &str,
     ) {
         self.ensure_overlay(win_id);
-        let Some(win) = self.windows.get_mut(&win_id) else { return };
+        let Some(win) = self.windows.get_mut(&win_id) else {
+            return;
+        };
         win.overlay_mode = mode;
         win.overlay_open = true;
         win.overlay_shown = Some(Instant::now());
@@ -1532,7 +1634,9 @@ impl BrowserApp {
     }
 
     fn hide_overlay(&mut self, win_id: WindowId, refocus: bool) {
-        let Some(win) = self.windows.get_mut(&win_id) else { return };
+        let Some(win) = self.windows.get_mut(&win_id) else {
+            return;
+        };
         if !win.overlay_open {
             return;
         }
@@ -1550,15 +1654,24 @@ impl BrowserApp {
     }
 
     fn open_prompt(&mut self, win_id: WindowId, prompt: Prompt, title: &str, value: &str) {
-        let Some(win) = self.windows.get_mut(&win_id) else { return };
+        let Some(win) = self.windows.get_mut(&win_id) else {
+            return;
+        };
         win.prompt = Some(prompt);
         let w = 420.0f64.min(win.width - 20.0);
-        let frame = [((win.width - w) / 2.0).max(4.0), win.chrome_height() + 24.0, w, 112.0];
+        let frame = [
+            ((win.width - w) / 2.0).max(4.0),
+            win.chrome_height() + 24.0,
+            w,
+            112.0,
+        ];
         self.show_overlay(win_id, "prompt", Vec::new(), frame, title, "Name", value);
     }
 
     fn finish_prompt(&mut self, win_id: WindowId, text: &str) {
-        let Some(win) = self.windows.get_mut(&win_id) else { return };
+        let Some(win) = self.windows.get_mut(&win_id) else {
+            return;
+        };
         match win.prompt.take() {
             Some(Prompt::NewGroup(tab)) => {
                 let color = next_group_color(win);
@@ -1582,10 +1695,16 @@ impl BrowserApp {
             color: None,
         };
         let mut out = Vec::new();
-        let Some(win) = self.windows.get(&win_id) else { return out };
+        let Some(win) = self.windows.get(&win_id) else {
+            return out;
+        };
         let active = win.tabs.active_tab_id();
         for t in win.tabs.tabs() {
-            let label = if t.title.is_empty() { t.url.as_str() } else { t.title.as_str() };
+            let label = if t.title.is_empty() {
+                t.url.as_str()
+            } else {
+                t.title.as_str()
+            };
             let mut it = item("tab", t.id.0.to_string(), label, t.url.clone());
             it.color = t.group.and_then(|g| group_tone(win, g));
             out.push(it);
@@ -1597,7 +1716,11 @@ impl BrowserApp {
             ("new-tab", "New tab", "Ctrl+T"),
             ("new-window", "New window", "Ctrl+N"),
             ("reopen", "Reopen closed tab", "Ctrl+Shift+T"),
-            ("favourite", "Add or remove this page from favourites", "Ctrl+D"),
+            (
+                "favourite",
+                "Add or remove this page from favourites",
+                "Ctrl+D",
+            ),
             ("reader", "Reader view", "F9"),
             ("pip", "Picture in picture", ""),
             ("find", "Find in page", "Ctrl+F"),
@@ -1609,21 +1732,41 @@ impl BrowserApp {
         ] {
             out.push(item("action", name.to_string(), label, sub.to_string()));
         }
-        for (page, label) in [
-            ("shoji://settings", "Settings: appearance, privacy, passwords"),
-        ] {
+        for (page, label) in [(
+            "shoji://settings",
+            "Settings: appearance, privacy, passwords",
+        )] {
             out.push(item("url", page.to_string(), label, page.to_string()));
         }
         if win.split.is_some() {
-            out.push(item("action", "split-exit".into(), "Exit split view", String::new()));
+            out.push(item(
+                "action",
+                "split-exit".into(),
+                "Exit split view",
+                String::new(),
+            ));
         } else {
             for t in win.tabs.tabs().iter().filter(|t| Some(t.id) != active) {
-                let label = if t.title.is_empty() { t.url.as_str() } else { t.title.as_str() };
-                out.push(item("action", format!("split:{}", t.id.0), &format!("Split view with: {label}"), String::new()));
+                let label = if t.title.is_empty() {
+                    t.url.as_str()
+                } else {
+                    t.title.as_str()
+                };
+                out.push(item(
+                    "action",
+                    format!("split:{}", t.id.0),
+                    &format!("Split view with: {label}"),
+                    String::new(),
+                ));
             }
         }
         if let Some(a) = active {
-            out.push(item("action", format!("group-new:{}", a.0), "New tab group with this tab", String::new()));
+            out.push(item(
+                "action",
+                format!("group-new:{}", a.0),
+                "New tab group with this tab",
+                String::new(),
+            ));
         }
         out
     }
@@ -1638,13 +1781,21 @@ impl BrowserApp {
             color,
         };
         let mut out = Vec::new();
-        let Some(win) = self.windows.get(&win_id) else { return out };
-        let Some(tab) = win.tabs.get_tab_by_id(tab_id) else { return out };
+        let Some(win) = self.windows.get(&win_id) else {
+            return out;
+        };
+        let Some(tab) = win.tabs.get_tab_by_id(tab_id) else {
+            return out;
+        };
         let active = win.tabs.active_tab_id();
         if win.split.is_some_and(|p| p.contains(&tab_id)) {
             out.push(item("split-exit".into(), "Exit split view", None));
         } else if Some(tab_id) != active {
-            out.push(item(format!("split:{}", tab_id.0), "Open in split view with the current tab", None));
+            out.push(item(
+                format!("split:{}", tab_id.0),
+                "Open in split view with the current tab",
+                None,
+            ));
         }
         for g in win.tabs.groups() {
             if tab.group != Some(g.id) {
@@ -1655,11 +1806,23 @@ impl BrowserApp {
                 ));
             }
         }
-        out.push(item(format!("group-new:{}", tab_id.0), "New group with this tab…", None));
+        out.push(item(
+            format!("group-new:{}", tab_id.0),
+            "New group with this tab…",
+            None,
+        ));
         if let Some(g) = tab.group {
-            out.push(item(format!("group-none:{}", tab_id.0), "Remove from group", None));
+            out.push(item(
+                format!("group-none:{}", tab_id.0),
+                "Remove from group",
+                None,
+            ));
             out.push(item(format!("group-rename:{g}"), "Rename group…", None));
-            out.push(item(format!("group-color:{g}"), "Change group color", group_tone(win, g)));
+            out.push(item(
+                format!("group-color:{g}"),
+                "Change group color",
+                group_tone(win, g),
+            ));
         }
         let web = tab.url.starts_with("http://") || tab.url.starts_with("https://");
         if web {
@@ -1730,16 +1893,23 @@ impl BrowserApp {
             }
             "group-color" => {
                 if let (Ok(gid), Some(win)) = (a.parse::<u32>(), self.windows.get_mut(&win_id)) {
-                    let current = win.tabs.groups().iter().find(|g| g.id == gid).map(|g| g.color.clone());
+                    let current = win
+                        .tabs
+                        .groups()
+                        .iter()
+                        .find(|g| g.id == gid)
+                        .map(|g| g.color.clone());
                     if let Some(current) = current {
                         let i = GROUP_COLORS.iter().position(|c| *c == current).unwrap_or(0);
-                        win.tabs.set_group_color(gid, GROUP_COLORS[(i + 1) % GROUP_COLORS.len()]);
+                        win.tabs
+                            .set_group_color(gid, GROUP_COLORS[(i + 1) % GROUP_COLORS.len()]);
                         win.ui_dirty = true;
                     }
                 }
             }
             "fav" => {
-                let page = tab.and_then(|t| self.windows.get(&win_id)?.tabs.get_tab_by_id(t).cloned());
+                let page =
+                    tab.and_then(|t| self.windows.get(&win_id)?.tabs.get_tab_by_id(t).cloned());
                 if let Some(t) = page {
                     self.favourites.toggle(&t.url, &t.title);
                     self.push_data();
@@ -1761,8 +1931,12 @@ impl BrowserApp {
 
     /// Show `other` beside the active tab, or leave split view when `None`.
     fn split_with(&mut self, win_id: WindowId, other: Option<TabId>) {
-        let Some(win) = self.windows.get_mut(&win_id) else { return };
-        let Some(active) = win.tabs.active_tab_id() else { return };
+        let Some(win) = self.windows.get_mut(&win_id) else {
+            return;
+        };
+        let Some(active) = win.tabs.active_tab_id() else {
+            return;
+        };
         match other {
             None => {
                 if let Some(pair) = win.split.take() {
@@ -1787,9 +1961,15 @@ impl BrowserApp {
     }
 
     fn toggle_reader(&mut self, win_id: WindowId) {
-        let Some(win) = self.windows.get_mut(&win_id) else { return };
-        let Some(state) = win.tabs.active_tab().cloned() else { return };
-        let Some(tab) = win.views.get(&state.id) else { return };
+        let Some(win) = self.windows.get_mut(&win_id) else {
+            return;
+        };
+        let Some(state) = win.tabs.active_tab().cloned() else {
+            return;
+        };
+        let Some(tab) = win.views.get(&state.id) else {
+            return;
+        };
         if win.reader.remove(&state.id) {
             // Back to the article itself.
             let _ = tab.view.load_url(&state.url);
@@ -1801,16 +1981,20 @@ impl BrowserApp {
         }
         let proxy = self.proxy.clone();
         let id = state.id;
-        let _ = tab.view.evaluate_script_with_callback(pages::READER_SCRIPT, move |json| {
-            let _ = proxy.send_event(BrowserEvent::ReaderReady { tab_id: id, json });
-        });
+        let _ = tab
+            .view
+            .evaluate_script_with_callback(pages::READER_SCRIPT, move |json| {
+                let _ = proxy.send_event(BrowserEvent::ReaderReady { tab_id: id, json });
+            });
     }
 
     /* ----- notes ----- */
 
     fn open_notes(&mut self, win_id: WindowId) {
         let notes_json = self.notebook.to_json();
-        let Some(win) = self.windows.get_mut(&win_id) else { return };
+        let Some(win) = self.windows.get_mut(&win_id) else {
+            return;
+        };
         if win.notes.is_none() {
             let proxy = self.proxy.clone();
             let dark = window::is_dark(&win.window, &self.settings.appearance.theme);
@@ -1825,7 +2009,11 @@ impl BrowserApp {
                 .with_custom_protocol("shoji".into(), |_, request| font_response(&request))
                 .with_incognito(true)
                 // Pre-painted in the paper colour, so the first unroll never shows a blank rectangle.
-                .with_background_color(if dark { (35, 34, 31, 255) } else { (251, 249, 243, 255) })
+                .with_background_color(if dark {
+                    (35, 34, 31, 255)
+                } else {
+                    (251, 249, 243, 255)
+                })
                 .with_theme(window::webview_theme(&self.settings.appearance.theme))
                 .with_ipc_handler(move |req: wry::http::Request<String>| {
                     if let Ok(msg) = serde_json::from_str(req.body()) {
@@ -1845,7 +2033,9 @@ impl BrowserApp {
         win.notes_open = true;
         let sheet = win.notes_sheet();
         // Unroll downward from the top edge, unless it is already partly open (reopened mid-close).
-        let from = win.notes_clip.unwrap_or([sheet[0], sheet[1], sheet[2], 1.0]);
+        let from = win
+            .notes_clip
+            .unwrap_or([sheet[0], sheet[1], sheet[2], 1.0]);
         win.set_notes_clip(from);
         if let Some(n) = &win.notes {
             let _ = n.evaluate_script(&notes_layout_js("open", sheet, NOTES_OPEN_MS));
@@ -1863,7 +2053,9 @@ impl BrowserApp {
     }
 
     fn set_notes_expanded(&mut self, win_id: WindowId, expanded: bool) {
-        let Some(win) = self.windows.get_mut(&win_id) else { return };
+        let Some(win) = self.windows.get_mut(&win_id) else {
+            return;
+        };
         if !win.notes_open || win.notes_expanded == expanded {
             return;
         }
@@ -1878,7 +2070,9 @@ impl BrowserApp {
     }
 
     fn close_notes(&mut self, win_id: WindowId) {
-        let Some(win) = self.windows.get_mut(&win_id) else { return };
+        let Some(win) = self.windows.get_mut(&win_id) else {
+            return;
+        };
         if !win.notes_open {
             return;
         }
@@ -1897,7 +2091,9 @@ impl BrowserApp {
     /* ----- side panel ----- */
 
     fn toggle_sidebar(&mut self, win_id: WindowId, mode: &'static str) {
-        let Some(win) = self.windows.get_mut(&win_id) else { return };
+        let Some(win) = self.windows.get_mut(&win_id) else {
+            return;
+        };
         if win.sidebar_open && win.sidebar_mode == mode {
             return self.close_sidebar(win_id);
         }
@@ -2017,7 +2213,13 @@ impl BrowserApp {
             for win in self.windows.values() {
                 win.window.set_theme(window::forced_theme(&pref));
                 let theme = window::webview_theme(&pref);
-                for wv in win.chrome.iter().chain(&win.sidebar).chain(&win.notes).chain(win.views.values().map(|t| &t.view)) {
+                for wv in win
+                    .chrome
+                    .iter()
+                    .chain(&win.sidebar)
+                    .chain(&win.notes)
+                    .chain(win.views.values().map(|t| &t.view))
+                {
                     let _ = wv.set_theme(theme);
                 }
                 window::apply_frame(&win.window, window::is_dark(&win.window, &pref));
@@ -2058,7 +2260,8 @@ impl BrowserApp {
                 .iter()
                 .filter_map(|(id, win)| {
                     let tab = win.tabs.active_tab()?;
-                    let wants = !is_internal(&tab.url) && self.settings.is_site_persistent(&tab.url);
+                    let wants =
+                        !is_internal(&tab.url) && self.settings.is_site_persistent(&tab.url);
                     let has = win.views.get(&tab.id)?.persistent;
                     (wants != has && !is_internal(&tab.url)).then(|| (*id, tab.url.clone()))
                 })
@@ -2093,7 +2296,9 @@ impl BrowserApp {
                 self.push_data();
             }
             M::MinimizeWindow | M::ToggleMaximize | M::StartWindowResize => {
-                let Some(win) = self.windows.get(&win_id) else { return };
+                let Some(win) = self.windows.get(&win_id) else {
+                    return;
+                };
                 let w = &win.window;
                 match msg {
                     M::MinimizeWindow => w.set_minimized(true),
@@ -2137,7 +2342,9 @@ impl BrowserApp {
             M::NotesReady => {
                 if let Some(win) = self.windows.get_mut(&win_id) {
                     win.notes_ready = true;
-                    if let (true, None, Some(from)) = (win.notes_open, &win.notes_anim, win.notes_clip) {
+                    if let (true, None, Some(from)) =
+                        (win.notes_open, &win.notes_anim, win.notes_clip)
+                    {
                         let sheet = win.notes_sheet();
                         win.animate_notes(from, sheet, NOTES_OPEN_MS, false);
                     }
@@ -2158,7 +2365,8 @@ impl BrowserApp {
             }
             M::CloseWindow => self.close_window(win_id, event_loop),
             M::CreateTab { url } => {
-                let url = url.and_then(|u| normalize_url(&u, self.settings.search_url_template()).ok());
+                let url =
+                    url.and_then(|u| normalize_url(&u, self.settings.search_url_template()).ok());
                 self.create_tab(win_id, url);
             }
             M::OpenNewWindow => self.new_window(event_loop, None),
@@ -2175,7 +2383,11 @@ impl BrowserApp {
                         win.show_tab(tab);
                     }
                 }
-                let url = if url.is_empty() { format!("{INTERNAL_SCHEME}newtab") } else { url };
+                let url = if url.is_empty() {
+                    format!("{INTERNAL_SCHEME}newtab")
+                } else {
+                    url
+                };
                 self.navigate(win_id, &url);
             }
             M::GoBack | M::GoForward | M::Stop | M::OpenDevTools => {
@@ -2225,22 +2437,31 @@ impl BrowserApp {
                 let tab = from_tab.and_then(|id| self.windows.get(&win_id)?.views.get(&id));
                 if let Some(tab) = tab {
                     let json = shield::hub().state_json(log, None);
-                    let _ = tab
-                        .view
-                        .evaluate_script(&format!("window.__byobuState&&window.__byobuState({json})"));
+                    let _ = tab.view.evaluate_script(&format!(
+                        "window.__byobuState&&window.__byobuState({json})"
+                    ));
                 }
             }
             M::ToggleDownloadsSidebar => self.toggle_sidebar(win_id, "downloads"),
             M::CloseSidebar => self.close_sidebar(win_id),
             M::OpenCertificateDialog { host } => cert::open_certificate_dialog(&host),
-            M::ReorderTab { from_index, to_index } => {
+            M::ReorderTab {
+                from_index,
+                to_index,
+            } => {
                 if let Some(win) = self.windows.get_mut(&win_id) {
-                    if self.settings.tabs.enable_tab_reordering && win.tabs.reorder_tab(from_index, to_index) {
+                    if self.settings.tabs.enable_tab_reordering
+                        && win.tabs.reorder_tab(from_index, to_index)
+                    {
                         win.ui_dirty = true;
                     }
                 }
             }
-            M::DetachTabToNewWindow { tab_id, screen_x, screen_y } => {
+            M::DetachTabToNewWindow {
+                tab_id,
+                screen_x,
+                screen_y,
+            } => {
                 if self.settings.tabs.enable_tab_tearoff {
                     self.detach_tab(win_id, tab_id, screen_x.zip(screen_y), event_loop);
                 }
@@ -2299,7 +2520,8 @@ impl BrowserApp {
             }
             M::CancelDownload { download_id } => webview::cancel_download(download_id),
             M::ChangeDownloadFolder => {
-                if let Some(folder) = webview::pick_folder(&self.settings.downloads.default_folder) {
+                if let Some(folder) = webview::pick_folder(&self.settings.downloads.default_folder)
+                {
                     let js = format!(
                         "window.__setDownloadFolder && window.__setDownloadFolder({})",
                         js_string(&folder.to_string_lossy())
@@ -2316,7 +2538,10 @@ impl BrowserApp {
                     win.layout();
                 }
             }
-            M::PermissionResponse { permission_id, allow } => {
+            M::PermissionResponse {
+                permission_id,
+                allow,
+            } => {
                 // The answer is remembered for that site, so it isn't asked again.
                 if let Some((host, kind)) = self.perm_pending.remove(&permission_id) {
                     self.site_data.set_permission(&host, kind, allow);
@@ -2349,7 +2574,10 @@ impl BrowserApp {
                 }
             }
             M::ToggleFavourite => {
-                let page = self.windows.get(&win_id).and_then(|w| w.tabs.active_tab().cloned());
+                let page = self
+                    .windows
+                    .get(&win_id)
+                    .and_then(|w| w.tabs.active_tab().cloned());
                 if let Some(t) = page {
                     self.favourites.toggle(&t.url, &t.title);
                     self.push_data();
@@ -2366,7 +2594,9 @@ impl BrowserApp {
                 }
             }
             M::SuggestShow { items, x, width } => {
-                let Some(win) = self.windows.get(&win_id) else { return };
+                let Some(win) = self.windows.get(&win_id) else {
+                    return;
+                };
                 if items.is_empty() {
                     return self.hide_overlay(win_id, false);
                 }
@@ -2392,21 +2622,39 @@ impl BrowserApp {
                 }
             }
             M::SuggestClose => {
-                if self.windows.get(&win_id).is_some_and(|w| w.overlay_mode == "suggest") {
+                if self
+                    .windows
+                    .get(&win_id)
+                    .is_some_and(|w| w.overlay_mode == "suggest")
+                {
                     self.hide_overlay(win_id, false);
                 }
             }
             M::OpenPalette => {
-                if self.windows.get(&win_id).is_some_and(|w| w.overlay_open && w.overlay_mode == "palette") {
+                if self
+                    .windows
+                    .get(&win_id)
+                    .is_some_and(|w| w.overlay_open && w.overlay_mode == "palette")
+                {
                     return self.hide_overlay(win_id, true);
                 }
                 let items = self.palette_items(win_id);
-                let Some(win) = self.windows.get(&win_id) else { return };
+                let Some(win) = self.windows.get(&win_id) else {
+                    return;
+                };
                 let w = (win.width - 40.0).clamp(300.0, 620.0);
                 let top = win.chrome_height() + 12.0;
                 let h = (win.height - top - 24.0).clamp(160.0, 440.0);
                 let x = ((win.width - w) / 2.0).max(4.0);
-                self.show_overlay(win_id, "palette", items, [x, top, w, h], "", "Jump to a tab, favourite, setting or action", "");
+                self.show_overlay(
+                    win_id,
+                    "palette",
+                    items,
+                    [x, top, w, h],
+                    "",
+                    "Jump to a tab, favourite, setting or action",
+                    "",
+                );
             }
             M::OverlayReady => {
                 if let Some(win) = self.windows.get_mut(&win_id) {
@@ -2434,7 +2682,8 @@ impl BrowserApp {
             M::OverlayChoose { kind, value } => {
                 // Navigation and tab switches focus the page themselves; actions that open a
                 // prompt must keep the focus for it.
-                let opens_prompt = value.starts_with("group-new") || value.starts_with("group-rename");
+                let opens_prompt =
+                    value.starts_with("group-new") || value.starts_with("group-rename");
                 self.hide_overlay(win_id, kind == "action" && !opens_prompt);
                 match kind.as_str() {
                     "url" => self.navigate(win_id, &value),
@@ -2459,7 +2708,9 @@ impl BrowserApp {
             }
             M::TabMenu { tab_id, x, y } => {
                 let items = self.tab_menu_items(win_id, tab_id);
-                let Some(win) = self.windows.get(&win_id) else { return };
+                let Some(win) = self.windows.get(&win_id) else {
+                    return;
+                };
                 let w = 260.0f64.min(win.width - 8.0);
                 let x = x.min(win.width - w - 4.0).max(4.0);
                 let h = items.len() as f64 * 32.0 + 10.0;
@@ -2498,14 +2749,20 @@ impl BrowserApp {
             M::PageInfo { color, has_video } => {
                 if let Some(tab_id) = from_tab {
                     let tint = color.as_deref().and_then(parse_css_color);
-                    if let Some(tab) = self.windows.get_mut(&win_id).and_then(|w| w.views.get_mut(&tab_id)) {
+                    if let Some(tab) = self
+                        .windows
+                        .get_mut(&win_id)
+                        .and_then(|w| w.views.get_mut(&tab_id))
+                    {
                         tab.tint = tint;
                         tab.has_video = has_video;
                     }
                 }
             }
             M::ContinueInsecure { tab_id, host, url } => {
-                if url.starts_with("http://") && extract_host(&url).as_deref() == Some(host.as_str()) {
+                if url.starts_with("http://")
+                    && extract_host(&url).as_deref() == Some(host.as_str())
+                {
                     if let Ok(mut set) = self.insecure_hosts.lock() {
                         set.insert(host);
                     }
@@ -2535,7 +2792,10 @@ impl BrowserApp {
         match cmd {
             Command::NewTab => self.create_tab(win_id, None),
             Command::ReopenClosedTab => {
-                let url = self.windows.get_mut(&win_id).and_then(|w| w.tabs.pop_last_closed());
+                let url = self
+                    .windows
+                    .get_mut(&win_id)
+                    .and_then(|w| w.tabs.pop_last_closed());
                 if let Some(u) = &url {
                     if let Ok(mut ctx) = self.pages.write() {
                         ctx.recent.retain(|c| &c.url != u);
@@ -2548,7 +2808,11 @@ impl BrowserApp {
             }
             Command::NewWindow => self.new_window(event_loop, None),
             Command::CloseTab => {
-                if let Some(id) = self.windows.get(&win_id).and_then(|w| w.tabs.active_tab_id()) {
+                if let Some(id) = self
+                    .windows
+                    .get(&win_id)
+                    .and_then(|w| w.tabs.active_tab_id())
+                {
                     self.close_tab(win_id, id, event_loop);
                 }
             }
@@ -2572,7 +2836,9 @@ impl BrowserApp {
             Command::Back => ipc(self, M::GoBack),
             Command::Forward => ipc(self, M::GoForward),
             Command::NextTab | Command::PrevTab | Command::SelectTab(_) => {
-                let Some(win) = self.windows.get_mut(&win_id) else { return };
+                let Some(win) = self.windows.get_mut(&win_id) else {
+                    return;
+                };
                 let tabs = win.tabs.tabs();
                 if tabs.is_empty() {
                     return;
@@ -2635,14 +2901,20 @@ impl BrowserApp {
                 }
                 if let Ok(json) = serde_json::to_string(&msg) {
                     if json != win.last_ui_json {
-                        win.eval_chrome(&format!("window.__shellUpdate && window.__shellUpdate({json})"));
+                        win.eval_chrome(&format!(
+                            "window.__shellUpdate && window.__shellUpdate({json})"
+                        ));
                         win.last_ui_json = json;
                     }
                 }
             }
             if win.sidebar_dirty && win.sidebar_open {
                 win.sidebar_dirty = false;
-                let url = win.tabs.active_tab().map(|t| t.url.clone()).unwrap_or_default();
+                let url = win
+                    .tabs
+                    .active_tab()
+                    .map(|t| t.url.clone())
+                    .unwrap_or_default();
                 let persistent = win.active().is_some_and(|t| t.persistent);
                 let info = self.cert_cache.describe(
                     &url,
@@ -2656,7 +2928,9 @@ impl BrowserApp {
                     security_info: Some(Box::new(info)),
                 };
                 if let Ok(json) = serde_json::to_string(&msg) {
-                    win.eval_sidebar(&format!("window.__sidebarSync && window.__sidebarSync({json})"));
+                    win.eval_sidebar(&format!(
+                        "window.__sidebarSync && window.__sidebarSync({json})"
+                    ));
                 }
             }
             // Page-derived toolbar state: tint colour, picture-in-picture, reader, favourite star.
@@ -2669,7 +2943,10 @@ impl BrowserApp {
             let page = format!("{tint:?}|{video}|{reader}");
             if page != win.last_page_sync {
                 win.last_page_sync = page;
-                let tint_js = tint.as_deref().map(js_string).unwrap_or_else(|| "null".into());
+                let tint_js = tint
+                    .as_deref()
+                    .map(js_string)
+                    .unwrap_or_else(|| "null".into());
                 win.eval_chrome(&format!(
                     "window.__tint && window.__tint({tint_js}); window.__syncPage && window.__syncPage({{hasVideo:{video},reader:{reader}}})"
                 ));
@@ -2694,13 +2971,15 @@ impl BrowserApp {
                 let json = shield::hub().tab_json(tab, &host, state);
                 let key = u64::from(win.window.id());
                 if shield::hub().changed(&format!("c{key}"), &json) {
-                    win.eval_chrome(&format!("window.__shieldSync && window.__shieldSync({json})"));
+                    win.eval_chrome(&format!(
+                        "window.__shieldSync && window.__shieldSync({json})"
+                    ));
                 }
                 if win.sidebar_open && win.sidebar_mode == "shield" {
-                    let paused = serde_json::to_string(&self.settings.shield.paused_sites).unwrap_or_default();
-                    let js = format!(
-                        "window.__shieldPanel && window.__shieldPanel({json}, {paused})"
-                    );
+                    let paused = serde_json::to_string(&self.settings.shield.paused_sites)
+                        .unwrap_or_default();
+                    let js =
+                        format!("window.__shieldPanel && window.__shieldPanel({json}, {paused})");
                     if shield::hub().changed(&format!("s{key}"), &js) {
                         win.eval_sidebar(&js);
                     }
@@ -2708,7 +2987,10 @@ impl BrowserApp {
                     shield::hub().forget_sync(&format!("s{key}"));
                 }
             }
-            let fav = win.tabs.active_tab().is_some_and(|t| self.favourites.contains(&t.url));
+            let fav = win
+                .tabs
+                .active_tab()
+                .is_some_and(|t| self.favourites.contains(&t.url));
             let fav_state = fav.to_string();
             if fav_state != win.last_fav_sync {
                 win.last_fav_sync = fav_state;
@@ -2728,7 +3010,9 @@ impl BrowserApp {
         let mut next: Option<Instant> = None;
         for win in self.windows.values_mut() {
             for (id, tab) in win.views.iter_mut() {
-                let Some(since) = tab.hidden_since.filter(|_| !tab.suspended) else { continue };
+                let Some(since) = tab.hidden_since.filter(|_| !tab.suspended) else {
+                    continue;
+                };
                 let due = since + after;
                 if due <= now {
                     webview::try_suspend(&tab.view, *id, self.proxy.clone());
@@ -2745,20 +3029,30 @@ impl BrowserApp {
 
     /// The WebView2 browser process died: every view in this app is gone. Rebuild them.
     fn restart_engine(&mut self) {
-        if self.last_engine_restart.is_some_and(|t| t.elapsed() < Duration::from_secs(5)) {
+        if self
+            .last_engine_restart
+            .is_some_and(|t| t.elapsed() < Duration::from_secs(5))
+        {
             return;
         }
         self.last_engine_restart = Some(Instant::now());
         let ids: Vec<WindowId> = self.windows.keys().copied().collect();
         for win_id in ids {
-            let Some(win) = self.windows.get_mut(&win_id) else { continue };
+            let Some(win) = self.windows.get_mut(&win_id) else {
+                continue;
+            };
             win.sidebar = None;
             win.sidebar_open = false;
             win.overlay = None;
             win.overlay_open = false;
             win.overlay_ready = false;
             let window = win.window.clone();
-            let tabs: Vec<(TabId, String)> = win.tabs.tabs().iter().map(|t| (t.id, t.url.clone())).collect();
+            let tabs: Vec<(TabId, String)> = win
+                .tabs
+                .tabs()
+                .iter()
+                .map(|t| (t.id, t.url.clone()))
+                .collect();
             let active = win.tabs.active_tab_id();
             win.views.clear();
             win.chrome = None;
@@ -2845,9 +3139,19 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                     self.handle_command(win_id, cmd, event_loop);
                 }
             }
-            BrowserEvent::TabUpdate { tab_id, url, title, history, favicon } => {
-                let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) else { return };
-                let Some(state) = win.tabs.tabs_mut().iter_mut().find(|t| t.id == tab_id) else { return };
+            BrowserEvent::TabUpdate {
+                tab_id,
+                url,
+                title,
+                history,
+                favicon,
+            } => {
+                let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) else {
+                    return;
+                };
+                let Some(state) = win.tabs.tabs_mut().iter_mut().find(|t| t.id == tab_id) else {
+                    return;
+                };
                 let mut changed = false;
                 let mut moved: Option<(String, String)> = None;
                 if let Some(url) = url {
@@ -2897,7 +3201,9 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 if let Some((old, new)) = moved {
                     if extract_host(&old) != extract_host(&new) && extract_host(&new).is_some() {
                         let zoom = self.zoom_for(&new);
-                        if let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) {
+                        if let Some(win) =
+                            self.owner(tab_id).and_then(|id| self.windows.get_mut(&id))
+                        {
                             if let Some(tab) = win.views.get(&tab_id) {
                                 let _ = unsafe { tab.view.controller().SetZoomFactor(zoom) };
                             }
@@ -2916,28 +3222,34 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                     }
                 }
             }
-            BrowserEvent::PermissionPrompt { tab_id, permission_id, origin, kind } => {
-                match self.settings.permission_policy(kind) {
-                    "allow" => webview::resolve_permission(permission_id, true),
-                    "block" => webview::resolve_permission(permission_id, false),
-                    _ if self.site_data.permission(&origin, kind).is_some() => {
-                        let allow = self.site_data.permission(&origin, kind).unwrap_or(false);
-                        webview::resolve_permission(permission_id, allow)
-                    }
-                    _ => {
-                        let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get(&id)) else {
-                            return webview::resolve_permission(permission_id, false);
-                        };
-                        self.perm_pending.insert(permission_id, (origin.clone(), kind));
-                        let json = serde_json::json!({
-                            "permission_id": permission_id,
-                            "origin": origin,
-                            "permission_kind": kind,
-                        });
-                        win.eval_chrome(&format!("window.__permissionPrompt && window.__permissionPrompt({json})"));
-                    }
+            BrowserEvent::PermissionPrompt {
+                tab_id,
+                permission_id,
+                origin,
+                kind,
+            } => match self.settings.permission_policy(kind) {
+                "allow" => webview::resolve_permission(permission_id, true),
+                "block" => webview::resolve_permission(permission_id, false),
+                _ if self.site_data.permission(&origin, kind).is_some() => {
+                    let allow = self.site_data.permission(&origin, kind).unwrap_or(false);
+                    webview::resolve_permission(permission_id, allow)
                 }
-            }
+                _ => {
+                    let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get(&id)) else {
+                        return webview::resolve_permission(permission_id, false);
+                    };
+                    self.perm_pending
+                        .insert(permission_id, (origin.clone(), kind));
+                    let json = serde_json::json!({
+                        "permission_id": permission_id,
+                        "origin": origin,
+                        "permission_kind": kind,
+                    });
+                    win.eval_chrome(&format!(
+                        "window.__permissionPrompt && window.__permissionPrompt({json})"
+                    ));
+                }
+            },
             BrowserEvent::TabCrashed(tab_id, kind) => {
                 // 0 = browser process exited (all views are dead); 1/2 = this page's renderer.
                 if kind == 0 {
@@ -2946,18 +3258,25 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 if kind != 1 && kind != 2 {
                     return; // GPU / utility processes restart on their own
                 }
-                let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) else { return };
+                let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) else {
+                    return;
+                };
                 win.tabs.mark_tab_crashed(tab_id);
                 win.ui_dirty = true;
                 if let Ok(mut ctx) = self.pages.write() {
-                    ctx.notices.insert(tab_id.0, pages::crash(&self.settings, tab_id.0));
+                    ctx.notices
+                        .insert(tab_id.0, pages::crash(&self.settings, tab_id.0));
                 }
                 if let Some(tab) = win.views.get(&tab_id) {
-                    let _ = tab.view.load_url(&format!("{INTERNAL_ORIGIN}notice-{}/", tab_id.0));
+                    let _ = tab
+                        .view
+                        .load_url(&format!("{INTERNAL_ORIGIN}notice-{}/", tab_id.0));
                 }
             }
             BrowserEvent::CertificateError { tab_id, host, uri } => {
-                let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get(&id)) else { return };
+                let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get(&id)) else {
+                    return;
+                };
                 if let Ok(mut ctx) = self.pages.write() {
                     ctx.notices.insert(
                         tab_id.0,
@@ -2965,17 +3284,31 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                     );
                 }
                 if let Some(tab) = win.views.get(&tab_id) {
-                    let _ = tab.view.load_url(&format!("{INTERNAL_ORIGIN}notice-{}/", tab_id.0));
+                    let _ = tab
+                        .view
+                        .load_url(&format!("{INTERNAL_ORIGIN}notice-{}/", tab_id.0));
                 }
             }
             BrowserEvent::CertificateReady(host) => {
                 for win in self.windows.values_mut() {
-                    if win.tabs.active_tab().and_then(|t| extract_host(&t.url)).as_deref() == Some(host.as_str()) {
+                    if win
+                        .tabs
+                        .active_tab()
+                        .and_then(|t| extract_host(&t.url))
+                        .as_deref()
+                        == Some(host.as_str())
+                    {
                         win.sidebar_dirty = true;
                     }
                 }
             }
-            BrowserEvent::DownloadProgress { download_id, filename, received_bytes, total_bytes, state } => {
+            BrowserEvent::DownloadProgress {
+                download_id,
+                filename,
+                received_bytes,
+                total_bytes,
+                state,
+            } => {
                 let json = serde_json::json!({
                     "download_id": download_id,
                     "filename": filename,
@@ -2983,8 +3316,10 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                     "total_bytes": total_bytes,
                     "state": state,
                 });
-                let chrome_js = format!("window.__downloadProgress && window.__downloadProgress({json})");
-                let sidebar_js = format!("window.__syncDownloads && window.__syncDownloads({json})");
+                let chrome_js =
+                    format!("window.__downloadProgress && window.__downloadProgress({json})");
+                let sidebar_js =
+                    format!("window.__syncDownloads && window.__syncDownloads({json})");
                 for win in self.windows.values() {
                     win.eval_chrome(&chrome_js);
                     win.eval_sidebar(&sidebar_js);
@@ -2999,13 +3334,20 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 }
             }
             BrowserEvent::NavFailed { tab_id, uri } => {
-                let Some(host) = extract_host(&uri) else { return };
-                let recent = self.upgraded.get(&host).is_some_and(|t| t.elapsed() < Duration::from_secs(60));
+                let Some(host) = extract_host(&uri) else {
+                    return;
+                };
+                let recent = self
+                    .upgraded
+                    .get(&host)
+                    .is_some_and(|t| t.elapsed() < Duration::from_secs(60));
                 if !recent || !self.settings.privacy.https_only {
                     return;
                 }
                 self.upgraded.remove(&host);
-                let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get(&id)) else { return };
+                let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get(&id)) else {
+                    return;
+                };
                 let http_url = format!("http://{}", uri.trim_start_matches("https://"));
                 if let Ok(mut ctx) = self.pages.write() {
                     ctx.notices.insert(
@@ -3014,7 +3356,9 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                     );
                 }
                 if let Some(tab) = win.views.get(&tab_id) {
-                    let _ = tab.view.load_url(&format!("{INTERNAL_ORIGIN}notice-{}/", tab_id.0));
+                    let _ = tab
+                        .view
+                        .load_url(&format!("{INTERNAL_ORIGIN}notice-{}/", tab_id.0));
                 }
             }
             BrowserEvent::ReaderReady { tab_id, json } => {
@@ -3024,24 +3368,34 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                     site: String,
                     html: String,
                 }
-                let article = serde_json::from_str::<serde_json::Value>(&json).ok().and_then(|v| {
-                    let field = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
-                    Some(Article {
-                        title: field("title")?,
-                        byline: field("byline").unwrap_or_default(),
-                        site: field("site").unwrap_or_default(),
-                        html: field("html")?,
-                    })
-                });
-                let Some(win_id) = self.owner(tab_id) else { return };
+                let article = serde_json::from_str::<serde_json::Value>(&json)
+                    .ok()
+                    .and_then(|v| {
+                        let field = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
+                        Some(Article {
+                            title: field("title")?,
+                            byline: field("byline").unwrap_or_default(),
+                            site: field("site").unwrap_or_default(),
+                            html: field("html")?,
+                        })
+                    });
+                let Some(win_id) = self.owner(tab_id) else {
+                    return;
+                };
                 let Some(article) = article else {
                     if let Some(win) = self.windows.get(&win_id) {
                         win.eval_chrome("window.__noReader && window.__noReader()");
                     }
                     return;
                 };
-                let Some(win) = self.windows.get_mut(&win_id) else { return };
-                let original = win.tabs.get_tab_by_id(tab_id).map(|t| t.url.clone()).unwrap_or_default();
+                let Some(win) = self.windows.get_mut(&win_id) else {
+                    return;
+                };
+                let original = win
+                    .tabs
+                    .get_tab_by_id(tab_id)
+                    .map(|t| t.url.clone())
+                    .unwrap_or_default();
                 let page = pages::reader(
                     &self.settings,
                     &article.title,
@@ -3056,7 +3410,9 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 win.reader.insert(tab_id);
                 win.ui_dirty = true;
                 if let Some(tab) = win.views.get(&tab_id) {
-                    let _ = tab.view.load_url(&format!("{INTERNAL_ORIGIN}notice-{}/", tab_id.0));
+                    let _ = tab
+                        .view
+                        .load_url(&format!("{INTERNAL_ORIGIN}notice-{}/", tab_id.0));
                 }
             }
             BrowserEvent::ShieldTouched(tab_id) => {
@@ -3071,7 +3427,9 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 let line = format!("{host}##{selector}");
                 self.update_settings(|s| {
                     if !s.shield.custom_rules.lines().any(|l| l.trim() == line) {
-                        if !s.shield.custom_rules.is_empty() && !s.shield.custom_rules.ends_with('\n') {
+                        if !s.shield.custom_rules.is_empty()
+                            && !s.shield.custom_rules.ends_with('\n')
+                        {
                             s.shield.custom_rules.push('\n');
                         }
                         s.shield.custom_rules.push_str(&line);
@@ -3094,7 +3452,12 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
         }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window_id: WindowId,
+        event: WindowEvent,
+    ) {
         match event {
             WindowEvent::CloseRequested => self.close_window(window_id, event_loop),
             WindowEvent::Resized(size) => {
@@ -3122,11 +3485,13 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 }
             }
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
-            WindowEvent::KeyboardInput { event, .. } if event.state.is_pressed() && !event.repeat => {
+            WindowEvent::KeyboardInput { event, .. }
+                if event.state.is_pressed() && !event.repeat =>
+            {
                 let m = self.modifiers;
-                if let Some(cmd) = keys::vkey_from_winit(&event.logical_key)
-                    .and_then(|vk| keys::command_for(vk, m.control_key(), m.shift_key(), m.alt_key()))
-                {
+                if let Some(cmd) = keys::vkey_from_winit(&event.logical_key).and_then(|vk| {
+                    keys::command_for(vk, m.control_key(), m.shift_key(), m.alt_key())
+                }) {
                     self.handle_command(window_id, cmd, event_loop);
                 }
             }
@@ -3141,7 +3506,11 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
             animating |= win.step_notes();
         }
         let session_due = self.maybe_write_session();
-        let next = self.rest_background_tabs().into_iter().chain(session_due).min();
+        let next = self
+            .rest_background_tabs()
+            .into_iter()
+            .chain(session_due)
+            .min();
         // While something animates, wake for the next frame; otherwise sleep until needed.
         let frame = animating.then(|| Instant::now() + Duration::from_millis(8));
         event_loop.set_control_flow(match frame.into_iter().chain(next).min() {
@@ -3176,7 +3545,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.iter().any(|a| a == "--uninstall") {
         let uninstaller = exe_dir.join("uninstall.exe");
         if uninstaller.exists() {
-            let _ = std::process::Command::new(uninstaller).arg("--uninstall").spawn();
+            let _ = std::process::Command::new(uninstaller)
+                .arg("--uninstall")
+                .spawn();
         }
         return Ok(());
     }
@@ -3225,8 +3596,14 @@ mod feature_tests {
         assert_eq!(parse_css_color("#fff").as_deref(), Some("#ffffff"));
         assert_eq!(parse_css_color("#1a2B3c").as_deref(), Some("#1a2b3c"));
         assert_eq!(parse_css_color("#11223344").as_deref(), Some("#112233"));
-        assert_eq!(parse_css_color("rgb(10, 20, 30)").as_deref(), Some("#0a141e"));
-        assert_eq!(parse_css_color("rgba(10, 20, 30, 1)").as_deref(), Some("#0a141e"));
+        assert_eq!(
+            parse_css_color("rgb(10, 20, 30)").as_deref(),
+            Some("#0a141e")
+        );
+        assert_eq!(
+            parse_css_color("rgba(10, 20, 30, 1)").as_deref(),
+            Some("#0a141e")
+        );
         assert_eq!(parse_css_color("rgba(0, 0, 0, 0)"), None);
         assert_eq!(parse_css_color("rgb(300, 0, 0)"), None);
         assert_eq!(parse_css_color("red"), None);

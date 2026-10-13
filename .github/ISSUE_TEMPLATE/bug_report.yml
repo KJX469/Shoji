@@ -1,0 +1,52 @@
+name: Bug report
+description: Something in Shoji doesn't work the way it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Click …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Shoji version
+      description: From the file properties of shoji.exe, or the release you installed.
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 23H2
+    validations:
+      required: true
+  - type: input
+    id: webview2
+    attributes:
+      label: WebView2 runtime version
+      description: Optional. Visit edge://version in Edge, or see Settings → Apps.
+  - type: dropdown
+    id: shield
+    attributes:
+      label: Is this about a page that looks or behaves wrongly?
+      description: If so, try pausing Byōbu (the shield) on that site first.
+      options:
+        - Not a page issue
+        - Still broken with the shield paused
+        - Only broken while the shield is on
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots or anything else

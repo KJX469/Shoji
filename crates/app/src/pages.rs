@@ -69,7 +69,9 @@ pub fn html_escape(s: &str) -> String {
 
 /// A JSON value safe to embed inside a `<script>` block.
 fn script_json(value: serde_json::Result<String>) -> String {
-    value.unwrap_or_else(|_| "null".into()).replace("</", "<\\/")
+    value
+        .unwrap_or_else(|_| "null".into())
+        .replace("</", "<\\/")
 }
 
 /// Toolbar behaviour flags read by the chrome strip.
@@ -142,9 +144,13 @@ fn dark_config(s: &Settings) -> String {
 
 /// Script registered on every tab while dark websites is on: Dark Reader plus its settings.
 pub fn dark_document_script(s: &Settings) -> Option<String> {
-    (s.appearance.dark_websites == Some(true))
-        .then(|| format!("{DARK_READER}
-;DarkReader.shoji({});", dark_config(s)))
+    (s.appearance.dark_websites == Some(true)).then(|| {
+        format!(
+            "{DARK_READER}
+;DarkReader.shoji({});",
+            dark_config(s)
+        )
+    })
 }
 
 /// Script that re-applies the current dark-website settings to a page that is already open,
@@ -152,8 +158,10 @@ pub fn dark_document_script(s: &Settings) -> Option<String> {
 pub fn dark_apply_js(s: &Settings) -> String {
     let config = dark_config(s);
     if s.appearance.dark_websites == Some(true) {
-        format!("if (!window.DarkReader) {{ {DARK_READER}
- }};DarkReader.shoji({config});")
+        format!(
+            "if (!window.DarkReader) {{ {DARK_READER}
+ }};DarkReader.shoji({config});"
+        )
     } else {
         format!("window.DarkReader && DarkReader.shoji({config});")
     }
@@ -232,7 +240,14 @@ pub fn chrome(s: &Settings) -> String {
             ("SEARCH_ENGINE_NAME", s.search_engine_display_name()),
             ("PREFS_JSON", &prefs_json(s)),
             ("ACCENTS_JSON", &theme::accents_json()),
-            ("FROST", if s.appearance.frosted_toolbar { "1" } else { "0" }),
+            (
+                "FROST",
+                if s.appearance.frosted_toolbar {
+                    "1"
+                } else {
+                    "0"
+                },
+            ),
         ],
     )
 }
@@ -296,8 +311,9 @@ pub fn home_json(d: &HomeData) -> String {
 /// Shown when a site could not be reached over HTTPS in HTTPS-only mode.
 pub fn insecure_fallback(s: &Settings, tab_id: u64, host: &str, http_url: &str) -> String {
     let host_html = html_escape(host);
-    let payload =
-        html_escape(&serde_json::json!({ "tab_id": tab_id, "host": host, "url": http_url }).to_string());
+    let payload = html_escape(
+        &serde_json::json!({ "tab_id": tab_id, "host": host, "url": http_url }).to_string(),
+    );
     let body = format!(
         r#"<div class="mark danger">{ICON_WARN}</div>
 <h1>This site doesn't offer a secure connection</h1>
@@ -370,10 +386,24 @@ pub fn welcome(s: &Settings) -> String {
             ("FONTS", s.fonts().id),
             ("CRANE", &theme::crane_svg("c", "hero")),
             ("SWATCHES", &swatches()),
-            ("DARK_CHECKED", if s.appearance.dark_websites == Some(true) { "checked" } else { "" }),
+            (
+                "DARK_CHECKED",
+                if s.appearance.dark_websites == Some(true) {
+                    "checked"
+                } else {
+                    ""
+                },
+            ),
             ("PROFILES_JSON", &profiles_json()),
             ("SEARCH_ENGINE", &s.search_engine.to_lowercase()),
-            ("PRIVATE_MODE", if s.privacy.ephemeral_default { "true" } else { "false" }),
+            (
+                "PRIVATE_MODE",
+                if s.privacy.ephemeral_default {
+                    "true"
+                } else {
+                    "false"
+                },
+            ),
         ],
     )
 }
@@ -432,7 +462,8 @@ pub fn certificate_error(s: &Settings, tab_id: u64, host: &str, uri: &str) -> St
     let host_html = html_escape(host);
     let uri_html = html_escape(uri);
     // JSON in a double-quoted attribute: HTML-escape it so quotes in the URL can't break out.
-    let payload = html_escape(&serde_json::json!({ "tab_id": tab_id, "host": host, "url": uri }).to_string());
+    let payload =
+        html_escape(&serde_json::json!({ "tab_id": tab_id, "host": host, "url": uri }).to_string());
     let body = format!(
         r#"<div class="mark danger">{ICON_SHIELD}</div>
 <h1>This connection isn't private</h1>
@@ -473,7 +504,14 @@ mod tests {
         for html in [
             chrome(&s),
             sidebar(&s),
-            home(&s, &HomeData { favourites: &[], recent: &[], restore_tabs: 2 }),
+            home(
+                &s,
+                &HomeData {
+                    favourites: &[],
+                    recent: &[],
+                    restore_tabs: 2,
+                },
+            ),
             welcome(&s),
             settings(&s, "1.0", std::path::Path::new("C:\\data"), 3),
             overlay(&s),
@@ -484,21 +522,32 @@ mod tests {
             certificate_error(&s, 4, "a.com", "https://a.com/<x>"),
         ] {
             assert!(!html.contains("{{"), "unfilled placeholder");
-            assert!(html.contains("data-fonts=\"shinbun\""), "missing type profile");
+            assert!(
+                html.contains("data-fonts=\"shinbun\""),
+                "missing type profile"
+            );
         }
     }
 
     #[test]
     fn every_bundled_face_is_served() {
         for (_, file, _) in theme::FONT_FILES {
-            assert!(font_file(file).is_some_and(|b| b.starts_with(b"wOF2")), "{file}");
+            assert!(
+                font_file(file).is_some_and(|b| b.starts_with(b"wOF2")),
+                "{file}"
+            );
         }
         assert!(font_file("../settings.json").is_none());
     }
 
     #[test]
     fn certificate_page_escapes_hostile_input() {
-        let html = certificate_error(&Settings::default(), 1, "a.com", "https://a.com/'</script><x>");
+        let html = certificate_error(
+            &Settings::default(),
+            1,
+            "a.com",
+            "https://a.com/'</script><x>",
+        );
         assert!(!html.contains("</script><x>"));
     }
 }
@@ -514,16 +563,53 @@ fn dump_pages() {
     s.privacy.persistent_sites = vec!["github.com".into()];
     for (name, html) in [
         ("chrome", chrome(&s)),
-        ("notes", notes(&s, r#"[{"id":"a","created":1791800000000,"updated":1791800000000,"text":"Ideas for the weekend
-Walk by the river"}]"#)),
+        (
+            "notes",
+            notes(
+                &s,
+                r#"[{"id":"a","created":1791800000000,"updated":1791800000000,"text":"Ideas for the weekend
+Walk by the river"}]"#,
+            ),
+        ),
         ("sidebar", sidebar(&s)),
-        ("home", home(&s, &HomeData { favourites: &[], recent: &[], restore_tabs: 0 })),
+        (
+            "home",
+            home(
+                &s,
+                &HomeData {
+                    favourites: &[],
+                    recent: &[],
+                    restore_tabs: 0,
+                },
+            ),
+        ),
         ("overlay", overlay(&s)),
-        ("reader", reader(&s, "A quiet article", "By Someone", "example.com", "<p>Hello.</p>", "https://example.com/")),
+        (
+            "reader",
+            reader(
+                &s,
+                "A quiet article",
+                "By Someone",
+                "example.com",
+                "<p>Hello.</p>",
+                "https://example.com/",
+            ),
+        ),
         ("welcome", welcome(&s)),
-        ("settings", settings(&s, "141.0.3537.71", std::path::Path::new(r"C:\Users\you\AppData\Roaming\shoji"), 0)),
+        (
+            "settings",
+            settings(
+                &s,
+                "141.0.3537.71",
+                std::path::Path::new(r"C:\Users\you\AppData\Roaming\shoji"),
+                0,
+            ),
+        ),
         ("crash", crash(&s, 1)),
-        ("cert", certificate_error(&s, 1, "expired.badssl.com", "https://expired.badssl.com/")),
+        (
+            "cert",
+            certificate_error(&s, 1, "expired.badssl.com", "https://expired.badssl.com/"),
+        ),
     ] {
         std::fs::write(dir.join(format!("{name}.html")), html).unwrap();
     }

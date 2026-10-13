@@ -116,8 +116,18 @@ pub fn brave_lists_from_catalog(json: &str, have: &[ListSource]) -> Vec<ListSour
                 continue;
             }
             let id = format!("brave-{:016x}", fnv(&s.url));
-            let title = if e.title.is_empty() { s.url.clone() } else { e.title.clone() };
-            out.push(ListSource { id, title, url: s.url.clone(), refresh_secs: 6 * HOUR, trusted: true });
+            let title = if e.title.is_empty() {
+                s.url.clone()
+            } else {
+                e.title.clone()
+            };
+            out.push(ListSource {
+                id,
+                title,
+                url: s.url.clone(),
+                refresh_secs: 6 * HOUR,
+                trusted: true,
+            });
         }
     }
     out
@@ -125,7 +135,13 @@ pub fn brave_lists_from_catalog(json: &str, have: &[ListSource]) -> Vec<ListSour
 
 /// A list the user added by URL.
 pub fn custom_list(url: &str) -> ListSource {
-    let host = url.split("//").last().unwrap_or(url).split('/').next().unwrap_or(url);
+    let host = url
+        .split("//")
+        .last()
+        .unwrap_or(url)
+        .split('/')
+        .next()
+        .unwrap_or(url);
     ListSource {
         id: format!("custom-{:016x}", fnv(url)),
         title: host.to_string(),
@@ -136,8 +152,9 @@ pub fn custom_list(url: &str) -> ListSource {
 }
 
 fn fnv(s: &str) -> u64 {
-    s.bytes()
-        .fold(0xcbf29ce484222325, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3))
+    s.bytes().fold(0xcbf29ce484222325, |h, b| {
+        (h ^ b as u64).wrapping_mul(0x100000001b3)
+    })
 }
 
 #[cfg(test)]
@@ -165,7 +182,10 @@ mod tests {
 
     #[test]
     fn quick_fixes_polls_hourly() {
-        let q = ublock_lists().into_iter().find(|l| l.id == "ubo-quick-fixes").unwrap();
+        let q = ublock_lists()
+            .into_iter()
+            .find(|l| l.id == "ubo-quick-fixes")
+            .unwrap();
         assert_eq!(q.refresh_secs, 3600);
     }
 }

@@ -120,7 +120,8 @@ mod tests {
 
     fn icon_location(lnk: &Path) -> String {
         unsafe {
-            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).unwrap();
+            let link: IShellLinkW =
+                CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).unwrap();
             link.cast::<IPersistFile>()
                 .unwrap()
                 .Load(&HSTRING::from(lnk.as_os_str()), STGM_READWRITE)
