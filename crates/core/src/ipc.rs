@@ -1,6 +1,10 @@
 use crate::tabs::{TabGroup, TabId, TabState};
 use serde::{Deserialize, Serialize};
 
+/// What the user types on the settings page to confirm uninstalling Shoji and deleting all of
+/// its data.
+pub const UNINSTALL_CONFIRMATION: &str = "UNINSTALL";
+
 /// Strongly-typed commands sent from the browser UI (JS) to the Rust host.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", content = "payload")]
@@ -191,6 +195,11 @@ pub enum UiToHostMessage {
     ClearSiteData,
     /// Delete saved logins and autofill entries from the profile
     ClearSavedLogins,
+    /// Uninstall Shoji and delete everything it stored. Honoured only when `confirm` is
+    /// [`UNINSTALL_CONFIRMATION`], which the user has to type on the settings page.
+    UninstallShoji {
+        confirm: String,
+    },
     /// Page facts reported by the page-info script that runs in every tab
     PageInfo {
         #[serde(default)]

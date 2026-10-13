@@ -221,6 +221,9 @@ fn engine_url(url: &str) -> Cow<'_, str> {
     }
 }
 
+/// Hides the page's own scrollbar on the right; scrolling itself is unchanged.
+const HIDE_SCROLLBAR_SCRIPT: &str = "(() => { try { const s = new CSSStyleSheet();     s.replaceSync('html { scrollbar-width: none !important; } html::-webkit-scrollbar { display: none !important; }');     document.adoptedStyleSheets = [...document.adoptedStyleSheets, s]; } catch (e) {} })();";
+
 /// With the shield off the engine's own tracking prevention goes off too.
 fn tracking_level(settings: &Settings) -> webview::Tracking {
     if settings.shield.mode == "off" {
@@ -1030,6 +1033,8 @@ impl BrowserApp {
         if !internal {
             builder = builder.with_initialization_script(pages::PAGE_INFO_SCRIPT);
         }
+        // Every tab, not just web ones: an internal tab can navigate to a site in place.
+        builder = builder.with_initialization_script(HIDE_SCROLLBAR_SCRIPT);
         // Built blank, so document scripts are registered before the first navigation.
         let view = builder
             .build_as_child(window)
@@ -2746,6 +2751,14 @@ impl BrowserApp {
                     webview::clear_saved_logins(&tab.view);
                 }
             }
+            M::UninstallShoji { confirm } => {
+                if confirm.trim() == shoji_core::ipc::UNINSTALL_CONFIRMATION
+                    && start_uninstall(&self.data_dir)
+                {
+                    // Exit at once, without the usual save-on-close, so nothing is written back.
+                    std::process::exit(0);
+                }
+            }
             M::PageInfo { color, has_video } => {
                 if let Some(tab_id) = from_tab {
                     let tint = color.as_deref().and_then(parse_css_color);
@@ -3518,6 +3531,54 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
             None => ControlFlow::Wait,
         });
     }
+}
+
+/// Start deleting Shoji and everything it stored, then let the caller exit. An installed copy
+/// hands over to its uninstaller in purge mode; a copy that was never installed gets a detached
+/// cleanup script instead. Returns false if nothing could be started.
+#[cfg(windows)]
+fn start_uninstall(data_dir: &std::path::Path) -> bool {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let local = shoji_core::env::local_app_directory();
+    let installed = std::env::var_os("LOCALAPPDATA")
+        .map(|l| PathBuf::from(l).join("Programs").join(shoji_core::APP_NAME));
+    let uninstallers = exe
+        .parent()
+        .map(PathBuf::from)
+        .into_iter()
+        .chain(installed)
+        .map(|d| d.join("uninstall.exe"));
+    for uninstaller in uninstallers {
+        if uninstaller.exists() {
+            return std::process::Command::new(uninstaller)
+                .args(["--uninstall", "--purge"])
+                .spawn()
+                .is_ok();
+        }
+    }
+
+    let mut dirs = vec![data_dir.to_path_buf()];
+    dirs.extend(local);
+    let mut files = shoji_core::shell::all_shortcuts();
+    files.push(exe);
+    match shoji_core::env::delayed_purge_script(&dirs, &files) {
+        Some(script) => std::process::Command::new("cmd")
+            .args(["/c", &script])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .is_ok(),
+        None => false,
+    }
+}
+
+#[cfg(not(windows))]
+fn start_uninstall(_data_dir: &std::path::Path) -> bool {
+    false
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

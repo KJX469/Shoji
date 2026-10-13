@@ -6,6 +6,11 @@ All notable changes to Shoji are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+- A red **Uninstall Shoji** button under Settings → Danger zone. After a warning that notes,
+  logins and everything else will be erased, and typing `UNINSTALL`, it removes the app, its
+  shortcuts, its Windows registration, and all settings and profile data.
+
 ## [0.1.0] - 2026-10-12
 
 First public version.

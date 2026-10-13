@@ -523,3 +523,36 @@ fn test_permission_policy_lookup() {
     assert_eq!(s.permission_policy("Microphone"), "ask");
     assert_eq!(s.permission_policy("Clipboard"), "ask");
 }
+
+#[test]
+fn test_purge_script_deletes_only_safe_paths() {
+    use shoji_core::env::delayed_purge_script;
+    use std::path::PathBuf;
+
+    let dirs = [
+        PathBuf::from(r"C:\Users\a\AppData\Roaming\shoji"),
+        PathBuf::from(r"C:\Users\%USERNAME%\evil"),
+        PathBuf::from(r#"C:\Users\a\x" & calc"#),
+        PathBuf::from(r"C:\"),
+    ];
+    let files = [PathBuf::from(r"C:\Users\a\Desktop\Shoji.lnk")];
+    let script = delayed_purge_script(&dirs, &files).unwrap();
+    assert!(script.starts_with("ping -n 4 127.0.0.1 >nul"));
+    assert!(script.contains(r#"rmdir /s /q "C:\Users\a\AppData\Roaming\shoji""#));
+    assert!(script.contains(r#"del /f /q "C:\Users\a\Desktop\Shoji.lnk""#));
+    assert!(!script.contains('%') && !script.contains("calc"));
+    assert_eq!(script.matches("rmdir").count(), 1);
+
+    assert!(delayed_purge_script(&[PathBuf::from(r"C:\")], &[]).is_none());
+}
+
+#[test]
+fn test_uninstall_message_round_trips_with_confirmation() {
+    let json = r#"{"action":"UninstallShoji","payload":{"confirm":"UNINSTALL"}}"#;
+    match serde_json::from_str::<UiToHostMessage>(json).unwrap() {
+        UiToHostMessage::UninstallShoji { confirm } => {
+            assert_eq!(confirm, shoji_core::ipc::UNINSTALL_CONFIRMATION)
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+}

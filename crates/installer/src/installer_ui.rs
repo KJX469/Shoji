@@ -104,18 +104,21 @@ const TEMPLATE: &str = r#"<!DOCTYPE html>
       $('launchBox').hidden = true;
       show('done');
     };
+    if ({{PURGE}}) { $('removeData').checked = true; uninstall(); }
   </script>
 </body>
 </html>
 "#;
 
-pub fn installer_html(is_uninstall: bool) -> String {
+/// `purge` starts removing everything straight away (the user already confirmed in the browser).
+pub fn installer_html(is_uninstall: bool, purge: bool) -> String {
     let (install, uninstall) = if is_uninstall {
         ("", "active")
     } else {
         ("active", "")
     };
     TEMPLATE
+        .replace("{{PURGE}}", if purge { "true" } else { "false" })
         .replace("{{THEME_CSS}}", &theme::css())
         .replace("{{CRANE}}", &theme::crane_svg("c", ""))
         .replace("{{INSTALL_ACTIVE}}", install)
@@ -132,11 +135,13 @@ mod tests {
 
     #[test]
     fn install_and_uninstall_modes() {
-        let html = installer_html(false);
+        let html = installer_html(false, false);
         assert!(html.contains(r#"class="step active" id="install""#));
         assert!(html.contains(r#"class="step " id="uninstall""#));
-        let html = installer_html(true);
+        let html = installer_html(true, false);
         assert!(html.contains(r#"class="step active" id="uninstall""#));
+        assert!(html.contains("if (false)"));
         assert!(!html.contains("{{"));
+        assert!(installer_html(true, true).contains("if (true)"));
     }
 }

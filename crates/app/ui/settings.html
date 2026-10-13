@@ -70,6 +70,18 @@
     .lrow .x:hover { color: var(--danger); }
     textarea { width: 100%; min-height: 110px; resize: vertical; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); font-family: var(--mono); font-size: 12px; line-height: 1.5; outline: none; box-sizing: border-box; }
     textarea:focus { border-color: var(--accent); }
+    .btn.danger { background: var(--danger); border-color: transparent; color: #fff; font-weight: 600; }
+    .btn.danger:hover { filter: brightness(1.08); border-color: transparent; }
+    .btn.danger:disabled { opacity: .4; cursor: not-allowed; filter: none; }
+    .danger-card { border-color: var(--danger); }
+    dialog { width: min(440px, calc(100vw - 48px)); padding: 24px; border-radius: 14px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); }
+    dialog::backdrop { background: rgba(0, 0, 0, .45); }
+    dialog h2 { font-family: var(--font-display); font-size: 20px; font-weight: 400; color: var(--danger); }
+    dialog p { margin-top: 10px; color: var(--ink-2); }
+    dialog ul { margin: 10px 0 0 18px; color: var(--ink-2); }
+    dialog label { display: block; margin-top: 18px; }
+    dialog input[type=text] { width: 100%; margin-top: 6px; box-sizing: border-box; }
+    dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
     #toast { position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 12px); padding: 8px 16px; border-radius: 9px; background: var(--ink); color: var(--bg); font-size: 12px; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s var(--ease); }
     #toast.show { opacity: 1; transform: translate(-50%, 0); }
   </style>
@@ -285,7 +297,35 @@
         <div class="row"><div class="what"><b>Data folder</b><span class="path">{{DATA_DIR}}</span></div></div>
       </div>
     </section>
+
+    <section>
+      <span class="label">Danger zone</span>
+      <div class="card danger-card">
+        <div class="row">
+          <div class="what"><b>Uninstall Shoji</b><small>Removes Shoji from this computer and deletes everything it stored, including your notes. This can't be undone</small></div>
+          <button class="btn danger" onclick="openUninstall()">Uninstall…</button>
+        </div>
+      </div>
+    </section>
   </div>
+
+  <dialog id="uninstallDlg" aria-labelledby="uninstallTitle">
+    <h2 id="uninstallTitle">Uninstall Shoji and erase everything?</h2>
+    <p>This permanently deletes, with no way to get it back:</p>
+    <ul>
+      <li>Your notes</li>
+      <li>Favourites, history, cookies and saved logins and passwords</li>
+      <li>Settings, Byōbu rules and the open-tabs record</li>
+      <li>The app itself, its shortcuts and its Windows registration</li>
+    </ul>
+    <label for="uninstallInput">Type <b>UNINSTALL</b> to confirm
+      <input type="text" id="uninstallInput" autocomplete="off" spellcheck="false">
+    </label>
+    <div class="actions">
+      <button class="btn" onclick="$('uninstallDlg').close()">Cancel</button>
+      <button class="btn danger" id="uninstallGo" disabled onclick="confirmUninstall()">Erase everything</button>
+    </div>
+  </dialog>
   <div id="toast" role="status"></div>
 
   <script>
@@ -301,6 +341,25 @@
       clearTimeout(toastTimer);
       toastTimer = setTimeout(() => $('toast').classList.remove('show'), 1600);
     }
+    const UNINSTALL_WORD = 'UNINSTALL';
+    function openUninstall() {
+      $('uninstallInput').value = '';
+      $('uninstallGo').disabled = true;
+      $('uninstallDlg').showModal();
+      $('uninstallInput').focus();
+    }
+    $('uninstallInput').addEventListener('input', () => {
+      $('uninstallGo').disabled = $('uninstallInput').value.trim() !== UNINSTALL_WORD;
+    });
+    $('uninstallInput').addEventListener('keydown', e => { if (e.key === 'Enter' && !$('uninstallGo').disabled) confirmUninstall(); });
+    function confirmUninstall() {
+      const confirm = $('uninstallInput').value.trim();
+      if (confirm !== UNINSTALL_WORD) return;
+      $('uninstallGo').disabled = true;
+      $('uninstallGo').textContent = 'Erasing…';
+      post('UninstallShoji', { confirm });
+    }
+
     const get = (obj, path) => path.split('.').reduce((o, k) => o && o[k], obj);
     function patchFor(path, value) {
       const keys = path.split('.');
