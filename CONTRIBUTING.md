@@ -9,7 +9,7 @@ For anything larger, open an issue first so we can agree on the shape before you
 You need Windows 10/11 x64, the Rust MSVC toolchain, and the Visual Studio C++ build tools.
 
 ```powershell
-git clone https://github.com/KJX469/shoji.git
+git clone https://github.com/KJX469/Shoji.git
 cd shoji
 cargo run -p shoji                 # run the browser (debug)
 cargo test --workspace             # unit, security and UI-template tests
