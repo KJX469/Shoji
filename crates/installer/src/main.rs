@@ -9,7 +9,7 @@ mod installer_ui;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -36,6 +36,22 @@ fn install_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
         .join("Programs")
         .join(APP_NAME)
+}
+
+/// Ask a running Shoji to save its tabs and quit. It may be waiting in the tray with no window,
+/// so the installed copy is started with `--quit`, which hands the request to the running one.
+fn close_running_copy(exe: &Path) {
+    if !exe.exists() {
+        return;
+    }
+    let mut cmd = Command::new(exe);
+    cmd.arg("--quit");
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    if cmd.status().is_ok() {
+        // Give it a moment to exit and release its files.
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+    }
 }
 
 fn data_dir() -> Option<PathBuf> {
@@ -231,6 +247,8 @@ fn install(desktop: bool, start_menu: bool, proxy: EventLoopProxy<InstallerEvent
         let _ = proxy.send_event(InstallerEvent::InstallFailed(text));
     };
     let dir = install_dir();
+    progress(5, "Closing Shoji");
+    close_running_copy(&dir.join(EXE_NAME));
     progress(10, "Copying files");
     if let Err(e) = std::fs::create_dir_all(&dir) {
         return fail(format!("Couldn't create {}: {e}", dir.display()));
@@ -298,6 +316,7 @@ fn uninstall(remove_data: bool, proxy: EventLoopProxy<InstallerEvent>) {
     let exe = dir.join(EXE_NAME);
 
     progress(15, "Closing Shoji");
+    close_running_copy(&exe);
     #[cfg(windows)]
     {
         let _ = Command::new("taskkill")
