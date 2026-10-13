@@ -27,6 +27,31 @@ pub fn resolve_profile_directory(data_dir: &Path) -> PathBuf {
 
 const LEGACY_PROFILE_DIR: &str = "webview2_data";
 
+/// `%LOCALAPPDATA%\Shoji`: the engine profile (logins, cache, history) and anything else that
+/// stays on this machine.
+pub fn local_app_directory() -> Option<PathBuf> {
+    std::env::var_os("LOCALAPPDATA").map(|l| PathBuf::from(l).join(crate::APP_NAME))
+}
+
+/// A `cmd /c` script that waits a few seconds, for the calling process to exit and release its
+/// files, then deletes `dirs` recursively and `files`. Returns `None` when there is nothing safe
+/// to delete. Paths that cmd could misread (`"` or `%`) or that have no parent (drive roots) are
+/// skipped rather than risk deleting the wrong thing.
+pub fn delayed_purge_script(dirs: &[PathBuf], files: &[PathBuf]) -> Option<String> {
+    fn usable(p: &Path) -> bool {
+        let s = p.to_string_lossy();
+        p.parent().is_some() && p.file_name().is_some() && !s.contains('"') && !s.contains('%')
+    }
+    let mut steps = vec!["ping -n 4 127.0.0.1 >nul".to_string()];
+    for d in dirs.iter().filter(|p| usable(p)) {
+        steps.push(format!("rmdir /s /q \"{}\"", d.display()));
+    }
+    for f in files.iter().filter(|p| usable(p)) {
+        steps.push(format!("del /f /q \"{}\"", f.display()));
+    }
+    (steps.len() > 1).then(|| steps.join(" & "))
+}
+
 /// Move a profile from the old roaming location to `target` once. Returns the folder to use:
 /// `target` normally, or `legacy` if the move was not possible (e.g. another Shoji is still
 /// using it), so existing logins are never lost or split.

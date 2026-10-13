@@ -110,6 +110,8 @@ enum InstallerEvent {
 
 struct InstallerApp {
     is_uninstall: bool,
+    /// Remove everything, including settings and notes, without asking again
+    purge: bool,
     proxy: EventLoopProxy<InstallerEvent>,
     window: Option<Arc<Window>>,
     webview: Option<wry::WebView>,
@@ -147,7 +149,7 @@ impl ApplicationHandler<InstallerEvent> for InstallerApp {
         let busy = self.busy.clone();
         let uninstall_mode = self.is_uninstall;
         let webview = WebViewBuilder::new()
-            .with_html(installer_ui::installer_html(self.is_uninstall))
+            .with_html(installer_ui::installer_html(self.is_uninstall, self.purge))
             .with_incognito(true)
             .with_ipc_handler(move |req: wry::http::Request<String>| {
                 let Ok(val) = serde_json::from_str::<serde_json::Value>(req.body()) else {
@@ -277,6 +279,17 @@ fn install(desktop: bool, start_menu: bool, proxy: EventLoopProxy<InstallerEvent
     let _ = proxy.send_event(InstallerEvent::InstallComplete);
 }
 
+/// Delete a folder, retrying briefly: the engine's helper processes can outlive the browser
+/// by a moment and keep profile files open.
+fn remove_dir_retrying(dir: &std::path::Path) {
+    for _ in 0..8 {
+        if !dir.exists() || std::fs::remove_dir_all(dir).is_ok() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(400));
+    }
+}
+
 fn uninstall(remove_data: bool, proxy: EventLoopProxy<InstallerEvent>) {
     let progress = |pct, text| {
         let _ = proxy.send_event(InstallerEvent::Progress(pct, text));
@@ -301,29 +314,29 @@ fn uninstall(remove_data: bool, proxy: EventLoopProxy<InstallerEvent>) {
     }
 
     progress(70, "Removing files");
+    // Settings and notes under %APPDATA%, and the browsing profile (logins, cache, history)
+    // under %LOCALAPPDATA%.
+    let mut wipe: Vec<PathBuf> = Vec::new();
     if remove_data {
-        if let Some(data) = data_dir() {
-            let _ = std::fs::remove_dir_all(data);
-        }
-        // The browsing profile (logins, cache, history) lives under %LOCALAPPDATA%.
-        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-            let _ =
-                std::fs::remove_dir_all(std::path::PathBuf::from(local).join(shoji_core::APP_NAME));
+        wipe.extend(data_dir());
+        wipe.extend(shoji_core::env::local_app_directory());
+        for d in &wipe {
+            remove_dir_retrying(d);
         }
     }
     let _ = std::fs::remove_file(exe);
 
-    // This process is uninstall.exe inside the install folder: delete the folder once we exit.
+    // This process is uninstall.exe inside the install folder: delete the folder once we exit,
+    // and sweep anything the engine was still holding open a moment ago.
     #[cfg(windows)]
     {
-        let cmd = format!(
-            "timeout /t 2 /nobreak >nul & rmdir /s /q \"{}\"",
-            dir.display()
-        );
-        let _ = Command::new("cmd")
-            .args(["/c", &cmd])
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn();
+        wipe.push(dir);
+        if let Some(script) = shoji_core::env::delayed_purge_script(&wipe, &[]) {
+            let _ = Command::new("cmd")
+                .args(["/c", &script])
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn();
+        }
     }
     progress(100, "Done");
     let _ = proxy.send_event(InstallerEvent::UninstallComplete);
@@ -355,6 +368,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoop::<InstallerEvent>::with_user_event().build()?;
     let mut app = InstallerApp {
         is_uninstall,
+        // Started from the browser's settings page, where the user already confirmed.
+        purge: is_uninstall && std::env::args().any(|a| a == "--purge"),
         proxy: event_loop.create_proxy(),
         window: None,
         webview: None,
