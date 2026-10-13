@@ -10,6 +10,7 @@ license = "MIT"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rusqlite = { version = "0.32", features = ["bundled"] }
+ring = "0.17"
 shoji-brand = { path = "../brand" }
 
 [target.'cfg(windows)'.dependencies.windows]

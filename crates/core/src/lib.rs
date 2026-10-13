@@ -13,6 +13,7 @@ pub mod settings;
 pub mod shell;
 pub mod tabs;
 pub mod userdata;
+pub mod vault;
 
 /// Product name shown to users.
 pub const APP_NAME: &str = "Shoji";
