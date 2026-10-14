@@ -1,6 +1,6 @@
 [package]
 name = "shoji-brand"
-version = "0.2.0"
+version = "0.1.3"
 edition = "2021"
 authors = ["Shoji Contributors"]
 description = "Shoji brand: the origami crane (geometry, palettes, icon rasterizer) and the shared UI theme"
