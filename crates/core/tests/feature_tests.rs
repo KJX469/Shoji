@@ -175,15 +175,19 @@ fn session_file_roundtrips_and_tolerates_garbage() {
                     url: "https://a.com".into(),
                     title: "A".into(),
                     group: Some(1),
+                    workspace: 1,
                 },
                 SessionTab {
                     url: "https://b.com".into(),
                     title: "B".into(),
                     group: None,
+                    workspace: 1,
                 },
             ],
             active: 1,
             groups: vec![],
+            workspaces: vec![],
+            active_workspace: 0,
         }],
     };
     session.save(&path);

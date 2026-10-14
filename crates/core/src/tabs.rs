@@ -1324,6 +1324,246 @@ impl TabManager {
         }
         self.sync_active_workspace_tab();
     }
+
+    /// Serialize this window's workspaces, tabs, active tabs, groups, and split state into a
+    /// [`crate::userdata::SessionWindow`]. Returns `None` if the window only has the default
+    /// workspace with no web pages.
+    pub fn to_session_window(&self) -> Option<crate::userdata::SessionWindow> {
+        use crate::userdata::{SessionSplit, SessionTab, SessionWindow, SessionWorkspace};
+
+        let mut tabs = Vec::new();
+        let mut workspaces = Vec::new();
+        let mut window_active = 0;
+
+        for ws in &self.workspaces {
+            let ws_tabs = self.tabs_for_workspace(ws.id);
+            let split_panes = ws.split.as_ref().map(|s| s.panes);
+            let ws_active_id = if ws.id == self.active_workspace_id {
+                self.active_tab_id.or(ws.active_tab)
+            } else {
+                ws.active_tab
+            };
+
+            let mut kept_ids = Vec::new();
+            let mut ws_active_idx = 0;
+
+            for t in &ws_tabs {
+                let is_web = t.url.starts_with("http://") || t.url.starts_with("https://");
+                let in_split = split_panes.is_some_and(|p| p.contains(&t.id));
+                if !is_web && !in_split {
+                    continue;
+                }
+                let local_idx = kept_ids.len();
+                let global_idx = tabs.len();
+                if Some(t.id) == ws_active_id {
+                    ws_active_idx = local_idx;
+                }
+                if ws.id == self.active_workspace_id && Some(t.id) == self.active_tab_id {
+                    window_active = global_idx;
+                }
+                kept_ids.push(t.id);
+                tabs.push(SessionTab {
+                    url: t.url.clone(),
+                    title: t.title.clone(),
+                    group: t.group,
+                    workspace: ws.id,
+                });
+            }
+
+            let split = ws.split.as_ref().and_then(|s| {
+                let p0 = kept_ids.iter().position(|&id| id == s.panes[0])?;
+                let p1 = kept_ids.iter().position(|&id| id == s.panes[1])?;
+                (p0 != p1).then_some(SessionSplit {
+                    panes: [p0, p1],
+                    orientation: s.orientation,
+                    ratio: s.ratio,
+                })
+            });
+
+            workspaces.push(SessionWorkspace {
+                id: ws.id,
+                name: ws.name.clone(),
+                color: ws.color.clone(),
+                active: ws_active_idx,
+                split,
+            });
+        }
+
+        let has_custom_workspaces = workspaces.len() > 1
+            || workspaces
+                .first()
+                .is_some_and(|w| w.name != "Main" || w.color != "blue");
+
+        if tabs.is_empty() && !has_custom_workspaces {
+            return None;
+        }
+
+        Some(SessionWindow {
+            tabs,
+            active: window_active,
+            groups: self.groups.clone(),
+            workspaces,
+            active_workspace: self.active_workspace_id,
+        })
+    }
+
+    /// Restore workspaces, tabs, active tabs, groups, and split state from a saved
+    /// [`crate::userdata::SessionWindow`], migrating pre-workspace session files into the default
+    /// `"Main"` workspace.
+    pub fn restore_session_window(
+        &mut self,
+        saved: &crate::userdata::SessionWindow,
+        current_time_secs: u64,
+    ) {
+        self.tabs.clear();
+        self.inactive_tabs.clear();
+        self.workspaces.clear();
+        self.active_tab_id = None;
+        self.restore_groups(saved.groups.clone());
+
+        // Legacy session file without workspaces: migrate all tabs into the default "Main" workspace.
+        if saved.workspaces.is_empty() {
+            self.workspaces.push(Workspace::default_main());
+            self.active_workspace_id = 1;
+            self.next_workspace_id = 2;
+
+            for st in &saved.tabs {
+                let id = self.create_tab(&st.url, current_time_secs);
+                if !st.title.is_empty() {
+                    self.update_title(id, st.title.clone());
+                }
+                if st.group.is_some() {
+                    self.set_tab_group(id, st.group);
+                }
+            }
+            if self.tabs.is_empty() {
+                self.create_tab("shoji://newtab", current_time_secs);
+            } else {
+                let target_idx = saved.active.min(self.tabs.len() - 1);
+                let target_id = self.tabs[target_idx].id;
+                self.switch_tab(target_id, current_time_secs);
+            }
+            self.prune_groups();
+            return;
+        }
+
+        let active_ws_id = if saved
+            .workspaces
+            .iter()
+            .any(|w| w.id == saved.active_workspace)
+        {
+            saved.active_workspace
+        } else {
+            saved.workspaces[0].id
+        };
+        self.active_workspace_id = active_ws_id;
+        self.next_workspace_id = saved.workspaces.iter().map(|w| w.id).max().unwrap_or(1) + 1;
+
+        for (ws_idx, sw) in saved.workspaces.iter().enumerate() {
+            let mut ws_tabs = Vec::new();
+            let mut ws_ids = Vec::new();
+
+            for st in &saved.tabs {
+                let belongs = st.workspace == sw.id || (ws_idx == 0 && st.workspace == 0);
+                if !belongs {
+                    continue;
+                }
+                let id = TabId(self.next_id);
+                self.next_id += 1;
+                ws_ids.push(id);
+                ws_tabs.push(TabState {
+                    id,
+                    url: st.url.clone(),
+                    title: if st.title.is_empty() {
+                        "New Tab".to_string()
+                    } else {
+                        st.title.clone()
+                    },
+                    favicon_uri: None,
+                    is_loading: false,
+                    can_go_back: false,
+                    can_go_forward: false,
+                    is_audio_playing: false,
+                    is_muted: false,
+                    status: TabStatus::Suspended,
+                    last_active_timestamp_secs: current_time_secs,
+                    group: st.group,
+                    workspace: sw.id,
+                });
+            }
+
+            if ws_tabs.is_empty() {
+                let id = TabId(self.next_id);
+                self.next_id += 1;
+                ws_ids.push(id);
+                ws_tabs.push(TabState {
+                    id,
+                    url: "shoji://newtab".to_string(),
+                    title: "New Tab".to_string(),
+                    favicon_uri: None,
+                    is_loading: false,
+                    can_go_back: false,
+                    can_go_forward: false,
+                    is_audio_playing: false,
+                    is_muted: false,
+                    status: TabStatus::Suspended,
+                    last_active_timestamp_secs: current_time_secs,
+                    group: None,
+                    workspace: sw.id,
+                });
+            }
+
+            let ws_active_id = ws_ids.get(sw.active).or_else(|| ws_ids.first()).copied();
+
+            let split = sw.split.as_ref().and_then(|sp| {
+                let p0 = *ws_ids.get(sp.panes[0])?;
+                let p1 = *ws_ids.get(sp.panes[1])?;
+                (p0 != p1).then_some(SplitState {
+                    panes: [p0, p1],
+                    orientation: sp.orientation,
+                    ratio: SplitState::clamp_ratio(sp.ratio, None, 0.0),
+                })
+            });
+
+            self.workspaces.push(Workspace {
+                id: sw.id,
+                name: if sw.name.trim().is_empty() {
+                    "Workspace".to_string()
+                } else {
+                    sw.name.trim().chars().take(40).collect()
+                },
+                color: if sw.color.trim().is_empty() {
+                    "blue".to_string()
+                } else {
+                    sw.color.trim().to_string()
+                },
+                active_tab: ws_active_id,
+                split: split.clone(),
+            });
+
+            if sw.id == active_ws_id {
+                let split_panes = split
+                    .as_ref()
+                    .filter(|s| ws_active_id.is_some_and(|a| s.panes.contains(&a)))
+                    .map(|s| s.panes);
+                for tab in &mut ws_tabs {
+                    if Some(tab.id) == ws_active_id {
+                        tab.status = TabStatus::Active;
+                    } else if split_panes.is_some_and(|p| p.contains(&tab.id)) {
+                        tab.status = TabStatus::Inactive;
+                    } else {
+                        tab.status = TabStatus::Inactive;
+                    }
+                }
+                self.tabs = ws_tabs;
+                self.active_tab_id = ws_active_id;
+            } else {
+                self.inactive_tabs.extend(ws_tabs);
+            }
+        }
+
+        self.prune_groups();
+    }
 }
 
 /// Normalize an omnibox input string into a valid HTTP/HTTPS URL or search engine query.
