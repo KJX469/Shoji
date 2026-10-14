@@ -72,5 +72,7 @@ First public version.
   list management and custom rules.
 - A per-user installer and uninstaller that need no administrator rights.
 
-[Unreleased]: https://github.com/KJX469/shoji/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/KJX469/shoji/releases/tag/v0.1.0
+[Unreleased]: https://github.com/KJX469/Shoji/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/KJX469/Shoji/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/KJX469/Shoji/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/KJX469/Shoji/releases/tag/v0.1.0

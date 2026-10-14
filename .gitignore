@@ -46,7 +46,6 @@ Thumbs.db
 Desktop.ini
 .DS_Store
 
-
 # Secrets and signing material (never commit these)
 .env
 .env.*
