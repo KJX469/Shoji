@@ -4,6 +4,18 @@ All notable changes to Shoji are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Browser dark mode is adjustable.** The dark websites dropdown has a Browser tab with the same
+  presets, brightness, contrast, sepia, grayscale and colors, applied live to the toolbar, menus,
+  title bar and Shoji's own pages.
+
+### Fixed
+- Ctrl+S and Ctrl+G are no longer taken from web apps (Save and Find next stay in the palette).
+- A tab stuck "loading" stops flapping and showing a stop button after 30 seconds.
+- The toolbar strip's window clip is only changed when a card opens or closes.
+
 ## [0.1.3] - 2026-10-13
 
 ### Added

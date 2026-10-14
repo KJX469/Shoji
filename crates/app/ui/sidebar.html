@@ -119,6 +119,7 @@
     select:focus, input[type="time"]:focus { border-color: var(--accent); }
     .times { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-3); }
     .times[hidden] { display: none; }
+    [hidden] { display: none !important; }
     .link { color: var(--accent); font-size: 12px; text-align: left; }
     .link:hover { text-decoration: underline; }
   </style>
@@ -207,7 +208,14 @@
       </section>
 
       <section class="view" id="view-dark">
-        <div class="sect">
+        <div class="seg" role="radiogroup" aria-label="What to adjust">
+          <button role="radio" id="dkScopeSites" aria-checked="true">Websites</button>
+          <button role="radio" id="dkScopeBrowser" aria-checked="false">Browser</button>
+        </div>
+        <div class="sect" id="dkBrowserNote" hidden>
+          <div class="sub">How Shoji's own toolbar, menus and pages look in dark mode. Same controls, applied to the browser instead of to sites.</div>
+        </div>
+        <div class="sect" id="dkSitesTop">
           <div class="switch-row" style="padding:0"><span><b>Dark websites</b></span><button class="sw" id="dkOn" role="switch" aria-checked="false" aria-label="Dark websites"></button></div>
           <div id="dkSite">
             <div class="label" style="margin:2px 0 6px"><span id="dkHost"></span></div>
@@ -236,7 +244,7 @@
           </div>
         </div>
 
-        <div class="sect">
+        <div class="sect" id="dkText2">
           <div class="label"><span>Text</span></div>
           <div class="switch-row" style="padding:0"><span>Use a font</span><select id="dkFont" aria-label="Font">
             <option>Segoe UI</option><option>Arial</option><option>Verdana</option><option>Tahoma</option><option>Trebuchet MS</option>
@@ -245,7 +253,7 @@
           <label class="slide">Text stroke<input type="range" id="dkStroke" min="0" max="100"><output></output></label>
         </div>
 
-        <div class="sect">
+        <div class="sect" id="dkSched">
           <div class="switch-row" style="padding:0"><span>Only at certain hours</span><button class="sw" id="dkSchedOn" role="switch" aria-checked="false" aria-label="Schedule"></button></div>
           <div class="times" id="dkTimes" hidden>From <input type="time" id="dkFrom"> to <input type="time" id="dkTo"></div>
         </div>
@@ -450,28 +458,53 @@
     let D = null;
     const SLIDERS = [['dkBrightness', 'brightness', '%'], ['dkContrast', 'contrast', '%'], ['dkSepia', 'sepia', '%'], ['dkGrayscale', 'grayscale', '%'], ['dkStroke', 'text_stroke', '']];
     let sendTimer = 0, pendingSend = null;
+    let scope = 'sites';
     function target() { return D && D.site === 'custom' ? D.host : null; }
+    // The look being edited: the browser's own, or the websites' (global or one site's).
+    const cur = () => scope === 'browser' ? D.browser : D.theme;
     function edit(patch) {
       if (!D) return;
-      D.theme = Object.assign({}, D.theme, patch);
-      if (!('preset' in patch)) D.theme.preset = 'custom';
-      pendingSend = { host: target(), theme: D.theme };
+      const next = Object.assign({}, cur(), patch);
+      if (!('preset' in patch)) next.preset = 'custom';
+      if (scope === 'browser') D.browser = next; else D.theme = next;
+      pendingSend = scope === 'browser' ? { browser: true, theme: next } : { host: target(), theme: next };
       clearTimeout(sendTimer);
       // Dragging a slider sends a few updates a second so pages follow along live.
       sendTimer = setTimeout(flush, 90);
       renderDark(true);
     }
-    function flush() { if (pendingSend) { post('SetDarkTheme', pendingSend); pendingSend = null; } }
+    function flush() {
+      if (!pendingSend) return;
+      if (pendingSend.browser) post('SetBrowserTheme', { theme: pendingSend.theme });
+      else post('SetDarkTheme', pendingSend);
+      pendingSend = null;
+    }
+    function setScope(next) {
+      scope = next;
+      renderDark(false);
+      reportHeight();
+    }
+    $('dkScopeSites').onclick = () => setScope('sites');
+    $('dkScopeBrowser').onclick = () => setScope('browser');
     function renderDark(local) {
       if (!D) return;
-      const t = D.theme;
+      const t = cur();
+      const browser = scope === 'browser';
+      $('dkScopeSites').setAttribute('aria-checked', String(!browser));
+      $('dkScopeBrowser').setAttribute('aria-checked', String(browser));
+      $('dkBrowserNote').hidden = !browser;
+      if (mode === 'dark') $('title').textContent = browser ? 'Dark mode' : 'Dark websites';
+      $('dkSitesTop').hidden = browser;
+      $('dkText2').hidden = browser;
+      $('dkSched').hidden = browser;
+      $('dkModeDark').parentElement.hidden = browser;
       $('dkOn').setAttribute('aria-checked', String(D.on));
       $('dkSite').hidden = !D.host;
       $('dkHost').textContent = D.host || '';
       for (const [id, key] of [['dkSiteDark', 'dark'], ['dkSiteLight', 'light'], ['dkSiteCustom', 'custom']]) {
         $(id).setAttribute('aria-checked', String(D.site === key));
       }
-      $('dkScope').textContent = D.site === 'custom' ? 'Only for ' + D.host : 'All sites';
+      $('dkScope').textContent = browser ? 'Dark mode of the browser' : (D.site === 'custom' ? 'Only for ' + D.host : 'All sites');
       document.querySelectorAll('#dkPresets .preset').forEach(b => b.setAttribute('aria-checked', String(b.dataset.id === t.preset)));
       $('dkModeDark').setAttribute('aria-checked', String(t.mode !== 'light'));
       $('dkModeLight').setAttribute('aria-checked', String(t.mode === 'light'));
@@ -489,7 +522,7 @@
         if (document.activeElement !== $('dkFrom')) $('dkFrom').value = D.schedule.from;
         if (document.activeElement !== $('dkTo')) $('dkTo').value = D.schedule.to;
       }
-      document.getElementById('dkLook').style.opacity = D.on ? '' : '.55';
+      document.getElementById('dkLook').style.opacity = (browser || D.on) ? '' : '.55';
     }
     window.__darkPanel = d => {
       if (pendingSend) return; // our own edit is still on its way; its echo will follow

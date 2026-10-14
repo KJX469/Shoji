@@ -156,6 +156,10 @@ pub enum UiToHostMessage {
         host: Option<String>,
         theme: crate::settings::DarkTheme,
     },
+    /// Set how the browser's own dark mode looks
+    SetBrowserTheme {
+        theme: crate::settings::DarkTheme,
+    },
     /// Forget a site's own dark look and exclusion
     ResetDarkSite {
         host: String,

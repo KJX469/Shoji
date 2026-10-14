@@ -33,6 +33,27 @@ pub const READER_SCRIPT: &str = include_str!("../ui/reader.js");
 /// Dark Reader (modified for Shoji; see third_party/darkreader/SHOJI.md), minified.
 const DARK_READER: &str = include_str!("../ui/vendor/darkreader.min.js");
 
+/// The browser's own dark look from settings.
+pub fn browser_look(s: &Settings) -> shoji_brand::theme::DarkLook {
+    use shoji_brand::theme::DarkLook;
+    let t = &s.appearance.browser_theme;
+    DarkLook {
+        background: DarkLook::parse_hex(&t.background).unwrap_or(DarkLook::SUMI.background),
+        text: DarkLook::parse_hex(&t.text).unwrap_or(DarkLook::SUMI.text),
+        brightness: t.brightness,
+        contrast: t.contrast,
+        sepia: t.sepia,
+        grayscale: t.grayscale,
+    }
+}
+
+/// The shared stylesheet plus the user's dark-mode adjustments.
+fn theme_css(s: &Settings) -> String {
+    let mut css = THEME_CSS.clone();
+    css.push_str(&browser_look(s).override_css());
+    css
+}
+
 static THEME_CSS: LazyLock<String> = LazyLock::new(|| {
     let mut css = theme::css();
     css.push_str(CRANE_KIT_CSS);
@@ -221,7 +242,7 @@ pub fn notes(s: &Settings, notes_json: &str) -> String {
     fill(
         NOTES,
         &[
-            ("THEME_CSS", &THEME_CSS),
+            ("THEME_CSS", &theme_css(s)),
             ("ACCENT", s.accent().id()),
             ("MODE", &s.appearance.theme),
             ("FONTS", s.fonts().id),
@@ -283,7 +304,7 @@ pub fn chrome(s: &Settings) -> String {
     fill(
         CHROME,
         &[
-            ("THEME_CSS", &THEME_CSS),
+            ("THEME_CSS", &theme_css(s)),
             ("ACCENT", s.accent().id()),
             ("MODE", &s.appearance.theme),
             ("FONTS", s.fonts().id),
@@ -312,7 +333,7 @@ pub fn overlay(s: &Settings) -> String {
     fill(
         OVERLAY,
         &[
-            ("THEME_CSS", &THEME_CSS),
+            ("THEME_CSS", &theme_css(s)),
             ("ACCENT", s.accent().id()),
             ("MODE", &s.appearance.theme),
             ("FONTS", s.fonts().id),
@@ -334,7 +355,7 @@ pub fn reader(
     fill(
         READER,
         &[
-            ("THEME_CSS", &THEME_CSS),
+            ("THEME_CSS", &theme_css(s)),
             ("ACCENT", s.accent().id()),
             ("MODE", &s.appearance.theme),
             ("FONTS", s.fonts().id),
@@ -380,7 +401,7 @@ pub fn insecure_fallback(s: &Settings, tab_id: u64, host: &str, http_url: &str) 
     fill(
         NOTICE,
         &[
-            ("THEME_CSS", &THEME_CSS),
+            ("THEME_CSS", &theme_css(s)),
             ("ACCENT", s.accent().id()),
             ("MODE", &s.appearance.theme),
             ("FONTS", s.fonts().id),
@@ -394,7 +415,7 @@ pub fn sidebar(s: &Settings) -> String {
     fill(
         SIDEBAR,
         &[
-            ("THEME_CSS", &THEME_CSS),
+            ("THEME_CSS", &theme_css(s)),
             ("ACCENT", s.accent().id()),
             ("MODE", &s.appearance.theme),
             ("FONTS", s.fonts().id),
@@ -411,7 +432,7 @@ pub fn fun(s: &Settings, kind: &str, cranes: u32) -> String {
     fill(
         FUN,
         &[
-            ("THEME_CSS", &THEME_CSS),
+            ("THEME_CSS", &theme_css(s)),
             ("ACCENT", s.accent().id()),
             ("MODE", &s.appearance.theme),
             ("FONTS", s.fonts().id),
@@ -431,7 +452,7 @@ pub fn history(s: &Settings, tab: &str) -> String {
     fill(
         HISTORY,
         &[
-            ("THEME_CSS", &THEME_CSS),
+            ("THEME_CSS", &theme_css(s)),
             ("ACCENT", s.accent().id()),
             ("MODE", &s.appearance.theme),
             ("FONTS", s.fonts().id),
@@ -449,7 +470,7 @@ pub fn byobu(s: &Settings) -> String {
     fill(
         BYOBU,
         &[
-            ("THEME_CSS", &THEME_CSS),
+            ("THEME_CSS", &theme_css(s)),
             ("ACCENT", s.accent().id()),
             ("MODE", &s.appearance.theme),
             ("FONTS", s.fonts().id),
@@ -462,7 +483,7 @@ pub fn home(s: &Settings, data: &HomeData) -> String {
     fill(
         HOME,
         &[
-            ("THEME_CSS", &THEME_CSS),
+            ("THEME_CSS", &theme_css(s)),
             ("ACCENT", s.accent().id()),
             ("MODE", &s.appearance.theme),
             ("FONTS", s.fonts().id),
@@ -487,7 +508,7 @@ pub fn welcome(s: &Settings) -> String {
     fill(
         WELCOME,
         &[
-            ("THEME_CSS", &THEME_CSS),
+            ("THEME_CSS", &theme_css(s)),
             ("ACCENT", s.accent().id()),
             ("MODE", &s.appearance.theme),
             ("FONTS", s.fonts().id),
@@ -520,7 +541,7 @@ pub fn passwords(s: &Settings) -> String {
     fill(
         PASSWORDS,
         &[
-            ("THEME_CSS", &THEME_CSS),
+            ("THEME_CSS", &theme_css(s)),
             ("ACCENT", s.accent().id()),
             ("MODE", &s.appearance.theme),
             ("FONTS", s.fonts().id),
@@ -562,7 +583,7 @@ pub fn settings(
     fill(
         SETTINGS,
         &[
-            ("THEME_CSS", &THEME_CSS),
+            ("THEME_CSS", &theme_css(s)),
             ("ACCENT", s.accent().id()),
             ("MODE", &s.appearance.theme),
             ("FONTS", s.fonts().id),
@@ -592,7 +613,7 @@ pub fn crash(s: &Settings, tab_id: u64) -> String {
     fill(
         NOTICE,
         &[
-            ("THEME_CSS", &THEME_CSS),
+            ("THEME_CSS", &theme_css(s)),
             ("ACCENT", s.accent().id()),
             ("MODE", &s.appearance.theme),
             ("FONTS", s.fonts().id),
@@ -646,7 +667,7 @@ pub fn unreachable(s: &Settings, tab_id: u64, host: &str, offline: bool) -> Stri
     fill(
         NOTICE,
         &[
-            ("THEME_CSS", &THEME_CSS),
+            ("THEME_CSS", &theme_css(s)),
             ("ACCENT", s.accent().id()),
             ("MODE", &s.appearance.theme),
             ("FONTS", s.fonts().id),
@@ -676,7 +697,7 @@ pub fn certificate_error(s: &Settings, tab_id: u64, host: &str, uri: &str) -> St
     fill(
         NOTICE,
         &[
-            ("THEME_CSS", &THEME_CSS),
+            ("THEME_CSS", &theme_css(s)),
             ("ACCENT", s.accent().id()),
             ("MODE", &s.appearance.theme),
             ("FONTS", s.fonts().id),
@@ -823,8 +844,9 @@ Walk by the river"}]"#,
 
 /// Script that re-themes an open Shoji page (accent, colour mode and type profile).
 pub fn apply_theme_js(s: &Settings) -> String {
+    let css = serde_json::to_string(&browser_look(s).tokens_css()).unwrap_or_default();
     format!(
-        "window.__applyTheme && window.__applyTheme({{accent:'{}',mode:'{}',fonts:'{}'}})",
+        "(()=>{{let e=document.getElementById('shoji-dark');if(!e){{e=document.createElement('style');e.id='shoji-dark';(document.head||document.documentElement).appendChild(e)}}e.textContent={css}}})();         window.__applyTheme && window.__applyTheme({{accent:'{}',mode:'{}',fonts:'{}'}})",
         s.accent().id(),
         s.appearance.theme,
         s.fonts().id
@@ -863,6 +885,7 @@ pub fn dark_panel_json(s: &Settings, host: &str) -> String {
         "siteKey": own.map(|(k, _)| k.clone()),
         "theme": theme,
         "global": a.dark_theme,
+        "browser": a.browser_theme,
         "schedule": a.dark_schedule,
         "presets": DarkTheme::PRESETS.iter().map(|id| DarkTheme::preset(id)).collect::<Vec<_>>(),
     })

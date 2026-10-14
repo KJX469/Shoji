@@ -92,9 +92,6 @@ pub fn command_for(vkey: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Comm
             (Some('O' | 'B'), _) if shift => Favourites,
             (Some('A'), _) if shift => TabSearch,
             (Some('U'), _) => ViewSource,
-            (Some('S'), _) => SavePage,
-            (Some('G'), _) if shift => FindPrev,
-            (Some('G'), _) => FindNext,
             (_, VK_OEM_COMMA) => Settings,
             (_, VK_NEXT) => NextTabPage,
             (_, VK_PRIOR) => PrevTabPage,
@@ -233,6 +230,9 @@ mod tests {
             command_for('U' as u32, true, false, false),
             Some(Command::ViewSource)
         );
+        // Web apps own Ctrl+S and Ctrl+G; they reach the page.
+        assert_eq!(command_for('S' as u32, true, false, false), None);
+        assert_eq!(command_for('G' as u32, true, false, false), None);
         assert_eq!(
             command_for(VK_F11, false, false, false),
             Some(Command::FullScreen)
