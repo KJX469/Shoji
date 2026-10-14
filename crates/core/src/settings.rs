@@ -75,6 +75,14 @@ pub struct AppearanceSettings {
     pub dark_websites: Option<bool>,
     /// Sites left in their original colours while dark websites is on
     pub dark_websites_exclude: Vec<String>,
+    /// How websites are darkened (Dark Reader's brightness, contrast, colours and so on)
+    pub dark_theme: DarkTheme,
+    /// Sites that use their own look instead of `dark_theme`, by host
+    pub dark_site_themes: std::collections::BTreeMap<String, DarkTheme>,
+    /// Only darken websites between two times of day
+    pub dark_schedule: DarkSchedule,
+    /// Seasonal and time-of-day decoration on the new tab page
+    pub seasons: bool,
     /// Show only the site's domain in the address bar until it is clicked
     pub compact_address: bool,
     /// Tint the toolbar with a soft version of the page's own colour
@@ -83,6 +91,148 @@ pub struct AppearanceSettings {
     pub frosted_toolbar: bool,
     /// Also ask the search engine for suggestions as you type (sends keystrokes to it)
     pub search_suggestions: bool,
+}
+
+/// A look for darkened websites. Mirrors the knobs of the Dark Reader extension.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DarkTheme {
+    /// "sumi", "midnight", "dusk", "oled", "paper" or "custom"
+    pub preset: String,
+    /// "dark" (invert light pages) or "light" (dim them but keep them light)
+    pub mode: String,
+    /// 50..=150 (percent)
+    pub brightness: i32,
+    /// 50..=150 (percent)
+    pub contrast: i32,
+    /// 0..=100 (percent)
+    pub sepia: i32,
+    /// 0..=100 (percent)
+    pub grayscale: i32,
+    /// 0..=100 (percent of Dark Reader's heaviest stroke)
+    pub text_stroke: i32,
+    pub use_font: bool,
+    pub font_family: String,
+    /// Page background and text colours as `#rrggbb`
+    pub background: String,
+    pub text: String,
+}
+
+impl DarkTheme {
+    pub const PRESETS: [&'static str; 5] = ["sumi", "midnight", "dusk", "oled", "paper"];
+
+    /// A built-in look by id (unknown ids give Sumi).
+    pub fn preset(id: &str) -> Self {
+        let base = Self {
+            preset: "sumi".into(),
+            mode: "dark".into(),
+            brightness: 100,
+            contrast: 95,
+            sepia: 0,
+            grayscale: 0,
+            text_stroke: 0,
+            use_font: false,
+            font_family: "Segoe UI".into(),
+            background: "#1b1a18".into(),
+            text: "#ebe6dc".into(),
+        };
+        let with = |preset: &str, bg: &str, text: &str, b: i32, c: i32, sepia: i32| Self {
+            preset: preset.into(),
+            background: bg.into(),
+            text: text.into(),
+            brightness: b,
+            contrast: c,
+            sepia,
+            ..base.clone()
+        };
+        match id {
+            "midnight" => with("midnight", "#0f1420", "#dfe6f2", 100, 100, 0),
+            "dusk" => with("dusk", "#241d18", "#f0e2cf", 95, 100, 12),
+            "oled" => with("oled", "#000000", "#e8e8e8", 100, 100, 0),
+            "paper" => with("paper", "#2a2926", "#cfcac0", 90, 85, 0),
+            _ => base,
+        }
+    }
+
+    fn normalize(&mut self) {
+        if !Self::PRESETS.contains(&self.preset.as_str()) && self.preset != "custom" {
+            self.preset = "custom".into();
+        }
+        if self.mode != "light" {
+            self.mode = "dark".into();
+        }
+        self.brightness = self.brightness.clamp(50, 150);
+        self.contrast = self.contrast.clamp(50, 150);
+        self.sepia = self.sepia.clamp(0, 100);
+        self.grayscale = self.grayscale.clamp(0, 100);
+        self.text_stroke = self.text_stroke.clamp(0, 100);
+        self.font_family = self
+            .font_family
+            .chars()
+            .filter(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_'))
+            .take(60)
+            .collect();
+        if self.font_family.is_empty() {
+            self.font_family = "Segoe UI".into();
+        }
+        let base = Self::preset("sumi");
+        for (value, fallback) in [
+            (&mut self.background, base.background),
+            (&mut self.text, base.text),
+        ] {
+            let ok = value.len() == 7
+                && value.starts_with('#')
+                && value[1..].chars().all(|c| c.is_ascii_hexdigit());
+            if !ok {
+                *value = fallback;
+            }
+        }
+    }
+}
+
+impl Default for DarkTheme {
+    fn default() -> Self {
+        Self::preset("sumi")
+    }
+}
+
+/// Darken websites only between `from` and `to` (24-hour `HH:MM`, wrapping past midnight).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DarkSchedule {
+    pub enabled: bool,
+    pub from: String,
+    pub to: String,
+}
+
+impl Default for DarkSchedule {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            from: "20:00".into(),
+            to: "07:00".into(),
+        }
+    }
+}
+
+impl DarkSchedule {
+    fn normalize(&mut self) {
+        let valid = |t: &str| {
+            t.split_once(':').is_some_and(|(h, m)| {
+                h.len() == 2
+                    && m.len() == 2
+                    && h.parse::<u8>().is_ok_and(|h| h < 24)
+                    && m.parse::<u8>().is_ok_and(|m| m < 60)
+            })
+        };
+        let fallback = Self::default();
+        if !valid(&self.from) {
+            self.from = fallback.from;
+        }
+        if !valid(&self.to) {
+            self.to = fallback.to;
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -175,6 +325,10 @@ impl Default for AppearanceSettings {
             enable_link_preview: true,
             dark_websites: None,
             dark_websites_exclude: Vec::new(),
+            dark_theme: DarkTheme::default(),
+            dark_site_themes: std::collections::BTreeMap::new(),
+            dark_schedule: DarkSchedule::default(),
+            seasons: true,
             compact_address: true,
             tint_toolbar: true,
             frosted_toolbar: false,
@@ -354,6 +508,17 @@ impl Settings {
             self.appearance.theme = "system".to_string();
         }
         self.appearance.default_zoom_level = self.appearance.default_zoom_level.clamp(0.25, 3.0);
+        self.appearance.dark_theme.normalize();
+        self.appearance.dark_schedule.normalize();
+        let mut sites = std::mem::take(&mut self.appearance.dark_site_themes);
+        sites.retain(|host, _| !host.trim().is_empty() && host.len() < 254);
+        if sites.len() > 500 {
+            sites = sites.into_iter().take(500).collect();
+        }
+        for theme in sites.values_mut() {
+            theme.normalize();
+        }
+        self.appearance.dark_site_themes = sites;
         if !matches!(
             self.privacy.restore_session.as_str(),
             "ask" | "always" | "never"

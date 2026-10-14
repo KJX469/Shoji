@@ -6,12 +6,17 @@ web page in its own WebView2 controller, all as child windows of one top-level f
 
 ```
 ┌ top-level window (winit) ─────────────────────────────────────────────┐
-│ chrome strip webview   tabs · address bar · find / permission trays   │
-├───────────────────────────────────────────────────────┬───────────────┤
-│ active tab webview                                    │ side panel    │
-│ (hidden tabs: SetIsVisible(false), memory level Low,  │ webview,      │
-│  then TrySuspend after the idle timeout)              │ created lazily│
-└───────────────────────────────────────────────────────┴───────────────┘
+│ chrome strip webview   tabs · address bar · toolbar buttons           │
+├───────────────────────────────────────────────────────────────────────┤
+│ active tab webview            ╭─ dropdown webview (menu, site, shield, │
+│ (hidden tabs: SetIsVisible    │   downloads, dark websites), floating, │
+│  (false), memory level Low,   ╰─  rounded by a window region, created  │
+│  then TrySuspend when idle)       lazily; pinned, it docks and shrinks │
+│                                   the page by 320 px                   │
+└───────────────────────────────────────────────────────────────────────┘
+ Find, permission and download cards are drawn by the chrome strip itself: the strip
+ grows over the page and is clipped (SetWindowRgn) to the bar plus the cards, so the page
+ underneath is never resized or covered more than the card.
 ```
 
 ## Crates
@@ -92,8 +97,12 @@ the page immediately. Empty pages are never stored.
 * Hidden tabs drop to WebView2's low memory-usage level immediately and are suspended with
   `TrySuspend` after the configured idle time (default 5 minutes). Pages playing audio decline
   and are retried later. Showing a tab resumes it.
-* The side panel's webview is created on first use. Certificate details are fetched only when
-  the Site panel is open.
+* The dropdown's webview is created on first use. Certificate details are fetched only when
+  the Site dropdown is open. Dropdowns never resize the page: the host sizes the window to the
+  content height the page reports (`SidebarHeight`), rounds it with a window region, and the
+  page owns the open and close motion. A click elsewhere blurs the page, which closes it.
+* Find, permission and toast cards report their rectangles (`TrayRects`); the chrome strip
+  webview is extended to cover them and clipped to the union of the bar and the cards.
 
 ## Privacy
 
@@ -136,7 +145,7 @@ answers with `__byobuHide([...])`. Settings: `shield.mode` (off / standard / agg
   through when paused on the site. The host pushes `__shieldSync` from `flush()` so each window
   shows its active tab's counters; counters live in the hub in `shield.rs` and reset on every
   top-level navigation.
-* **Side panel, Shield tab** (`sidebar.html`): this page's counts, the per-site switch (writes
+* **Shield dropdown** (`sidebar.html`): this page's counts, the per-site switch (writes
   `shield.paused_sites` through `SaveSettings`), "Hide an element…", the log, and settings.
 * **Element picker** (`ui/byobu-picker.js`): injected on request with a one-time token; the
   reply (`byobu:rule:` web message) is accepted only with that token, for the page's own host,

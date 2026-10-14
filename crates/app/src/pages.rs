@@ -6,11 +6,17 @@
 //! `data-accent` attribute per document.
 
 use shoji_brand::{theme, theme::TypeProfile, Accent};
-use shoji_core::settings::Settings;
+use shoji_core::settings::{DarkTheme, Settings};
 use std::sync::LazyLock;
 
 const CHROME: &str = include_str!("../ui/chrome.html");
 const SIDEBAR: &str = include_str!("../ui/sidebar.html");
+const HISTORY: &str = include_str!("../ui/history.html");
+const FUN: &str = include_str!("../ui/fun.html");
+/// The crane's poses, appended to the shared stylesheet so every page can use them.
+const CRANE_KIT_CSS: &str = include_str!("../ui/crane-kit.css");
+/// Small controller for the crane's poses and flocks (`window.Pet`).
+const PET_JS: &str = include_str!("../ui/crane-kit.js");
 const HOME: &str = include_str!("../ui/home.html");
 const WELCOME: &str = include_str!("../ui/welcome.html");
 const PASSWORDS: &str = include_str!("../ui/passwords.html");
@@ -27,7 +33,11 @@ pub const READER_SCRIPT: &str = include_str!("../ui/reader.js");
 /// Dark Reader (modified for Shoji; see third_party/darkreader/SHOJI.md), minified.
 const DARK_READER: &str = include_str!("../ui/vendor/darkreader.min.js");
 
-static THEME_CSS: LazyLock<String> = LazyLock::new(theme::css);
+static THEME_CSS: LazyLock<String> = LazyLock::new(|| {
+    let mut css = theme::css();
+    css.push_str(CRANE_KIT_CSS);
+    css
+});
 
 /// Every importable browser's mark, by catalogue id, for the welcome and settings pages.
 static LOGOS_JSON: LazyLock<String> = LazyLock::new(|| {
@@ -146,10 +156,38 @@ pub const PAGE_INFO_SCRIPT: &str = r#"(() => {
   document.addEventListener('visibilitychange', later);
 })();"#;
 
-fn dark_config(s: &Settings) -> String {
+/// A [`DarkTheme`] as the field names Dark Reader's theme object uses.
+fn dark_reader_theme(t: &DarkTheme) -> serde_json::Value {
     serde_json::json!({
-        "on": s.appearance.dark_websites == Some(true),
-        "exclude": s.appearance.dark_websites_exclude,
+        "mode": if t.mode == "light" { 0 } else { 1 },
+        "brightness": t.brightness,
+        "contrast": t.contrast,
+        "sepia": t.sepia,
+        "grayscale": t.grayscale,
+        "textStroke": f64::from(t.text_stroke) / 100.0,
+        "useFont": t.use_font,
+        "fontFamily": t.font_family,
+        "darkSchemeBackgroundColor": t.background,
+        "darkSchemeTextColor": t.text,
+    })
+}
+
+fn dark_config(s: &Settings) -> String {
+    let a = &s.appearance;
+    let sites: serde_json::Map<String, serde_json::Value> = a
+        .dark_site_themes
+        .iter()
+        .map(|(host, t)| (host.clone(), dark_reader_theme(t)))
+        .collect();
+    serde_json::json!({
+        "on": a.dark_websites == Some(true),
+        "exclude": a.dark_websites_exclude,
+        "theme": dark_reader_theme(&a.dark_theme),
+        "sites": sites,
+        "schedule": a.dark_schedule.enabled.then(|| serde_json::json!({
+            "from": a.dark_schedule.from,
+            "to": a.dark_schedule.to,
+        })),
     })
     .to_string()
 }
@@ -252,6 +290,12 @@ pub fn chrome(s: &Settings) -> String {
             ("SEARCH_ENGINE_NAME", s.search_engine_display_name()),
             ("PREFS_JSON", &prefs_json(s)),
             ("ACCENTS_JSON", &theme::accents_json()),
+            ("CRANE_MARK", &theme::crane_svg("m", "pet")),
+            (
+                "CRANE_MARK_TAB",
+                &theme::crane_svg("t", "tab-crane pet").replace('"', "'"),
+            ),
+            ("PET_JS", PET_JS),
             (
                 "FROST",
                 if s.appearance.frosted_toolbar {
@@ -354,7 +398,48 @@ pub fn sidebar(s: &Settings) -> String {
             ("ACCENT", s.accent().id()),
             ("MODE", &s.appearance.theme),
             ("FONTS", s.fonts().id),
+            ("CRANE", &theme::crane_svg("c", "pet live")),
+            ("CRANE_GUARD", &theme::crane_svg("g", "pet")),
+            ("CRANE_PET", &theme::crane_svg("d", "pet")),
+            ("PET_JS", PET_JS),
+        ],
+    )
+}
+
+/// The small pages with a bit of character: `wish` (senbazuru), `tea` (418) and `koan`.
+pub fn fun(s: &Settings, kind: &str, cranes: u32) -> String {
+    fill(
+        FUN,
+        &[
+            ("THEME_CSS", &THEME_CSS),
+            ("ACCENT", s.accent().id()),
+            ("MODE", &s.appearance.theme),
+            ("FONTS", s.fonts().id),
+            ("KIND", kind),
+            ("CRANE", &theme::crane_svg("w", "")),
+            ("CRANE_T", &theme::crane_svg("t", "")),
+            ("CRANE_K", &theme::crane_svg("k", "")),
+            ("CRANES", &cranes.to_string()),
+            ("ACCENTS_JSON", &theme::accents_json()),
+            ("PET_JS", PET_JS),
+        ],
+    )
+}
+
+/// The history page (`shoji://history`) and its downloads tab (`shoji://downloads`).
+pub fn history(s: &Settings, tab: &str) -> String {
+    fill(
+        HISTORY,
+        &[
+            ("THEME_CSS", &THEME_CSS),
+            ("ACCENT", s.accent().id()),
+            ("MODE", &s.appearance.theme),
+            ("FONTS", s.fonts().id),
             ("CRANE", &theme::crane_svg("c", "")),
+            ("CRANE_B", &theme::crane_svg("b", "")),
+            ("CRANE_C", &theme::crane_svg("e", "")),
+            ("TAB", tab),
+            ("PET_JS", PET_JS),
         ],
     )
 }
@@ -384,6 +469,16 @@ pub fn home(s: &Settings, data: &HomeData) -> String {
             ("CRANE", &theme::crane_svg("c", "")),
             ("SEARCH_ENGINE_NAME", s.search_engine_display_name()),
             ("HOME_JSON", &home_json(data)),
+            (
+                "SEASONS",
+                if s.appearance.seasons {
+                    "true"
+                } else {
+                    "false"
+                },
+            ),
+            ("ACCENTS_JSON", &theme::accents_json()),
+            ("PET_JS", PET_JS),
         ],
     )
 }
@@ -507,6 +602,60 @@ pub fn crash(s: &Settings, tab_id: u64) -> String {
     )
 }
 
+/// Shown when a site's name can't be found, or the network is down: the crane looks around, or
+/// sleeps until it is back.
+pub fn unreachable(s: &Settings, tab_id: u64, host: &str, offline: bool) -> String {
+    let host_html = html_escape(host);
+    let query = html_escape(&host.replace('.', " "));
+    let (pose, title, text) = if offline {
+        (
+            "sleep",
+            "You're offline".to_string(),
+            "Shoji can't reach the network right now. The page will be right here when it comes back.".to_string(),
+        )
+    } else {
+        (
+            "look",
+            format!("Can't find {host_html}"),
+            "Check the spelling of the address, or search for it instead.".to_string(),
+        )
+    };
+    let search = if offline {
+        String::new()
+    } else {
+        format!(
+            r#"<button onclick="post('Navigate', {{ url: '{query}' }})">Search for it</button>"#
+        )
+    };
+    let body = format!(
+        r#"<div class="stage">{}{}</div>
+<h1>{title}</h1>
+<p>{text}</p>
+<div class="actions"><button class="primary" onclick="post('ReloadTab', {{ tab_id: {tab_id} }})">Try again</button>{search}</div>"#,
+        theme::crane_svg("u", "pet").replacen(
+            "class=\"crane pet\"",
+            &format!("class=\"crane pet\" data-pose=\"{pose}\""),
+            1
+        ),
+        if offline {
+            r#"<span class="zzz">z</span><span class="zzz">z</span>"#
+        } else {
+            ""
+        },
+    );
+    fill(
+        NOTICE,
+        &[
+            ("THEME_CSS", &THEME_CSS),
+            ("ACCENT", s.accent().id()),
+            ("MODE", &s.appearance.theme),
+            ("FONTS", s.fonts().id),
+            ("TITLE", if offline { "Offline" } else { "Page not found" }),
+            ("BODY", &body),
+        ],
+    )
+}
+
 /// Interstitial for an untrusted TLS certificate.
 pub fn certificate_error(s: &Settings, tab_id: u64, host: &str, uri: &str) -> String {
     let host_html = html_escape(host);
@@ -568,6 +717,13 @@ mod tests {
             reader(&s, "T", "B", "site", "<p>x</p>", "https://a.com/"),
             insecure_fallback(&s, 2, "a.com", "http://a.com/"),
             crash(&s, 3),
+            unreachable(&s, 5, "a.com", false),
+            unreachable(&s, 6, "a.com", true),
+            history(&s, "history"),
+            history(&s, "downloads"),
+            fun(&s, "wish", 12),
+            fun(&s, "tea", 12),
+            fun(&s, "koan", 12),
             notes(&s, "[]"),
             certificate_error(&s, 4, "a.com", "https://a.com/<x>"),
         ] {
@@ -673,4 +829,42 @@ pub fn apply_theme_js(s: &Settings) -> String {
         s.appearance.theme,
         s.fonts().id
     )
+}
+
+/// State for the dark-websites dropdown: the global switch, the look, and how the page the user
+/// is on (`host`, empty for none) is treated.
+pub fn dark_panel_json(s: &Settings, host: &str) -> String {
+    let a = &s.appearance;
+    let bare = host.trim_start_matches("www.");
+    let matches = |p: &str| {
+        let p = p.trim_start_matches("*.").trim_start_matches("www.");
+        !p.is_empty() && (bare == p || bare.ends_with(&format!(".{p}")))
+    };
+    let own = a
+        .dark_site_themes
+        .iter()
+        .filter(|(k, _)| matches(k))
+        .max_by_key(|(k, _)| k.len());
+    let excluded = a.dark_websites_exclude.iter().any(|p| matches(p));
+    let site = if host.is_empty() {
+        "none"
+    } else if excluded {
+        "light"
+    } else if own.is_some() {
+        "custom"
+    } else {
+        "dark"
+    };
+    let theme = own.map(|(_, t)| t).unwrap_or(&a.dark_theme);
+    serde_json::json!({
+        "on": a.dark_websites == Some(true),
+        "host": bare,
+        "site": site,
+        "siteKey": own.map(|(k, _)| k.clone()),
+        "theme": theme,
+        "global": a.dark_theme,
+        "schedule": a.dark_schedule,
+        "presets": DarkTheme::PRESETS.iter().map(|id| DarkTheme::preset(id)).collect::<Vec<_>>(),
+    })
+    .to_string()
 }

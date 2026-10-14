@@ -11,6 +11,35 @@ fn temp_dir(name: &str) -> std::path::PathBuf {
 }
 
 #[test]
+fn dark_look_is_clamped_and_per_site_looks_survive_patches() {
+    use shoji_core::settings::{DarkTheme, Settings};
+    let mut s = Settings::default();
+    assert!(s.apply_patch(&serde_json::json!({
+        "appearance": {
+            "dark_theme": { "brightness": 900, "contrast": -4, "background": "red", "font_family": "Evil; font" },
+            "dark_site_themes": { "news.example": { "sepia": 400, "preset": "bogus" } },
+            "dark_schedule": { "enabled": true, "from": "25:99", "to": "07:30" }
+        }
+    })));
+    let a = &s.appearance;
+    assert_eq!((a.dark_theme.brightness, a.dark_theme.contrast), (150, 50));
+    assert_eq!(a.dark_theme.background, DarkTheme::default().background);
+    assert_eq!(a.dark_theme.font_family, "Evil font");
+    let site = &a.dark_site_themes["news.example"];
+    assert_eq!((site.sepia, site.preset.as_str()), (100, "custom"));
+    assert_eq!(
+        (a.dark_schedule.from.as_str(), a.dark_schedule.to.as_str()),
+        ("20:00", "07:30")
+    );
+    // Presets are all valid as they stand.
+    for id in DarkTheme::PRESETS {
+        let p = DarkTheme::preset(id);
+        assert_eq!(p.preset, id);
+        assert_eq!(p.background.len(), 7);
+    }
+}
+
+#[test]
 fn tab_groups_assign_prune_and_rename() {
     let mut m = TabManager::new();
     let a = m.create_tab("https://a.com", 0);

@@ -4,6 +4,33 @@ All notable changes to Shoji are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-10-13
+
+### Added
+- **History page** (`shoji://history`, Ctrl+H): by day, searchable, select and remove, with
+  clear-browsing-data (Ctrl+Shift+Del) for a time range: history, download list, cookies, cache.
+- **Downloads page** (`shoji://downloads`) and a download list kept across restarts, with Open and
+  Show in folder; a card appears when a file is saved.
+- **Dark websites dropdown**: presets (Sumi, Midnight, Dusk, Oled, Paper), mode, brightness, contrast,
+  sepia, grayscale, background and text colors, font, text stroke, a daily schedule, and a look of
+  its own for any site.
+- **Shortcuts:** Ctrl+H, Ctrl+Shift+Del, Ctrl+U, Ctrl+S, F11, F3 / Ctrl+G, F6, Ctrl+, , Ctrl+Shift+A,
+  Ctrl+PgUp / PgDn, Alt+Home.
+- **A crane with a few things to say.** It guards the shield dropdown, carries downloads, naps on empty
+  pages and sleeping tabs, flaps in a tab that is loading, looks around on a page that can't be found,
+  and keeps a count of folded paper cranes (`shoji://wish`). A few more things aren't listed.
+- A vermilion site seal in place of the padlock, a brush stroke across the toolbar while a page loads,
+  tabs that fold away, and the new tab page's season and greeting (Settings → Appearance).
+- Page not found and offline pages.
+
+### Changed
+- Menu, site, shield and downloads are floating dropdowns with their own motion, hanging from their
+  buttons. They no longer resize the page. Pin one to dock it as a side panel.
+- Find, permission and download cards float over the page instead of pushing it down.
+
+### Fixed
+- Visits to pages opened from the address bar were not recorded in history.
+
 ## [0.1.2] - 2026-10-13
 
 ### Added
@@ -72,7 +99,8 @@ First public version.
   list management and custom rules.
 - A per-user installer and uninstaller that need no administrator rights.
 
-[Unreleased]: https://github.com/KJX469/Shoji/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/KJX469/Shoji/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/KJX469/Shoji/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/KJX469/Shoji/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/KJX469/Shoji/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/KJX469/Shoji/releases/tag/v0.1.0

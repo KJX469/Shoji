@@ -44,12 +44,26 @@
     .recent button:hover { background: var(--hover); }
     .recent .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .recent .h { color: var(--ink-3); font-size: 12px; }
+
+    /* A living page: the season drifts by, the crane keeps you company */
+    #scene { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    .greet { margin: -16px 0 26px; min-height: 1.5em; font-family: var(--font-display); font-style: italic; font-size: 15px; color: var(--ink-3); transition: opacity .5s; }
+    .crane { cursor: pointer; }
+    .wordmark { cursor: default; transition: opacity .25s; }
+    .hero-wrap { position: relative; }
+    .hero-wrap .zzz { top: 4px; left: 64px; font-size: 20px; }
+    .hero-wrap .zzz:nth-of-type(2) { top: -8px; left: 80px; }
+    .say { position: fixed; left: 50%; bottom: 36px; transform: translate(-50%, 16px); opacity: 0; padding: 10px 18px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line-strong); box-shadow: var(--shadow); font-family: var(--font-display); font-size: 15px; transition: opacity .25s, transform .3s var(--ease); pointer-events: none; }
+    .say.on { opacity: 1; transform: translate(-50%, 0); }
   </style>
 </head>
 <body>
+  <canvas id="scene" aria-hidden="true"></canvas>
+  <div class="say" id="say" role="status"></div>
   <main>
-    {{CRANE}}
-    <div class="wordmark">shoji</div>
+    <div class="hero-wrap">{{CRANE}}<span class="zzz" hidden>z</span><span class="zzz" hidden>z</span></div>
+    <div class="wordmark" id="wordmark">shoji</div>
+    <div class="greet" id="greet"></div>
     <div class="restore" id="restore" role="status">
       <span id="restoreText"></span>
       <button class="primary" onclick="post('RestoreSession')">Restore</button>
@@ -69,12 +83,29 @@
     </section>
   </main>
   <script>
+{{PET_JS}}
     function post(action, payload = null) {
       if (window.ipc) window.ipc.postMessage(JSON.stringify({ action, payload }));
     }
+    // A few words typed into the box are not searches.
+    const SECRETS = {
+      koan: () => post('OpenPage', { page: 'koan' }), haiku: () => post('OpenPage', { page: 'koan' }),
+      tea: () => post('OpenPage', { page: 'tea' }), teapot: () => post('OpenPage', { page: 'tea' }),
+      wish: () => post('OpenPage', { page: 'wish' }), senbazuru: () => post('OpenPage', { page: 'wish' }),
+      origami: () => { Pet.pose(hero, 'unfold'); Pet.flock(8, hero); say('Folded.'); },
+      fold: () => { Pet.pose(hero, 'unfold'); Pet.flock(8, hero); say('Folded.'); },
+      sakura: () => { burst('sakura', 70); say('Spring, briefly.'); },
+      snow: () => { burst('snow', 90); say('Quiet now.'); },
+      fireflies: () => { burst('firefly', 26); say('Lights.'); },
+      momiji: () => { burst('momiji', 60); say('Autumn, on request.'); },
+      hello: () => { Pet.pose(hero, 'nod'); say('Hello.'); },
+      shoji: () => { Pet.pose(hero, 'cheer'); say('That is me.'); },
+    };
     function go(e) {
       e.preventDefault();
       const url = document.getElementById('q').value.trim();
+      const secret = SECRETS[url.toLowerCase()];
+      if (secret) { secret(); document.getElementById('q').value = ''; return; }
       if (url) post('Navigate', { url });
     }
     const $ = id => document.getElementById(id);
@@ -113,6 +144,185 @@
     }
     window.__homeData = render;
     render({{HOME_JSON}});
+
+    /* ---- the crane ---- */
+    const hero = document.querySelector('.hero-wrap .crane');
+    hero.classList.add('pet', 'live');
+    const calm = Pet.calm;
+    const sayEl = $('say');
+    let sayTimer = 0;
+    function say(text, ms = 2600) {
+      sayEl.textContent = text;
+      sayEl.classList.add('on');
+      clearTimeout(sayTimer);
+      sayTimer = setTimeout(() => sayEl.classList.remove('on'), ms);
+    }
+    // Greeting by the hour, the same all day.
+    (() => {
+      const hr = new Date().getHours(), day = Math.floor(Date.now() / 864e5);
+      const pick = a => a[day % a.length];
+      $('greet').textContent =
+        hr >= 1 && hr < 5 ? pick(['Still up?', 'It is very late. The crane is awake too.', 'The quiet hours.'])
+        : hr < 11 ? pick(['Good morning.', 'A fresh sheet of paper.', 'Morning. Tea first?'])
+        : hr < 17 ? pick(['Good afternoon.', 'Plenty of day left.', 'Midday light on the screen.'])
+        : hr < 22 ? pick(['Good evening.', 'The light is going soft.', 'Evening. Lamps on.'])
+        : pick(['Late already.', 'Almost tomorrow.', 'Winding down?']);
+    })();
+    // Click it: it reacts. Seven times in a few seconds and it tries on every colour.
+    const REACT = ['nod', 'look', 'tilt', 'cheer', 'peck', 'startle', 'shelter'];
+    let clicks = [], playing = false;
+    const ACCENTS = {{ACCENTS_JSON}};
+    hero.addEventListener('click', () => {
+      const now = Date.now();
+      clicks = clicks.filter(t => now - t < 4000);
+      clicks.push(now);
+      Pet.pose(hero, REACT[clicks.length % REACT.length]);
+      if (clicks.length >= 7 && !playing) {
+        clicks = [];
+        playing = true;
+        const root = document.documentElement, original = root.dataset.accent;
+        let i = 0;
+        const tick = setInterval(() => {
+          if (i >= ACCENTS.length) {
+            clearInterval(tick);
+            root.dataset.accent = original;
+            playing = false;
+            say('Back to yourself.');
+            return;
+          }
+          root.dataset.accent = ACCENTS[i++].id;
+        }, 260);
+        Pet.pose(hero, 'cheer');
+        say('Every colour, once.');
+      }
+    });
+    // The wordmark, for a moment, in the old script.
+    $('wordmark').addEventListener('dblclick', () => {
+      const w = $('wordmark');
+      w.style.opacity = 0;
+      setTimeout(() => { w.textContent = '障子'; w.style.opacity = 1; }, 260);
+      setTimeout(() => { w.style.opacity = 0; }, 2200);
+      setTimeout(() => { w.textContent = 'shoji'; w.style.opacity = 1; }, 2480);
+    });
+    // Konami code: a flock.
+    (() => {
+      const code = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a'];
+      let at = 0;
+      addEventListener('keydown', e => {
+        const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+        at = k === code[at] ? at + 1 : (k === code[0] ? 1 : 0);
+        if (at === code.length) { at = 0; Pet.pose(hero, 'cheer'); Pet.flock(14, hero); say('A thousand wishes, fourteen at a time.', 3200); }
+      });
+    })();
+    // Left alone, it dozes; any movement wakes it.
+    (() => {
+      let idle = 0, asleep = false;
+      const zs = [...document.querySelectorAll('.hero-wrap .zzz')];
+      const sleep = () => { asleep = true; hero.setAttribute('data-pose', 'sleep'); zs.forEach(z => z.hidden = false); };
+      const wake = () => {
+        clearTimeout(idle);
+        if (asleep) { asleep = false; zs.forEach(z => z.hidden = true); Pet.pose(hero, 'startle'); }
+        idle = setTimeout(sleep, 50000);
+      };
+      ['mousemove', 'keydown', 'pointerdown', 'wheel'].forEach(ev => addEventListener(ev, wake, { passive: true }));
+      wake();
+    })();
+
+    /* ---- the season ---- */
+    const SEASONS = {{SEASONS}};
+    const cv = $('scene'), g = cv.getContext('2d');
+    let W = 0, H = 0, parts = [], kind = null, running = false;
+    function resize() {
+      const d = Math.min(2, devicePixelRatio || 1);
+      W = innerWidth; H = innerHeight;
+      cv.width = W * d; cv.height = H * d;
+      g.setTransform(d, 0, 0, d, 0, 0);
+    }
+    function seasonKind() {
+      const m = new Date().getMonth(), h = new Date().getHours();
+      if (m >= 2 && m <= 4) return 'sakura';
+      if (m >= 5 && m <= 7) return (h >= 18 || h < 6) ? 'firefly' : null;
+      if (m >= 8 && m <= 10) return 'momiji';
+      return 'snow';
+    }
+    function spawn(k, fresh) {
+      const p = { k, x: Math.random() * W, y: fresh ? Math.random() * H : -20, r: 0, a: Math.random() * 6.28,
+        s: 0.4 + Math.random() * 0.9, sway: Math.random() * 6.28, size: 0 };
+      if (k === 'sakura') { p.size = 5 + Math.random() * 4; p.s *= 0.8; }
+      else if (k === 'momiji') { p.size = 6 + Math.random() * 4; p.s *= 0.9; }
+      else if (k === 'snow') { p.size = 1.4 + Math.random() * 2.2; p.s *= 0.7; }
+      else { p.size = 2 + Math.random() * 1.6; p.y = Math.random() * H; p.s = 0.15 + Math.random() * 0.3; }
+      return p;
+    }
+    function draw(p, t) {
+      g.save();
+      g.translate(p.x, p.y);
+      if (p.k === 'sakura') {
+        g.rotate(p.a); g.fillStyle = 'rgba(238, 170, 188, .55)';
+        g.beginPath(); g.ellipse(0, 0, p.size, p.size * .55, 0, 0, 6.3); g.fill();
+        g.fillStyle = 'rgba(255, 225, 232, .5)';
+        g.beginPath(); g.ellipse(-p.size * .2, -p.size * .1, p.size * .5, p.size * .25, 0, 0, 6.3); g.fill();
+      } else if (p.k === 'momiji') {
+        // A maple leaf: three pointed lobes fanned from one stem.
+        g.rotate(p.a); g.fillStyle = 'rgba(200, 98, 58, .46)';
+        for (const ang of [-0.8, 0, 0.8]) {
+          g.save(); g.rotate(ang);
+          g.beginPath(); g.moveTo(0, 0);
+          g.quadraticCurveTo(p.size * .6, -p.size * .45, 0, -p.size * 1.2);
+          g.quadraticCurveTo(-p.size * .6, -p.size * .45, 0, 0);
+          g.fill(); g.restore();
+        }
+        g.strokeStyle = 'rgba(150, 70, 40, .5)'; g.lineWidth = 1;
+        g.beginPath(); g.moveTo(0, 0); g.lineTo(0, p.size * .55); g.stroke();
+      } else if (p.k === 'snow') {
+        g.fillStyle = 'rgba(255, 255, 255, .5)';
+        g.beginPath(); g.arc(0, 0, p.size, 0, 6.3); g.fill();
+      } else {
+        const glow = (Math.sin(t / 700 + p.sway * 3) + 1) / 2;
+        const grad = g.createRadialGradient(0, 0, 0, 0, 0, p.size * 5);
+        grad.addColorStop(0, 'rgba(236, 232, 140, ' + (0.15 + glow * 0.55) + ')');
+        grad.addColorStop(1, 'rgba(236, 232, 140, 0)');
+        g.fillStyle = grad;
+        g.beginPath(); g.arc(0, 0, p.size * 5, 0, 6.3); g.fill();
+      }
+      g.restore();
+    }
+    function step(t) {
+      g.clearRect(0, 0, W, H);
+      for (let i = 0; i < parts.length; i++) {
+        const p = parts[i];
+        p.sway += 0.012;
+        if (p.k === 'firefly') {
+          p.x += Math.sin(p.sway) * 0.35; p.y += Math.cos(p.sway * 0.8) * 0.25;
+        } else {
+          p.y += p.s * (p.k === 'snow' ? 0.8 : 1);
+          p.x += Math.sin(p.sway) * 0.5 + (p.k === 'snow' ? 0.1 : 0.25);
+          p.a += 0.01;
+        }
+        draw(p, t);
+        if (p.y > H + 24 || p.x > W + 24) {
+          if (p.burst) { parts.splice(i--, 1); continue; }
+          parts[i] = spawn(p.k, false);
+        }
+      }
+      if (parts.length) requestAnimationFrame(step); else running = false;
+    }
+    function start() { if (!running && parts.length) { running = true; requestAnimationFrame(step); } }
+    function burst(k, n) {
+      if (calm) return;
+      for (let i = 0; i < n; i++) { const p = spawn(k, false); p.burst = true; p.y = -Math.random() * H * .5; parts.push(p); }
+      start();
+    }
+    if (SEASONS && !calm) {
+      resize();
+      addEventListener('resize', resize);
+      kind = seasonKind();
+      if (kind) {
+        const n = Math.round(Math.min(34, Math.max(14, W / 56)));
+        for (let i = 0; i < n; i++) parts.push(spawn(kind, true));
+        start();
+      }
+    }
     window.__applyTheme = t => { const r = document.documentElement; r.dataset.accent = t.accent; if (t.mode) r.dataset.mode = t.mode; if (t.fonts) r.dataset.fonts = t.fonts; };
   </script>
 </body>
