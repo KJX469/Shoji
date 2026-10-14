@@ -171,6 +171,80 @@ pub enum UiToHostMessage {
     },
     /// Forget all browsing history kept by Shoji
     ClearHistory,
+    /* Password manager. The `Vault*` messages come only from the passwords page. */
+    /// Ask for the vault's state (answered with `__vaultState`)
+    VaultStatus,
+    /// The logins matching `query` (answered with `__vaultList`)
+    VaultList {
+        #[serde(default)]
+        query: String,
+    },
+    /// Send one login's password and note to the page (`__vaultSecret`)
+    VaultReveal {
+        id: String,
+    },
+    /// Put "username" or "password" of a login on the clipboard (cleared after a short while)
+    VaultCopy {
+        id: String,
+        field: String,
+    },
+    /// Add a login, or change the one with `id`
+    VaultSave {
+        #[serde(default)]
+        id: Option<String>,
+        url: String,
+        #[serde(default)]
+        title: String,
+        #[serde(default)]
+        username: String,
+        password: String,
+        #[serde(default)]
+        note: String,
+    },
+    VaultDelete {
+        id: String,
+    },
+    VaultDeleteAll,
+    VaultUnlock {
+        master: String,
+    },
+    VaultLock,
+    VaultSetMaster {
+        master: String,
+    },
+    VaultRemoveMaster,
+    /// A random password with these options (answered with `__vaultGenerated`)
+    VaultGenerate {
+        #[serde(default = "default_length")]
+        length: usize,
+        #[serde(default = "yes")]
+        lower: bool,
+        #[serde(default = "yes")]
+        upper: bool,
+        #[serde(default = "yes")]
+        digits: bool,
+        #[serde(default = "yes")]
+        symbols: bool,
+    },
+    /// Pick a CSV file and add its logins
+    VaultImportCsv,
+    /// Choose where to write every login as plain CSV
+    VaultExportCsv,
+    /// A login form was submitted on the page (reported by the page itself, so the host uses the
+    /// tab's real address, never one the page names, and asks the user before saving anything)
+    LoginSubmitted {
+        #[serde(default)]
+        username: String,
+        password: String,
+    },
+    /// The user focused a login field; `x`, `y`, `w`, `h` are its rectangle in the page. The host
+    /// offers only the logins saved for the tab's own site, and fills only after a click.
+    LoginFieldFocused {
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+    },
     /// Favourites
     ToggleFavourite,
     AddFavourite {
@@ -249,13 +323,24 @@ pub enum UiToHostMessage {
     },
 }
 
+fn yes() -> bool {
+    true
+}
+
+fn default_length() -> usize {
+    20
+}
+
 impl UiToHostMessage {
     /// Messages that ordinary web content is allowed to send. Everything else is accepted
     /// only from the browser's own surfaces (chrome strip, side panel, internal pages).
     pub fn allowed_from_web_content(&self) -> bool {
         matches!(
             self,
-            UiToHostMessage::FindResult { .. } | UiToHostMessage::PageInfo { .. }
+            UiToHostMessage::FindResult { .. }
+                | UiToHostMessage::PageInfo { .. }
+                | UiToHostMessage::LoginSubmitted { .. }
+                | UiToHostMessage::LoginFieldFocused { .. }
         )
     }
 }

@@ -10,10 +10,10 @@ use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 use shoji_core::import::{catalog, Decryptor, Imported, Kinds};
 use std::path::{Path, PathBuf};
 use windows::Win32::Foundation::{LocalFree, HLOCAL};
-use windows::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
+use windows::Win32::Security::Cryptography::{CryptProtectData, CryptUnprotectData, CRYPT_INTEGER_BLOB};
 
 /// Reverse DPAPI protection made for the current Windows user.
-fn dpapi_unprotect(data: &[u8]) -> Option<Vec<u8>> {
+pub(crate) fn dpapi_unprotect(data: &[u8]) -> Option<Vec<u8>> {
     let input = CRYPT_INTEGER_BLOB {
         cbData: data.len() as u32,
         pbData: data.as_ptr() as *mut u8,
@@ -21,6 +21,22 @@ fn dpapi_unprotect(data: &[u8]) -> Option<Vec<u8>> {
     let mut output = CRYPT_INTEGER_BLOB::default();
     unsafe {
         CryptUnprotectData(&input, None, None, None, None, 0, &mut output).ok()?;
+        let bytes = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
+        let _ = LocalFree(Some(HLOCAL(output.pbData as _)));
+        Some(bytes)
+    }
+}
+
+/// Protect `data` for the current Windows user, with no prompts.
+pub(crate) fn dpapi_protect(data: &[u8]) -> Option<Vec<u8>> {
+    let input = CRYPT_INTEGER_BLOB {
+        cbData: data.len() as u32,
+        pbData: data.as_ptr() as *mut u8,
+    };
+    let mut output = CRYPT_INTEGER_BLOB::default();
+    unsafe {
+        // CRYPTPROTECT_UI_FORBIDDEN: never show a dialog.
+        CryptProtectData(&input, None, None, None, None, 0x1, &mut output).ok()?;
         let bytes = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
         let _ = LocalFree(Some(HLOCAL(output.pbData as _)));
         Some(bytes)

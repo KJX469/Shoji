@@ -572,32 +572,50 @@ pub fn pick_folder(start: &std::path::Path) -> Option<PathBuf> {
     }
 }
 
-/// File picker for a bookmarks export (`.html`).
-pub fn pick_html_file() -> Option<PathBuf> {
-    use windows::core::{w, HSTRING};
+/// Open-file dialog filtered to `spec` (e.g. `"*.csv"`), titled `title`.
+pub fn pick_file(title: &str, filter_name: &str, spec: &str) -> Option<PathBuf> {
+    use windows::core::HSTRING;
     use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
     use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
     use windows::Win32::UI::Shell::{FileOpenDialog, IFileOpenDialog, SIGDN_FILESYSPATH};
     unsafe {
         let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL).ok()?;
+        let name = HSTRING::from(filter_name);
+        let spec = HSTRING::from(spec);
+        let all = HSTRING::from("All files");
+        let star = HSTRING::from("*.*");
         let filters = [
-            COMDLG_FILTERSPEC {
-                pszName: w!("Bookmarks (*.html;*.htm)"),
-                pszSpec: w!("*.html;*.htm"),
-            },
-            COMDLG_FILTERSPEC {
-                pszName: w!("All files"),
-                pszSpec: w!("*.*"),
-            },
+            COMDLG_FILTERSPEC { pszName: windows::core::PCWSTR(name.as_ptr()), pszSpec: windows::core::PCWSTR(spec.as_ptr()) },
+            COMDLG_FILTERSPEC { pszName: windows::core::PCWSTR(all.as_ptr()), pszSpec: windows::core::PCWSTR(star.as_ptr()) },
         ];
         let _ = dialog.SetFileTypes(&filters);
-        let _ = dialog.SetTitle(&HSTRING::from("Choose a bookmarks file"));
+        let _ = dialog.SetTitle(&HSTRING::from(title));
         dialog.Show(None).ok()?;
-        let path = dialog
-            .GetResult()
-            .ok()?
-            .GetDisplayName(SIGDN_FILESYSPATH)
-            .ok()?;
+        let path = dialog.GetResult().ok()?.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        Some(PathBuf::from(take(path)))
+    }
+}
+
+/// Bookmarks export (`.html`).
+pub fn pick_html_file() -> Option<PathBuf> {
+    pick_file("Choose a bookmarks file", "Bookmarks (*.html;*.htm)", "*.html;*.htm")
+}
+
+/// Save-as dialog for a CSV file named `default_name`.
+pub fn pick_save_csv(default_name: &str) -> Option<PathBuf> {
+    use windows::core::{w, HSTRING};
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
+    use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
+    use windows::Win32::UI::Shell::{FileSaveDialog, IFileSaveDialog, SIGDN_FILESYSPATH};
+    unsafe {
+        let dialog: IFileSaveDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_ALL).ok()?;
+        let filters = [COMDLG_FILTERSPEC { pszName: w!("CSV file (*.csv)"), pszSpec: w!("*.csv") }];
+        let _ = dialog.SetFileTypes(&filters);
+        let _ = dialog.SetDefaultExtension(w!("csv"));
+        let _ = dialog.SetFileName(&HSTRING::from(default_name));
+        let _ = dialog.SetTitle(&HSTRING::from("Save passwords as CSV"));
+        dialog.Show(None).ok()?;
+        let path = dialog.GetResult().ok()?.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
         Some(PathBuf::from(take(path)))
     }
 }
@@ -648,17 +666,18 @@ pub fn add_cookies(webview: &WebView, cookies: &[shoji_core::import::Cookie]) ->
 
 /* ---------- Engine settings, focus, failed navigations, DevTools protocol ---------- */
 
-/// Password saving / autofill (off in private mode) and the tracking-prevention level.
-/// Both are stored by the engine in the profile, encrypted for the current Windows user.
-pub fn configure_engine(webview: &WebView, passwords: bool, tracking: Tracking) {
+/// General autofill (addresses and the like; off in private mode) and the tracking-prevention
+/// level. The engine's own password saving stays off: Shoji's password manager does that, so
+/// there is one list the user can see, search, export and protect.
+pub fn configure_engine(webview: &WebView, autofill: bool, tracking: Tracking) {
     let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
         return;
     };
     if let Ok(settings) = unsafe { core.Settings() } {
         if let Ok(s4) = settings.cast::<ICoreWebView2Settings4>() {
             unsafe {
-                let _ = s4.SetIsPasswordAutosaveEnabled(passwords);
-                let _ = s4.SetIsGeneralAutofillEnabled(passwords);
+                let _ = s4.SetIsPasswordAutosaveEnabled(false);
+                let _ = s4.SetIsGeneralAutofillEnabled(autofill);
             }
         }
     }

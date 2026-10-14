@@ -8,6 +8,7 @@ following. Each keeps its own licence.
 | Component | Licence | Where |
 | --- | --- | --- |
 | [Dark Reader](https://github.com/darkreader/darkreader) (modified) | MIT | `third_party/darkreader/`, bundled at `crates/app/ui/vendor/darkreader.min.js` (licence beside it) |
+| Browser logos ([browser-logos](https://github.com/alrra/browser-logos), MIT, and [Simple Icons](https://simpleicons.org), CC0). The logos remain trademarks of their owners and only identify the browser to import from | MIT / CC0 | `crates/brand/assets/logos/` |
 | Instrument Sans, Newsreader, Fraunces, Literata | SIL Open Font License 1.1 | `assets/fonts/` (licence texts alongside) |
 
 ## Linked into the browser
@@ -21,6 +22,7 @@ Rust crates resolved in [Cargo.lock](Cargo.lock), including:
 | [windows](https://github.com/microsoft/windows-rs), webview2-com | MIT / Apache-2.0 |
 | [ureq](https://github.com/algesten/ureq), rustls | MIT / Apache-2.0 (rustls also ISC) |
 | [rusqlite](https://github.com/rusqlite/rusqlite) with bundled [SQLite](https://sqlite.org) (reads other browsers' data on import) | MIT; SQLite is public domain |
+| [ring](https://github.com/briansmith/ring) (encrypts the password vault) | ISC-style / OpenSSL-derived |
 | serde, serde_json and the other dependencies | MIT and/or Apache-2.0 |
 
 Run `cargo tree` for the full list. The MPL-2.0 source for `adblock` is available from its

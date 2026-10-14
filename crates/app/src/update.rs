@@ -231,7 +231,7 @@ mod tests {
     #[test]
     fn versions_compare_numerically() {
         assert!(is_newer("0.1.1", "0.1.0"));
-        assert!(is_newer("v0.2.0", "0.1.9"));
+        assert!(is_newer("v0.1.10", "0.1.9"));
         assert!(is_newer("1.0", "0.9.9"));
         assert!(
             is_newer("0.10.0", "0.9.0"),
@@ -247,14 +247,14 @@ mod tests {
     fn release_json_yields_assets_only_from_our_downloads() {
         let json = |installer: &str| {
             format!(
-                r#"{{"tag_name":"v0.2.0","draft":false,"prerelease":false,"assets":[
+                r#"{{"tag_name":"v0.1.10","draft":false,"prerelease":false,"assets":[
                   {{"name":"ShojiSetup.exe","browser_download_url":"{installer}"}},
-                  {{"name":"ShojiSetup.exe.sha256","browser_download_url":"{DOWNLOAD_PREFIX}v0.2.0/ShojiSetup.exe.sha256"}}]}}"#
+                  {{"name":"ShojiSetup.exe.sha256","browser_download_url":"{DOWNLOAD_PREFIX}v0.1.10/ShojiSetup.exe.sha256"}}]}}"#
             )
         };
-        let good = format!("{DOWNLOAD_PREFIX}v0.2.0/ShojiSetup.exe");
+        let good = format!("{DOWNLOAD_PREFIX}v0.1.10/ShojiSetup.exe");
         let r = parse_release(&json(&good), DOWNLOAD_PREFIX).expect("release");
-        assert_eq!(r.version, "0.2.0");
+        assert_eq!(r.version, "0.1.10");
         assert_eq!(r.installer_url, good);
 
         // An asset hosted anywhere else is never fetched.
@@ -268,7 +268,7 @@ mod tests {
         assert!(parse_release(&pre, DOWNLOAD_PREFIX).is_none());
         // A release without a checksum is not installed.
         let no_sum = format!(
-            r#"{{"tag_name":"v0.2.0","assets":[{{"name":"ShojiSetup.exe","browser_download_url":"{good}"}}]}}"#
+            r#"{{"tag_name":"v0.1.10","assets":[{{"name":"ShojiSetup.exe","browser_download_url":"{good}"}}]}}"#
         );
         assert!(parse_release(&no_sum, DOWNLOAD_PREFIX).is_none());
     }
