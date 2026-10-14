@@ -437,6 +437,10 @@ fn test_ipc_serde_roundtrip() {
         active_tab_id: None,
         groups: vec![],
         split: None,
+        split_state: None,
+        workspaces: vec![],
+        active_workspace_id: 1,
+        inactive_tabs: vec![],
     };
     let json = serde_json::to_string(&sync).unwrap();
     assert_eq!(

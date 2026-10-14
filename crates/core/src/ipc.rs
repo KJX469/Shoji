@@ -1,4 +1,4 @@
-use crate::tabs::{TabGroup, TabId, TabState};
+use crate::tabs::{SplitOrientation, SplitState, TabGroup, TabId, TabState, Workspace};
 use serde::{Deserialize, Serialize};
 
 /// What the user types on the settings page to confirm uninstalling Shoji and deleting all of
@@ -70,6 +70,8 @@ pub enum UiToHostMessage {
     ToggleSecurityPanel,
     /// Open the Byobu (shield) tab of the side panel
     ToggleShieldPanel,
+    /// Open the Workspaces tab of the side panel
+    ToggleWorkspacesSidebar,
     /// Start the "hide an element" picker in the active tab
     ShieldPickElement,
     /// A Byobu surface asks for fresh state (lists, counters, optionally the request log);
@@ -97,6 +99,39 @@ pub enum UiToHostMessage {
         screen_x: Option<f64>,
         #[serde(default)]
         screen_y: Option<f64>,
+    },
+    /// Workspaces
+    CreateWorkspace {
+        name: String,
+        #[serde(default)]
+        color: String,
+    },
+    SwitchWorkspace {
+        id: u32,
+    },
+    RenameWorkspace {
+        id: u32,
+        name: String,
+    },
+    SetWorkspaceColor {
+        id: u32,
+        color: String,
+    },
+    ReorderWorkspace {
+        from_index: usize,
+        to_index: usize,
+    },
+    DeleteWorkspace {
+        id: u32,
+    },
+    MoveTabToWorkspace {
+        tab_id: TabId,
+        workspace_id: u32,
+    },
+    WorkspaceMenu {
+        workspace_id: u32,
+        x: f64,
+        y: f64,
     },
     /// Zoom
     ZoomIn,
@@ -290,6 +325,29 @@ pub enum UiToHostMessage {
     SplitWith {
         tab_id: Option<TabId>,
     },
+    /// Enter or exit split view with the most recent sibling tab
+    ToggleSplit,
+    /// Flip the split divider between vertical and horizontal
+    ToggleSplitOrientation,
+    SetSplitOrientation {
+        orientation: SplitOrientation,
+    },
+    /// Set the split divider ratio (clamped to minimum pane bounds)
+    SetSplitRatio {
+        ratio: f64,
+    },
+    /// Reset split divider to 50/50
+    ResetSplitRatio,
+    /// Move focus between the two split panes
+    SwitchSplitPane,
+    /// A link was dragged and dropped onto a split pane
+    LinkDropped {
+        url: String,
+    },
+    /// Mute or unmute a tab's audio output
+    ToggleMuteTab {
+        tab_id: TabId,
+    },
     /// Session restore
     RestoreSession,
     DismissSession,
@@ -341,6 +399,7 @@ impl UiToHostMessage {
                 | UiToHostMessage::PageInfo { .. }
                 | UiToHostMessage::LoginSubmitted { .. }
                 | UiToHostMessage::LoginFieldFocused { .. }
+                | UiToHostMessage::LinkDropped { .. }
         )
     }
 }
@@ -391,6 +450,18 @@ pub enum HostToUiMessage {
         /// The two tabs shown side by side, if split view is on
         #[serde(default)]
         split: Option<[TabId; 2]>,
+        /// Detailed split state (orientation, ratio, panes) for the active workspace
+        #[serde(default)]
+        split_state: Option<SplitState>,
+        /// All workspaces in this window, in user order
+        #[serde(default)]
+        workspaces: Vec<Workspace>,
+        /// Active workspace id in this window
+        #[serde(default)]
+        active_workspace_id: u32,
+        /// Tabs in inactive workspaces (for the workspaces sidebar)
+        #[serde(default)]
+        inactive_tabs: Vec<TabState>,
     },
     /// Side panel state
     SidebarStateSync {
