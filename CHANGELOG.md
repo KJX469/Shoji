@@ -4,23 +4,29 @@ All notable changes to Shoji are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [0.2.0] - 2026-10-13
+## [0.1.2] - 2026-10-13
 
 ### Added
 - **Clean links.** Tracker redirects (Google, Facebook, Reddit, YouTube and others) are skipped and
   tracking parameters (`utm_*`, `fbclid`, `gclid`, ...) are removed before a page loads.
 - **Global Privacy Control.** Every request carries `Sec-GPC: 1`.
 - Both are on by default, with switches under Settings → Privacy.
-- **Import from your old browser** in setup (and Settings → Privacy → Import…): favourites, history and sign-ins
-  from Chrome, Edge, Brave, Firefox and 40+ more (Opera, Vivaldi, Arc, Yandex, LibreWolf, Waterfox, Zen, Safari
-  bookmarks files, Internet Explorer favourites…), each with its logo. Installed browsers are marked Found and
-  every profile is listed. Passwords can't be imported: the WebView2 engine has no way to receive them.
-  Sign-ins sealed to the old browser itself (Chrome/Edge/Brave "app-bound" values) are skipped and reported.
+- **Import from your old browser** in setup (and Settings → Privacy → Import…): favourites, history, sign-ins
+  and saved passwords from Chrome, Edge, Brave, Firefox and 40+ more (Opera, Vivaldi, Arc, Yandex, LibreWolf,
+  Waterfox, Zen, Safari bookmarks files, Internet Explorer favourites…), each with its real logo. Installed
+  browsers are marked Found and every profile is listed. Values sealed to the old browser itself (Chrome, Edge
+  and Brave "app-bound" sign-ins and passwords) are skipped and reported. Firefox passwords import as CSV.
+- **Password manager** (`shoji://passwords`): an encrypted vault with search, add/edit/delete, a generator,
+  weak and reused checks, CSV import and export, and an optional master password (locks after 15 idle minutes).
+  Shoji offers to save logins when you sign in and fills them from a menu on the login field. Copied passwords
+  skip clipboard history and clear after 30 seconds. It replaces the engine's own password saving.
 - **Default browser.** Shoji now registers with Windows and offers to become your default in setup.
 - **History.** Shoji keeps a browsing history (off in Private mode, cleared in Settings) that feeds address-bar suggestions.
-- Setup shows progress across every step, answers Enter and Esc, and lets you skip each step.
+- Setup shows progress across every step, answers Enter and Esc, and lets you skip each step. The crane
+  has a gesture for every step and flies off when setup ends, however you leave it.
 
 ### Changed
+- Removed the faint halo around the crane.
 - Favourites hold up to 5,000 entries (was 500).
 - Setup's Privacy step comes before Search and uses icons.
 

@@ -126,7 +126,7 @@ impl Default for TypeProfile {
     }
 }
 
-const DARK_TOKENS: &str = "--bg: #1b1a18; --bg-sunk: #151413; --surface: #22211f; --surface-2: #2a2926; --line: rgba(236, 229, 216, .09); --line-strong: rgba(236, 229, 216, .17); --ink: #ebe6dc; --ink-2: #a59f94; --ink-3: #78736a; --hover: rgba(236, 229, 216, .06); --press: rgba(236, 229, 216, .10); --ok: #9cc29a; --warn: #d8b46e; --danger: #df8f87; --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 14px 36px -14px rgba(0, 0, 0, .65); --crane-shadow: drop-shadow(0 10px 24px rgba(0, 0, 0, .35)); --accent: var(--tone);";
+const DARK_TOKENS: &str = "--bg: #1b1a18; --bg-sunk: #151413; --surface: #22211f; --surface-2: #2a2926; --line: rgba(236, 229, 216, .09); --line-strong: rgba(236, 229, 216, .17); --ink: #ebe6dc; --ink-2: #a59f94; --ink-3: #78736a; --hover: rgba(236, 229, 216, .06); --press: rgba(236, 229, 216, .10); --ok: #9cc29a; --warn: #d8b46e; --danger: #df8f87; --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 14px 36px -14px rgba(0, 0, 0, .65); --crane-shadow: none; --accent: var(--tone);";
 
 const BASE_CSS: &str = r#"
 :root {
@@ -151,7 +151,7 @@ const BASE_CSS: &str = r#"
   --warn: #a8772c;
   --danger: #b05049;
   --shadow: 0 1px 2px rgba(58, 50, 38, .06), 0 12px 32px -14px rgba(58, 50, 38, .22);
-  --crane-shadow: drop-shadow(0 .5px .6px rgba(58, 50, 38, .35)) drop-shadow(0 8px 18px rgba(58, 50, 38, .10));
+  --crane-shadow: drop-shadow(0 .5px .6px rgba(58, 50, 38, .35));
   --on-tone: #2b2924;
   --accent: var(--deep);
   --tint: color-mix(in srgb, var(--tone) 34%, transparent);

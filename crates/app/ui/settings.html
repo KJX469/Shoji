@@ -196,12 +196,16 @@
           <label class="switch"><input type="checkbox" data-path="privacy.strict_tracking_prevention"><span></span></label>
         </div>
         <div class="row">
-          <div class="what"><b>Save and fill passwords</b><small>Offers to save logins and fills them in. Stored encrypted for your Windows account. Not used in private mode</small></div>
+          <div class="what"><b>Save and fill passwords</b><small>Offers to save a login when you sign in, and fills it from Shoji's password manager. Not used in private mode. Applies to new tabs</small></div>
           <label class="switch"><input type="checkbox" data-path="privacy.save_passwords"><span></span></label>
         </div>
         <div class="row">
-          <div class="what"><b>Saved passwords</b><small>The engine can't list them for other apps, so you can remove all saved logins and autofill entries here</small></div>
-          <button class="btn" onclick="if (this.dataset.sure) { post('ClearSavedLogins'); toast('Saved logins removed'); delete this.dataset.sure; this.textContent = 'Remove all'; } else { this.dataset.sure = '1'; this.textContent = 'Click again to confirm'; }">Remove all</button>
+          <div class="what"><b>Password manager</b><small>See, search, add and import your logins, check for weak and reused ones, and lock them with a master password</small></div>
+          <button class="btn" onclick="post('Navigate', { url: 'shoji://passwords' })">Open</button>
+        </div>
+        <div class="row">
+          <div class="what"><b>Logins saved by the engine</b><small>Saved before Shoji had its own password manager. The engine can't list them, so you can only remove them all</small></div>
+          <button class="btn" onclick="if (this.dataset.sure) { post('ClearSavedLogins'); toast('Old saved logins removed'); delete this.dataset.sure; this.textContent = 'Remove all'; } else { this.dataset.sure = '1'; this.textContent = 'Click again to confirm'; }">Remove all</button>
         </div>
         <div class="row">
           <div class="what"><b>Restore tabs after a crash</b><small>If Shoji closes unexpectedly or is force-closed</small></div>

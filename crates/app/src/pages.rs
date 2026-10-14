@@ -13,6 +13,9 @@ const CHROME: &str = include_str!("../ui/chrome.html");
 const SIDEBAR: &str = include_str!("../ui/sidebar.html");
 const HOME: &str = include_str!("../ui/home.html");
 const WELCOME: &str = include_str!("../ui/welcome.html");
+const PASSWORDS: &str = include_str!("../ui/passwords.html");
+/// Reports login forms and fields to the password manager (see the file's header).
+pub const LOGIN_SCRIPT: &str = include_str!("../ui/login.js");
 const SETTINGS: &str = include_str!("../ui/settings.html");
 const NOTICE: &str = include_str!("../ui/notice.html");
 const BYOBU: &str = include_str!("../ui/byobu.html");
@@ -30,14 +33,10 @@ static THEME_CSS: LazyLock<String> = LazyLock::new(theme::css);
 static LOGOS_JSON: LazyLock<String> = LazyLock::new(|| {
     let marks: std::collections::BTreeMap<&str, String> = shoji_core::import::catalog::SOURCES
         .iter()
-        .map(|s| (s.id, theme_logo(s)))
+        .map(|s| (s.id, shoji_brand::logos::data_uri(s.id, s.color, s.name)))
         .collect();
     script_json(serde_json::to_string(&marks))
 });
-
-fn theme_logo(s: &shoji_core::import::catalog::Source) -> String {
-    shoji_brand::logos::svg(s.id, s.color, s.name)
-}
 
 /// Replace every `{{KEY}}` in `template` in one pass. Unknown keys are left untouched.
 fn fill(template: &str, vars: &[(&str, &str)]) -> String {
@@ -418,6 +417,22 @@ pub fn welcome(s: &Settings) -> String {
                     "false"
                 },
             ),
+        ],
+    )
+}
+
+pub fn passwords(s: &Settings) -> String {
+    fill(
+        PASSWORDS,
+        &[
+            ("THEME_CSS", &THEME_CSS),
+            ("ACCENT", s.accent().id()),
+            ("MODE", &s.appearance.theme),
+            ("FONTS", s.fonts().id),
+            ("CRANE", &theme::crane_svg("c", "")),
+            ("PRIVATE_MODE", if s.privacy.ephemeral_default { "true" } else { "false" }),
+            ("SAVE_ENABLED", if s.privacy.save_passwords { "true" } else { "false" }),
+            ("PRIVATE_NOTE", if s.privacy.ephemeral_default { " in private mode" } else { "" }),
         ],
     )
 }

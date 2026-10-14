@@ -10,6 +10,7 @@ mod pages;
 mod shield;
 mod tray;
 mod update;
+mod vault_win;
 mod webview;
 mod window;
 
@@ -201,6 +202,7 @@ fn internal_page(ctx: &PageContext, page: &str) -> Option<String> {
             },
         ),
         "welcome" => pages::welcome(s),
+        "passwords" => pages::passwords(s),
         "byobu" => pages::byobu(s),
         "settings" => pages::settings(s, &ctx.engine_version, &ctx.data_dir, ctx.site_choices),
         _ => {
@@ -376,6 +378,25 @@ fn js_string(s: &str) -> String {
 }
 
 /* ---------------------------------------------------------------- windows */
+
+/// A login form the user submitted, held until they say whether to keep it.
+struct PendingLogin {
+    url: String,
+    username: String,
+    password: String,
+    /// Already saved for this site and username with an older password
+    existing: Option<String>,
+    at: Instant,
+}
+
+/// How long a master-password vault stays open without being used.
+const VAULT_IDLE: Duration = Duration::from_secs(15 * 60);
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
 
 struct Tab {
     view: WebView,
@@ -758,6 +779,9 @@ struct BrowserApp {
     shield: shoji_byobu::Shield,
     favourites: shoji_core::userdata::Favourites,
     history: shoji_core::userdata::History,
+    vault: shoji_core::vault::Vault,
+    /// A login the user just submitted on a page, waiting for their answer to "save it?"
+    pending_login: Option<PendingLogin>,
     /// Cookies read by an import, waiting for a tab that uses the real profile (internal pages
     /// run in a throwaway one)
     pending_cookies: Mutex<Vec<shoji_core::import::Cookie>>,
@@ -795,6 +819,7 @@ impl BrowserApp {
         let favourites = shoji_core::userdata::Favourites::load(data_dir.join("favourites.json"));
         let site_data = shoji_core::userdata::SiteData::load(data_dir.join("sitedata.json"));
         let history = shoji_core::userdata::History::load(data_dir.join("history.json"));
+        let vault = shoji_core::vault::Vault::load(data_dir.join("vault.json"));
 
         // Tabs from the last run. Private mode keeps none; otherwise a crash or force-close
         // (clean_exit still false) is offered for restore, or restored outright if so chosen.
@@ -856,6 +881,8 @@ impl BrowserApp {
             notebook: shoji_core::notes::Notebook::load(data_dir.join("notes.json")),
             favourites,
             history,
+            vault,
+            pending_login: None,
             pending_cookies: Mutex::new(Vec::new()),
             site_data,
             session_path,
@@ -1057,6 +1084,201 @@ impl BrowserApp {
         }
     }
 
+    /* ----- password manager ----- */
+
+    /// Make the vault usable: open an OS-protected one, or (when `create`) start one. A vault
+    /// with a master password only opens when the user types it.
+    fn vault_open(&mut self, create: bool) -> bool {
+        use shoji_core::vault::State;
+        match self.vault.state() {
+            State::Unlocked => true,
+            State::Locked => {
+                !self.vault.has_master() && self.vault.unlock_auto(&vault_win::WinProtector)
+            }
+            State::Empty => create && self.vault.create(&vault_win::WinProtector),
+        }
+    }
+
+    fn eval_all_internal(&self, js: &str) {
+        for win in self.windows.values() {
+            win.eval_internal_tabs(js);
+        }
+    }
+
+    fn vault_state_json(&mut self) -> serde_json::Value {
+        use shoji_core::vault::State;
+        // An OS-protected vault opens on its own, so the page never shows it as locked.
+        if self.vault.state() == State::Locked {
+            self.vault_open(false);
+        }
+        let state = match self.vault.state() {
+            State::Empty => "empty",
+            State::Locked => "locked",
+            State::Unlocked => "unlocked",
+        };
+        serde_json::json!({ "state": state, "master": self.vault.has_master(), "count": self.vault.len() })
+    }
+
+    fn push_vault(&mut self) {
+        let js = format!("window.__vaultState && window.__vaultState({})", self.vault_state_json());
+        self.eval_all_internal(&js);
+    }
+
+    fn vault_toast(&self, text: &str) {
+        self.eval_all_internal(&format!(
+            "window.__vaultToast && window.__vaultToast({})",
+            js_string(text)
+        ));
+    }
+
+    fn push_vault_list(&mut self, query: &str) {
+        if !self.vault.is_unlocked() {
+            return;
+        }
+        let audit = self.vault.audit();
+        let weak: HashSet<&String> = audit.weak.iter().collect();
+        let reused: HashSet<&String> = audit.reused.iter().flatten().collect();
+        let items: Vec<serde_json::Value> = self
+            .vault
+            .search(query)
+            .iter()
+            .map(|l| {
+                serde_json::json!({
+                    "id": l.id, "title": l.title, "url": l.url, "host": l.host(),
+                    "username": l.username, "modified": l.modified,
+                    "weak": weak.contains(&l.id), "reused": reused.contains(&l.id),
+                })
+            })
+            .collect();
+        let payload = serde_json::json!({
+            "items": items, "weak": audit.weak.len(), "reused": audit.reused.iter().map(Vec::len).sum::<usize>(),
+        });
+        self.eval_all_internal(&format!("window.__vaultList && window.__vaultList({payload})"));
+    }
+
+    fn vault_changed(&mut self) {
+        self.push_vault();
+        self.push_vault_list("");
+    }
+
+    /// Whether the saved-login prompts and fill menu are on for `win_id`'s active page, and the
+    /// page's address.
+    fn login_page(&self, win_id: WindowId, tab: TabId) -> Option<String> {
+        if !self.settings.privacy.save_passwords || self.settings.privacy.ephemeral_default {
+            return None;
+        }
+        let url = self
+            .windows
+            .get(&win_id)?
+            .tabs
+            .tabs()
+            .iter()
+            .find(|t| t.id == tab)?
+            .url
+            .clone();
+        (url.starts_with("https://") || url.starts_with("http://")).then_some(url)
+    }
+
+    /// Ask whether to keep the login just submitted.
+    fn offer_save(&mut self, win_id: WindowId) {
+        use shoji_core::ipc::OverlayItem;
+        let Some(p) = &self.pending_login else {
+            return;
+        };
+        let host = shoji_core::vault::host_of(&p.url);
+        let who = if p.username.is_empty() { String::new() } else { format!(" for {}", p.username) };
+        let (label, value) = if p.existing.is_some() {
+            (format!("Update the saved password{who}"), "save")
+        } else {
+            (format!("Save password{who}"), "save")
+        };
+        let item = |kind: &str, value: &str, label: String, sub: String| OverlayItem {
+            kind: kind.into(),
+            value: value.into(),
+            label,
+            sub,
+            color: None,
+        };
+        let items = vec![
+            item("login-save", value, label, host.clone()),
+            item("login-save", "never", format!("Never for {host}"), String::new()),
+            item("login-save", "dismiss", "Not now".into(), String::new()),
+        ];
+        let Some(win) = self.windows.get(&win_id) else {
+            return;
+        };
+        let w = 320.0f64.min(win.width - 16.0);
+        let frame = [win.width - w - 12.0, win.chrome_height(), w, 46.0 + 2.0 * 34.0 + 12.0];
+        self.show_overlay(win_id, "menu", items, frame, "", "", "");
+    }
+
+    fn commit_login(&mut self, choice: &str) {
+        let Some(p) = self.pending_login.take() else {
+            return;
+        };
+        if p.at.elapsed() > Duration::from_secs(600) {
+            return;
+        }
+        let host = shoji_core::vault::host_of(&p.url);
+        match choice {
+            "save" => {
+                if self.vault_open(true) {
+                    let draft = shoji_core::vault::Draft {
+                        url: p.url.clone(),
+                        title: host,
+                        username: p.username,
+                        password: p.password,
+                        note: String::new(),
+                    };
+                    self.vault.upsert(&draft, now_ms());
+                    self.vault_changed();
+                }
+            }
+            "never" => {
+                if self.vault_open(true) {
+                    self.vault.never_save(&host);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Fill the active page's login form with a saved login, if it is for this page's site.
+    fn fill_login(&mut self, win_id: WindowId, id: &str) {
+        let Some(login) = self.vault.get(id).cloned() else {
+            return;
+        };
+        let Some(win) = self.windows.get(&win_id) else {
+            return;
+        };
+        let Some(tab) = win.active() else {
+            return;
+        };
+        let page_host = win
+            .tabs
+            .active_tab()
+            .map(|t| shoji_core::vault::host_of(&t.url))
+            .unwrap_or_default();
+        if !shoji_core::vault::host_matches(&login.host(), &page_host) {
+            return;
+        }
+        let js = format!(
+            "window.__shojiFill && window.__shojiFill({}, {})",
+            js_string(&login.username),
+            js_string(&login.password)
+        );
+        let _ = tab.view.evaluate_script(&js);
+        self.vault.mark_used(id, now_ms());
+    }
+
+    /// Lock an idle master-password vault.
+    fn vault_tick(&mut self) -> Option<Instant> {
+        if self.vault.lock_if_idle(VAULT_IDLE) {
+            self.push_vault();
+        }
+        self.vault.idle_deadline(VAULT_IDLE)
+    }
+
     /// Run a script in the welcome and settings pages of a window.
     fn eval_welcome_and_settings(&self, win_id: WindowId, js: &str) {
         if let Some(win) = self.windows.get(&win_id) {
@@ -1175,6 +1397,10 @@ impl BrowserApp {
         }
         if !internal {
             builder = builder.with_initialization_script(pages::PAGE_INFO_SCRIPT);
+            // Password manager: report login forms and fields (see ui/login.js).
+            if self.settings.privacy.save_passwords && !self.settings.privacy.ephemeral_default {
+                builder = builder.with_initialization_script(pages::LOGIN_SCRIPT);
+            }
         }
         // Every tab, not just web ones: an internal tab can navigate to a site in place.
         builder = builder.with_initialization_script(HIDE_SCROLLBAR_SCRIPT);
@@ -1210,7 +1436,7 @@ impl BrowserApp {
         );
         webview::attach_focus(&view, tab_id, self.proxy.clone());
         webview::attach_nav_failures(&view, tab_id, self.proxy.clone());
-        // Passwords are only saved and filled where the browser also remembers things.
+        // Autofill only where the browser also remembers things (passwords are Shoji's own).
         webview::configure_engine(
             &view,
             self.settings.privacy.save_passwords && persistent,
@@ -1246,6 +1472,7 @@ impl BrowserApp {
         let title = match url.as_str() {
             "shoji://settings" => "Settings",
             "shoji://welcome" => "Welcome",
+            "shoji://passwords" => "Passwords",
             _ => "New tab",
         };
         win.tabs.insert_tab(
@@ -1343,6 +1570,9 @@ impl BrowserApp {
         };
         if target == "shoji://settings" {
             return self.open_internal(win_id, "settings");
+        }
+        if target == "shoji://passwords" {
+            return self.open_internal(win_id, "passwords");
         }
         let Some(active) = self
             .windows
@@ -1880,6 +2110,7 @@ impl BrowserApp {
             ("notes", "Quick note", ""),
             ("dark", "Turn dark websites on or off", ""),
             ("settings", "Settings", ""),
+            ("passwords", "Passwords", ""),
             ("devtools", "Developer tools", "F12"),
         ] {
             out.push(item("action", name.to_string(), label, sub.to_string()));
@@ -2009,6 +2240,7 @@ impl BrowserApp {
             "dark" => self.handle_ipc(win_id, None, M::ToggleDarkWebsites, event_loop),
             "favourite" => self.handle_ipc(win_id, None, M::ToggleFavourite, event_loop),
             "settings" => self.open_internal(win_id, "settings"),
+            "passwords" => self.open_internal(win_id, "passwords"),
             "devtools" => self.handle_ipc(win_id, None, M::OpenDevTools, event_loop),
             "split" => self.split_with(win_id, tab),
             "split-exit" => self.split_with(win_id, None),
@@ -2820,6 +3052,217 @@ impl BrowserApp {
                 }
             }
             M::ClearHistory => self.history.clear(),
+            M::VaultStatus => self.push_vault(),
+            M::VaultList { query } => {
+                self.vault_open(false);
+                self.push_vault_list(&query);
+            }
+            M::VaultReveal { id } => {
+                if self.vault_open(false) {
+                    self.vault.touch();
+                    if let Some(l) = self.vault.get(&id) {
+                        let secret = serde_json::json!({ "password": l.password, "note": l.note });
+                        self.eval_all_internal(&format!(
+                            "window.__vaultSecret && window.__vaultSecret({}, {secret})",
+                            js_string(&id)
+                        ));
+                    }
+                }
+            }
+            M::VaultCopy { id, field } => {
+                if self.vault_open(false) {
+                    self.vault.touch();
+                    let text = self.vault.get(&id).map(|l| {
+                        if field == "username" { l.username.clone() } else { l.password.clone() }
+                    });
+                    if let Some(text) = text {
+                        if vault_win::copy_secret(&text) {
+                            self.vault.mark_used(&id, now_ms());
+                            self.vault_toast(if field == "username" {
+                                "Username copied"
+                            } else {
+                                "Password copied. It clears from the clipboard in 30 seconds"
+                            });
+                        }
+                    }
+                }
+            }
+            M::VaultSave { id, url, title, username, password, note } => {
+                if self.vault_open(true) {
+                    let draft = shoji_core::vault::Draft { url, title, username, password, note };
+                    let ok = match id {
+                        Some(id) => self.vault.edit(&id, &draft, now_ms()),
+                        None => self.vault.upsert(&draft, now_ms()).is_some(),
+                    };
+                    self.vault_toast(if ok { "Saved" } else { "Couldn't save that login" });
+                    self.vault_changed();
+                }
+            }
+            M::VaultDelete { id } => {
+                if self.vault_open(false) && self.vault.remove(&id) {
+                    self.vault_toast("Deleted");
+                    self.vault_changed();
+                }
+            }
+            M::VaultDeleteAll => {
+                if self.vault_open(false) {
+                    self.vault.delete_all();
+                    self.vault_toast("All passwords deleted");
+                    self.vault_changed();
+                }
+            }
+            M::VaultUnlock { master } => {
+                if self.vault.unlock_master(&master) {
+                    self.vault_changed();
+                } else {
+                    let mut s = self.vault_state_json();
+                    s["error"] = "That isn't the master password.".into();
+                    self.eval_all_internal(&format!("window.__vaultState && window.__vaultState({s})"));
+                }
+            }
+            M::VaultLock => {
+                self.vault.lock();
+                self.push_vault();
+            }
+            M::VaultSetMaster { master } => {
+                if self.vault_open(true) && self.vault.set_master(&master) {
+                    self.vault_toast("Master password set");
+                } else {
+                    self.vault_toast("Couldn't set the master password");
+                }
+                self.vault_changed();
+            }
+            M::VaultRemoveMaster => {
+                if self.vault.is_unlocked() && self.vault.remove_master(&vault_win::WinProtector) {
+                    self.vault_toast("Master password removed");
+                }
+                self.vault_changed();
+            }
+            M::VaultGenerate { length, lower, upper, digits, symbols } => {
+                let pw = shoji_core::vault::generate(shoji_core::vault::GenOptions {
+                    length,
+                    lower,
+                    upper,
+                    digits,
+                    symbols,
+                });
+                self.eval_all_internal(&format!(
+                    "window.__vaultGenerated && window.__vaultGenerated({})",
+                    js_string(&pw)
+                ));
+            }
+            M::VaultImportCsv => {
+                let Some(path) = webview::pick_file("Choose a passwords CSV file", "CSV files (*.csv)", "*.csv") else {
+                    return;
+                };
+                let text = std::fs::read(&path)
+                    .map(|b| String::from_utf8_lossy(&b).into_owned())
+                    .unwrap_or_default();
+                let drafts = shoji_core::vault::drafts_from_csv(&text);
+                if drafts.is_empty() {
+                    self.vault_toast("No logins found in that file");
+                } else if self.vault_open(true) {
+                    let (added, updated, skipped) = self.vault.import(&drafts, now_ms());
+                    self.eval_all_internal(&format!(
+                        "window.__vaultImported && window.__vaultImported({{\"added\":{added},\"updated\":{updated},\"skipped\":{skipped}}})"
+                    ));
+                    self.vault_changed();
+                } else {
+                    self.vault_toast("Unlock your passwords first");
+                }
+            }
+            M::VaultExportCsv => {
+                if self.vault_open(false) {
+                    if let Some(path) = webview::pick_save_csv("shoji-passwords.csv") {
+                        let ok = std::fs::write(&path, self.vault.to_csv()).is_ok();
+                        self.vault_toast(if ok { "Exported. Keep that file safe" } else { "Couldn't write the file" });
+                    }
+                }
+            }
+            M::LoginSubmitted { username, password } => {
+                let Some(tab) = from_tab else {
+                    return;
+                };
+                if password.is_empty() || password.len() > 1024 || username.len() > 512 {
+                    return;
+                }
+                let Some(url) = self.login_page(win_id, tab) else {
+                    return;
+                };
+                let host = shoji_core::vault::host_of(&url);
+                if self.vault.state() != shoji_core::vault::State::Empty && !self.vault_open(false) {
+                    return; // locked behind a master password: stay quiet
+                }
+                if self.vault.is_never(&host) {
+                    return;
+                }
+                let existing = self
+                    .vault
+                    .logins()
+                    .iter()
+                    .find(|l| l.host() == host && l.username == username)
+                    .map(|l| (l.id.clone(), l.password == password));
+                let existing_id = match existing {
+                    Some((id, true)) => {
+                        self.vault.mark_used(&id, now_ms());
+                        return;
+                    }
+                    Some((id, false)) => Some(id),
+                    None => None,
+                };
+                self.pending_login = Some(PendingLogin {
+                    url,
+                    username,
+                    password,
+                    existing: existing_id,
+                    at: Instant::now(),
+                });
+                self.offer_save(win_id);
+            }
+            M::LoginFieldFocused { x, y, w, h } => {
+                let Some(tab) = from_tab else {
+                    return;
+                };
+                let Some(url) = self.login_page(win_id, tab) else {
+                    return;
+                };
+                let host = shoji_core::vault::host_of(&url);
+                let Some(win) = self.windows.get(&win_id) else {
+                    return;
+                };
+                // Only the tab being looked at, and not in split view (the page offsets differ).
+                if win.tabs.active_tab_id() != Some(tab) || win.split_showing().is_some() {
+                    return;
+                }
+                if self.vault.state() == shoji_core::vault::State::Empty || !self.vault_open(false) {
+                    return;
+                }
+                use shoji_core::ipc::OverlayItem;
+                let items: Vec<OverlayItem> = self
+                    .vault
+                    .for_host(&host)
+                    .iter()
+                    .take(5)
+                    .map(|l| OverlayItem {
+                        kind: "login".into(),
+                        value: l.id.clone(),
+                        label: if l.username.is_empty() { "Saved login".into() } else { l.username.clone() },
+                        sub: format!("Fill with Shoji · {}", l.host()),
+                        color: None,
+                    })
+                    .collect();
+                if items.is_empty() {
+                    return;
+                }
+                let Some(win) = self.windows.get(&win_id) else {
+                    return;
+                };
+                let width = w.clamp(240.0, 380.0);
+                let left = x.clamp(4.0, (win.width - width - 4.0).max(4.0));
+                let top = win.chrome_height() + y + h + 2.0;
+                let frame = [left, top, width, items.len() as f64 * 46.0 + 12.0];
+                self.show_overlay(win_id, "suggest", items, frame, "", "", "");
+            }
             M::ToggleFavourite => {
                 let page = self
                     .windows
@@ -2949,6 +3392,8 @@ impl BrowserApp {
                         }
                     }
                     "action" => self.run_action(win_id, &value, event_loop),
+                    "login" => self.fill_login(win_id, &value),
+                    "login-save" => self.commit_login(&value),
                     "text" => self.finish_prompt(win_id, &value),
                     _ => {}
                 }
@@ -3409,6 +3854,18 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 let favourites = self.favourites.add_many(&imported.favourites);
                 let history = self.history.merge(imported.history);
                 let cookies = imported.cookies.len();
+                // Saved passwords go to the password manager (a master-password vault must be open).
+                let mut passwords = 0;
+                let mut vault_locked = false;
+                if !imported.logins.is_empty() {
+                    if self.vault_open(true) {
+                        let (added, updated, _) = self.vault.import(&imported.logins, now_ms());
+                        passwords = added + updated;
+                        self.vault_changed();
+                    } else {
+                        vault_locked = true;
+                    }
+                }
                 if cookies > 0 {
                     if let Ok(mut pending) = self.pending_cookies.lock() {
                         pending.extend(imported.cookies);
@@ -3427,11 +3884,16 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 }
                 self.push_data();
                 let r = imported.report;
+                let mut notes = r.notes;
+                if vault_locked {
+                    notes.push("Passwords weren't imported: unlock Shoji's password manager first, then import again".into());
+                }
                 let summary = serde_json::json!({
                     "favourites": favourites,
                     "history": history,
                     "cookies": cookies,
-                    "notes": r.notes,
+                    "passwords": passwords,
+                    "notes": notes,
                     "locked": r.locked,
                 });
                 self.eval_welcome_and_settings(
@@ -3834,10 +4296,12 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
             animating |= win.step_notes();
         }
         let session_due = self.maybe_write_session();
+        let vault_due = self.vault_tick();
         let next = self
             .rest_background_tabs()
             .into_iter()
             .chain(session_due)
+            .chain(vault_due)
             .min();
         // While something animates, wake for the next frame; otherwise sleep until needed.
         let frame = animating.then(|| Instant::now() + Duration::from_millis(8));
