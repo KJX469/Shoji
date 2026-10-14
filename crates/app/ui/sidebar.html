@@ -66,6 +66,26 @@
     .sw[aria-checked="true"] { background: var(--accent); }
     .sw[aria-checked="true"]::after { transform: translateX(14px); }
     .empty { padding: 48px 0; text-align: center; color: var(--ink-3); font-size: 12px; }
+
+    /* Workspaces ("Spaces") panel */
+    .ws-new { display: flex; gap: 6px; }
+    .ws-new input { flex: 1; height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font: inherit; font-size: 12px; outline: none; }
+    .ws-new input:focus { border-color: var(--accent); background: var(--surface); }
+    .ws-new button { height: 32px; padding: 0 12px; border-radius: 7px; background: var(--accent); color: var(--surface); font-size: 12px; font-weight: 500; }
+    .ws-card { border-radius: 10px; border: 1px solid var(--line); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; transition: border-color .12s, background .12s; }
+    .ws-card.active { border-color: var(--line-strong); background: var(--tint-soft); }
+    .ws-card.drop-target { border-color: var(--accent); background: var(--tint); }
+    .ws-head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+    .ws-color { width: 14px; height: 14px; border-radius: 50%; background: var(--ws, var(--accent)); flex-shrink: 0; border: 1px solid rgba(0,0,0,.12); }
+    .ws-title { flex: 1; font-weight: 600; font-size: 12.5px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ws-rename { flex: 1; height: 24px; padding: 0 6px; border-radius: 5px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); font: inherit; font-size: 12px; }
+    .ws-act { width: 22px; height: 22px; border-radius: 5px; color: var(--ink-3); display: grid; place-items: center; font-size: 11px; }
+    .ws-act:hover { background: var(--hover); color: var(--ink); }
+    .ws-tabs { display: flex; flex-direction: column; gap: 2px; }
+    .ws-tab { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 6px; border-radius: 6px; font-size: 12px; color: var(--ink-2); cursor: grab; }
+    .ws-tab:hover { background: var(--hover); color: var(--ink); }
+    .ws-tab.current { color: var(--ink); font-weight: 500; }
+    .ws-tab span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
   </style>
 </head>
 <body>
@@ -78,6 +98,7 @@
 
   <nav>
     <button id="tab-menu" class="active" onclick="show('menu')">Menu</button>
+    <button id="tab-spaces" onclick="show('spaces')">Spaces</button>
     <button id="tab-security" onclick="show('security')">Site</button>
     <button id="tab-shield" onclick="show('shield')">Shield</button>
     <button id="tab-downloads" onclick="show('downloads')">Downloads</button>
@@ -88,6 +109,8 @@
       <div class="group">
         <button class="item" onclick="post('CreateTab', { url: null })"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New tab</span><kbd>Ctrl+T</kbd></button>
         <button class="item" onclick="post('OpenNewWindow')"><svg class="i" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 9h16"/></svg><span>New window</span><kbd>Ctrl+N</kbd></button>
+        <button class="item" onclick="show('spaces')"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.5"/><rect x="13" y="4" width="8" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/></svg><span>Spaces</span><kbd>Alt+W</kbd></button>
+        <button class="item" onclick="post('ToggleSplit')"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg><span>Split view</span><kbd>Ctrl+Shift+S</kbd></button>
         <div class="rule"></div>
         <div class="item" style="cursor:default"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5M8.5 11h5"/></svg><span>Zoom</span>
           <div class="zoom"><button onclick="post('ZoomOut')" aria-label="Zoom out">−</button><span id="zoomVal" onclick="post('ZoomReset')" title="Reset">100%</span><button onclick="post('ZoomIn')" aria-label="Zoom in">+</button></div>
@@ -102,6 +125,14 @@
         <strong>Your browsing data</strong>
         Shoji remembers logins, history and cache like a normal browser. Turn on Private mode in Settings to forget everything when it closes.
       </div>
+    </section>
+
+    <section class="view" id="view-spaces">
+      <div class="ws-new">
+        <input id="wsNewName" type="text" placeholder="New workspace name…" maxlength="40" onkeydown="if(event.key==='Enter')createWs()">
+        <button onclick="createWs()">Add</button>
+      </div>
+      <div id="wsList" style="display:flex;flex-direction:column;gap:10px"></div>
     </section>
 
     <section class="view" id="view-security">
@@ -146,17 +177,158 @@
 
   <script>
     const $ = id => document.getElementById(id);
+    const ACCENTS = {{ACCENTS_JSON}};
+    const toneOf = id => (ACCENTS.find(a => a.id === id) || ACCENTS[0]).tone;
     let currentHost = '';
+    let shell = { tabs: [], inactive_tabs: [], workspaces: [], active_workspace_id: 1, active_tab_id: 0 };
+    let editingWsId = null;
+    let draggedTabId = null;
+
     function post(action, payload = null) {
       if (window.ipc) window.ipc.postMessage(JSON.stringify({ action, payload }));
     }
     function show(mode) {
-      for (const m of ['menu', 'security', 'shield', 'downloads']) {
+      for (const m of ['menu', 'spaces', 'security', 'shield', 'downloads']) {
         $('tab-' + m).classList.toggle('active', m === mode);
         $('view-' + m).classList.toggle('active', m === mode);
       }
     }
     const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    function createWs() {
+      const inp = $('wsNewName');
+      const name = inp.value.trim();
+      inp.value = '';
+      post('CreateWorkspace', { name: name || null, color: null });
+    }
+    function cycleWsColor(id, current) {
+      const idx = ACCENTS.findIndex(a => a.id === current);
+      const next = ACCENTS[(idx + 1) % ACCENTS.length].id;
+      post('SetWorkspaceColor', { id, color: next });
+    }
+    function startRenameWs(id) { editingWsId = id; renderSpaces(); }
+    function commitRenameWs(id, val) {
+      editingWsId = null;
+      const trimmed = val.trim();
+      if (trimmed) post('RenameWorkspace', { id, name: trimmed });
+      else renderSpaces();
+    }
+
+    window.__shellUpdate = function (msg) {
+      const d = msg && (msg.data || msg);
+      if (!d || !d.tabs) return;
+      shell = d;
+      renderSpaces();
+    };
+
+    function renderSpaces() {
+      const box = $('wsList');
+      if (!box) return;
+      const allTabs = (shell.tabs || []).concat(shell.inactive_tabs || []);
+      const wsList = shell.workspaces || [];
+      box.innerHTML = '';
+      wsList.forEach((ws, idx) => {
+        const card = document.createElement('div');
+        card.className = 'ws-card' + (ws.id === shell.active_workspace_id ? ' active' : '');
+        card.ondragover = e => { if (draggedTabId != null) { e.preventDefault(); card.classList.add('drop-target'); } };
+        card.ondragleave = () => card.classList.remove('drop-target');
+        card.ondrop = e => {
+          e.preventDefault();
+          card.classList.remove('drop-target');
+          if (draggedTabId != null) {
+            post('MoveTabToWorkspace', { tab_id: draggedTabId, workspace_id: ws.id });
+            draggedTabId = null;
+          }
+        };
+
+        const head = document.createElement('div');
+        head.className = 'ws-head';
+        const dot = document.createElement('button');
+        dot.className = 'ws-color';
+        dot.style.setProperty('--ws', toneOf(ws.color));
+        dot.title = 'Change workspace color';
+        dot.onclick = () => cycleWsColor(ws.id, ws.color);
+        head.appendChild(dot);
+
+        if (editingWsId === ws.id) {
+          const inp = document.createElement('input');
+          inp.className = 'ws-rename';
+          inp.value = ws.name;
+          inp.onkeydown = e => {
+            if (e.key === 'Enter') commitRenameWs(ws.id, inp.value);
+            else if (e.key === 'Escape') { editingWsId = null; renderSpaces(); }
+          };
+          inp.onblur = () => commitRenameWs(ws.id, inp.value);
+          head.appendChild(inp);
+          setTimeout(() => { inp.focus(); inp.select(); }, 0);
+        } else {
+          const title = document.createElement('button');
+          title.className = 'ws-title';
+          title.textContent = `${ws.name} (${ws.tab_count})`;
+          title.onclick = () => post('SwitchWorkspace', { id: ws.id });
+          title.ondblclick = () => startRenameWs(ws.id);
+          head.appendChild(title);
+        }
+
+        const ren = document.createElement('button');
+        ren.className = 'ws-act';
+        ren.title = 'Rename';
+        ren.textContent = '✎';
+        ren.onclick = () => startRenameWs(ws.id);
+        head.appendChild(ren);
+
+        if (idx > 0) {
+          const up = document.createElement('button');
+          up.className = 'ws-act';
+          up.title = 'Move up';
+          up.textContent = '↑';
+          up.onclick = () => post('ReorderWorkspace', { from_index: idx, to_index: idx - 1 });
+          head.appendChild(up);
+        }
+        if (idx + 1 < wsList.length) {
+          const dn = document.createElement('button');
+          dn.className = 'ws-act';
+          dn.title = 'Move down';
+          dn.textContent = '↓';
+          dn.onclick = () => post('ReorderWorkspace', { from_index: idx, to_index: idx + 1 });
+          head.appendChild(dn);
+        }
+        if (wsList.length > 1) {
+          const del = document.createElement('button');
+          del.className = 'ws-act';
+          del.title = 'Delete workspace';
+          del.textContent = '×';
+          del.onclick = () => post('DeleteWorkspace', { id: ws.id });
+          head.appendChild(del);
+        }
+        card.appendChild(head);
+
+        const tabsBox = document.createElement('div');
+        tabsBox.className = 'ws-tabs';
+        allTabs.filter(t => t.workspace_id === ws.id).forEach(t => {
+          const row = document.createElement('div');
+          row.className = 'ws-tab' + (t.id === shell.active_tab_id ? ' current' : '');
+          row.draggable = true;
+          row.ondragstart = e => { draggedTabId = t.id; e.dataTransfer.effectAllowed = 'move'; };
+          row.ondragend = () => { draggedTabId = null; };
+          const label = document.createElement('span');
+          label.textContent = t.title || t.url || 'New tab';
+          label.onclick = () => post('SwitchTab', { id: t.id });
+          row.appendChild(label);
+          if (ws.id === shell.active_workspace_id && t.id !== shell.active_tab_id) {
+            const spBtn = document.createElement('button');
+            spBtn.className = 'ws-act';
+            spBtn.title = 'Open in split view';
+            spBtn.textContent = '◫';
+            spBtn.onclick = e => { e.stopPropagation(); post('SplitWith', { tab_id: t.id }); };
+            row.appendChild(spBtn);
+          }
+          tabsBox.appendChild(row);
+        });
+        card.appendChild(tabsBox);
+        box.appendChild(card);
+      });
+    }
 
     addEventListener('keydown', e => { if (e.key === 'Escape') post('CloseSidebar'); });
     window.__applyTheme = t => { const r = document.documentElement; r.dataset.accent = t.accent; if (t.mode) r.dataset.mode = t.mode; if (t.fonts) r.dataset.fonts = t.fonts; };

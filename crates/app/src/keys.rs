@@ -33,6 +33,18 @@ pub enum Command {
     ToggleFavourite,
     /// F9: reader mode
     Reader,
+    /// Ctrl+Shift+S: enter or exit split view
+    ToggleSplit,
+    /// Alt+Shift+S: flip split divider between vertical and horizontal
+    ToggleSplitOrientation,
+    /// Alt+S: move focus to the other split pane
+    SwitchSplitPane,
+    /// Alt+W: open or close the workspaces side panel
+    Workspaces,
+    /// Alt+Shift+N: create a new workspace
+    NewWorkspace,
+    /// Alt+1..8 select a workspace by position; Alt+9 selects the last workspace (`usize::MAX`).
+    SelectWorkspace(usize),
 }
 
 const VK_TAB: u32 = 0x09;
@@ -57,6 +69,7 @@ pub fn command_for(vkey: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Comm
             (Some('T'), _) => NewTab,
             (Some('N'), _) => NewWindow,
             (Some('W'), _) => CloseTab,
+            (Some('S'), _) if shift => ToggleSplit,
             (Some('L' | 'E'), _) => FocusAddress,
             (Some('K'), _) => Palette,
             (Some('D'), _) => ToggleFavourite,
@@ -75,9 +88,15 @@ pub fn command_for(vkey: u32, ctrl: bool, shift: bool, alt: bool) -> Option<Comm
             (_, VK_F5) => HardReload,
             _ => return None,
         }),
-        (false, true) => match vkey {
-            VK_LEFT => Some(Back),
-            VK_RIGHT => Some(Forward),
+        (false, true) => match (ch, vkey) {
+            (_, VK_LEFT) => Some(Back),
+            (_, VK_RIGHT) => Some(Forward),
+            (Some('S'), _) if shift => Some(ToggleSplitOrientation),
+            (Some('S'), _) => Some(SwitchSplitPane),
+            (Some('W'), _) if !shift => Some(Workspaces),
+            (Some('N'), _) if shift => Some(NewWorkspace),
+            (Some(d @ '1'..='8'), _) if !shift => Some(SelectWorkspace(d as usize - '1' as usize)),
+            (Some('9'), _) if !shift => Some(SelectWorkspace(usize::MAX)),
             _ => None,
         },
         (false, false) => match vkey {
@@ -162,6 +181,34 @@ mod tests {
         assert_eq!(
             command_for(VK_F9, false, false, false),
             Some(Command::Reader)
+        );
+        assert_eq!(
+            command_for('S' as u32, true, true, false),
+            Some(Command::ToggleSplit)
+        );
+        assert_eq!(
+            command_for('S' as u32, false, true, true),
+            Some(Command::ToggleSplitOrientation)
+        );
+        assert_eq!(
+            command_for('S' as u32, false, false, true),
+            Some(Command::SwitchSplitPane)
+        );
+        assert_eq!(
+            command_for('W' as u32, false, false, true),
+            Some(Command::Workspaces)
+        );
+        assert_eq!(
+            command_for('N' as u32, false, true, true),
+            Some(Command::NewWorkspace)
+        );
+        assert_eq!(
+            command_for('2' as u32, false, false, true),
+            Some(Command::SelectWorkspace(1))
+        );
+        assert_eq!(
+            command_for('9' as u32, false, false, true),
+            Some(Command::SelectWorkspace(usize::MAX))
         );
         // Plain typing and Escape pass through to the page.
         assert_eq!(command_for('T' as u32, false, false, false), None);

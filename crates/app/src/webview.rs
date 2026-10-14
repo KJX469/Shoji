@@ -256,6 +256,60 @@ pub fn attach_tab_events(
         let _ = unsafe { core15.add_FaviconChanged(&handler, &mut token) };
     }
 
+    // Audio playback and mute state (`ICoreWebView2_8`).
+    if let Ok(core8) = core.cast::<ICoreWebView2_8>() {
+        let send_audio = {
+            let core8 = core8.clone();
+            let proxy = proxy.clone();
+            move || {
+                let (mut playing, mut muted) = (BOOL(0), BOOL(0));
+                unsafe {
+                    let _ = core8.IsDocumentPlayingAudio(&mut playing);
+                    let _ = core8.IsMuted(&mut muted);
+                }
+                let _ = proxy.send_event(BrowserEvent::TabAudio {
+                    tab_id,
+                    playing: playing.as_bool(),
+                    muted: muted.as_bool(),
+                });
+            }
+        };
+        let on_playing = send_audio.clone();
+        unsafe {
+            let _ = core8.add_IsDocumentPlayingAudioChanged(
+                &IsDocumentPlayingAudioChangedEventHandler::create(Box::new(move |_, _| {
+                    on_playing();
+                    Ok(())
+                })),
+                &mut token,
+            );
+            let _ = core8.add_IsMutedChanged(
+                &IsMutedChangedEventHandler::create(Box::new(move |_, _| {
+                    send_audio();
+                    Ok(())
+                })),
+                &mut token,
+            );
+        }
+    }
+
+    // Fullscreen element (e.g. HTML5 video in a split pane).
+    {
+        let core_fs = core.clone();
+        let proxy = proxy.clone();
+        let handler =
+            ContainsFullScreenElementChangedEventHandler::create(Box::new(move |_, _| {
+                let mut fs = BOOL(0);
+                unsafe { core_fs.ContainsFullScreenElement(&mut fs)? };
+                let _ = proxy.send_event(BrowserEvent::TabFullscreen {
+                    tab_id,
+                    fullscreen: fs.as_bool(),
+                });
+                Ok(())
+            }));
+        let _ = unsafe { core.add_ContainsFullScreenElementChanged(&handler, &mut token) };
+    }
+
     // target="_blank" and window.open() become tabs.
     {
         let proxy = proxy.clone();
@@ -515,6 +569,14 @@ pub fn try_suspend(webview: &WebView, tab_id: TabId, proxy: EventLoopProxy<Brows
         Ok(())
     }));
     let _ = unsafe { core3.TrySuspend(&handler) };
+}
+
+pub fn set_muted(webview: &WebView, muted: bool) {
+    if let Ok(core8) =
+        (unsafe { webview.controller().CoreWebView2() }).and_then(|c| c.cast::<ICoreWebView2_8>())
+    {
+        let _ = unsafe { core8.SetIsMuted(muted) };
+    }
 }
 
 /* ---------- Native dialogs ---------- */

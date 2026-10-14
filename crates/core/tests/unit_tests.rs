@@ -437,6 +437,10 @@ fn test_ipc_serde_roundtrip() {
         active_tab_id: None,
         groups: vec![],
         split: None,
+        split_state: None,
+        workspaces: vec![],
+        active_workspace_id: 1,
+        inactive_tabs: vec![],
     };
     let json = serde_json::to_string(&sync).unwrap();
     assert_eq!(
@@ -587,4 +591,138 @@ fn test_link_privacy_defaults_on_and_old_files_load() {
     assert!(old.shield.clean_links && old.shield.send_gpc);
     let off: Settings = serde_json::from_str(r#"{"shield":{"clean_links":false}}"#).unwrap();
     assert!(!off.shield.clean_links && off.shield.send_gpc);
+}
+
+#[test]
+fn test_workspace_crud_and_reorder() {
+    let mut tm = TabManager::new();
+    tm.create_tab("https://main.example", 10);
+    assert_eq!(tm.workspaces().len(), 1);
+    assert_eq!(tm.active_workspace_id(), 1);
+
+    let ws2 = tm.create_workspace("Work", "green");
+    let ws3 = tm.create_workspace("Reading", "amber");
+    tm.switch_workspace(ws3, 30);
+    assert_eq!(tm.workspaces().len(), 3);
+    assert_eq!(tm.active_workspace_id(), ws3);
+
+    tm.rename_workspace(ws2, "Work & Docs");
+    tm.set_workspace_color(ws2, "purple");
+    let w2 = tm.workspaces().iter().find(|w| w.id == ws2).unwrap();
+    assert_eq!(w2.name, "Work & Docs");
+    assert_eq!(w2.color, "purple");
+
+    assert!(tm.reorder_workspace(2, 0));
+    assert_eq!(tm.workspaces()[0].id, ws3);
+
+    // Deleting active workspace switches to neighbor; last workspace cannot be deleted.
+    assert!(tm.delete_workspace(ws3, 40));
+    assert_eq!(tm.workspaces().len(), 2);
+    assert!(tm.delete_workspace(1, 41));
+    assert_eq!(tm.workspaces().len(), 1);
+    assert!(!tm.delete_workspace(ws2, 42));
+}
+
+#[test]
+fn test_workspace_switch_suspends_and_restores_active_tab() {
+    let mut tm = TabManager::new();
+    let t1 = tm.create_tab("https://one.example", 10);
+    let t2 = tm.create_tab("https://two.example", 20);
+    tm.switch_tab(t1, 25);
+    assert_eq!(tm.active_tab_id(), Some(t1));
+
+    let ws2 = tm.create_workspace("Second", "red");
+    assert!(tm.switch_workspace(ws2, 30));
+    assert_eq!(tm.active_workspace_id(), ws2);
+    // Tabs in the inactive workspace (ws 1) are suspended, not destroyed.
+    assert_eq!(tm.inactive_tabs().len(), 2);
+    assert!(tm
+        .inactive_tabs()
+        .iter()
+        .all(|t| t.status == TabStatus::Suspended));
+
+    let w2_tab = tm.active_tab_id().unwrap();
+    tm.update_url(w2_tab, "https://second.example".into());
+    tm.update_title(w2_tab, "Second".into());
+
+    // Switching back to workspace 1 restores its last active tab (t1).
+    assert!(tm.switch_workspace(1, 40));
+    assert_eq!(tm.active_workspace_id(), 1);
+    assert_eq!(tm.active_tab_id(), Some(t1));
+    assert_eq!(tm.tabs().len(), 2);
+    assert!(tm.tabs().iter().any(|t| t.id == t2));
+    assert_eq!(tm.inactive_tabs().len(), 1);
+    assert_eq!(tm.inactive_tabs()[0].status, TabStatus::Suspended);
+}
+
+#[test]
+fn test_workspace_tab_moves_and_last_tab_blank() {
+    let mut tm = TabManager::new();
+    let t1 = tm.create_tab("https://move.example", 10);
+    let ws2 = tm.create_workspace("Target", "cyan");
+    assert_eq!(tm.tabs().len(), 1);
+
+    // Moving the only tab out of workspace 1 leaves workspace 1 with a blank tab.
+    assert!(tm.move_tab_to_workspace(t1, ws2, 30));
+    assert_eq!(tm.tabs().len(), 1);
+    assert_ne!(tm.tabs()[0].id, t1);
+    assert_eq!(tm.tabs()[0].url, "shoji://newtab");
+
+    // Switching to ws2 shows the moved tab.
+    tm.switch_workspace(ws2, 35);
+    assert!(tm.tabs().iter().any(|t| t.id == t1));
+
+    // Closing the last tab in a workspace via close_workspace_tab leaves a blank tab.
+    let ids: Vec<TabId> = tm.tabs().iter().map(|t| t.id).collect();
+    for id in ids {
+        tm.close_workspace_tab(id, 40);
+    }
+    assert_eq!(tm.tabs().len(), 1);
+    assert_eq!(tm.tabs()[0].url, "shoji://newtab");
+}
+
+#[test]
+fn test_split_open_close_focus_and_workspace_survival() {
+    use shoji_core::tabs::SplitOrientation;
+
+    let mut tm = TabManager::new();
+    let t1 = tm.create_tab("https://left.example", 10);
+    let t2 = tm.create_tab("https://right.example", 20);
+    let t3 = tm.create_tab("https://third.example", 30);
+    tm.switch_tab(t1, 35);
+
+    assert!(tm.open_split(t2));
+    assert_eq!(tm.split_panes(), Some([t1, t2]));
+    assert!(tm.is_tab_visible(t1) && tm.is_tab_visible(t2) && !tm.is_tab_visible(t3));
+
+    // Switching focus between split panes keeps the split open and changes active_tab_id.
+    assert_eq!(tm.switch_split_pane(40), Some(t2));
+    assert_eq!(tm.active_tab_id(), Some(t2));
+    assert_eq!(tm.switch_split_pane(41), Some(t1));
+    assert_eq!(tm.active_tab_id(), Some(t1));
+
+    // Ratio clamping and reset to 50/50.
+    assert!(tm.set_split_ratio(0.95));
+    assert!(tm.split().unwrap().ratio <= 0.85);
+    assert!(tm.reset_split_ratio());
+    assert!((tm.split().unwrap().ratio - 0.5).abs() < 1e-6);
+
+    // Orientation toggle.
+    assert_eq!(
+        tm.toggle_split_orientation(),
+        Some(SplitOrientation::Horizontal)
+    );
+
+    // Split survives switching to another workspace and back.
+    let ws2 = tm.create_workspace("Other", "rose");
+    tm.switch_workspace(ws2, 50);
+    assert_eq!(tm.active_workspace_id(), ws2);
+    assert!(tm.split_panes().is_none());
+    tm.switch_workspace(1, 60);
+    assert_eq!(tm.split_panes(), Some([t1, t2]));
+
+    // Closing one pane exits the split and focuses the surviving pane.
+    tm.close_tab(t1);
+    assert!(tm.split_panes().is_none());
+    assert_eq!(tm.active_tab_id(), Some(t2));
 }

@@ -379,12 +379,40 @@ impl SiteData {
 
 /* --------------------------------------------------------------- session */
 
+const fn default_session_split_ratio() -> f64 {
+    crate::tabs::DEFAULT_SPLIT_RATIO
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionSplit {
+    /// Indices into this workspace's tabs of the two split panes.
+    pub panes: [usize; 2],
+    #[serde(default)]
+    pub orientation: crate::tabs::SplitOrientation,
+    #[serde(default = "default_session_split_ratio")]
+    pub ratio: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionWorkspace {
+    pub id: u32,
+    pub name: String,
+    pub color: String,
+    /// Index into this workspace's tabs of the tab that was active in this workspace.
+    #[serde(default)]
+    pub active: usize,
+    #[serde(default)]
+    pub split: Option<SessionSplit>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionTab {
     pub url: String,
     pub title: String,
     #[serde(default)]
     pub group: Option<u32>,
+    #[serde(default = "crate::tabs::default_workspace_id")]
+    pub workspace: u32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -395,6 +423,12 @@ pub struct SessionWindow {
     /// This window's tab groups (ids are per window)
     #[serde(default)]
     pub groups: Vec<TabGroup>,
+    /// This window's workspaces in user order (empty in pre-workspace session files)
+    #[serde(default)]
+    pub workspaces: Vec<SessionWorkspace>,
+    /// Active workspace id in this window (0 in pre-workspace session files)
+    #[serde(default)]
+    pub active_workspace: u32,
 }
 
 /// The tabs open when Shoji last ran. `clean_exit` is false while it is running and only set
@@ -426,16 +460,69 @@ impl Session {
         }
     }
 
+    /// Build a session from window `TabManager`s if persistence is allowed by `privacy`.
+    /// Returns `None` in private mode (`ephemeral_default`) or when `restore_session == "never"`.
+    pub fn from_managers(
+        managers: &[&crate::tabs::TabManager],
+        clean_exit: bool,
+        privacy: &crate::settings::PrivacySettings,
+    ) -> Option<Self> {
+        if privacy.ephemeral_default || privacy.restore_session == "never" {
+            return None;
+        }
+        let windows = managers
+            .iter()
+            .filter_map(|m| m.to_session_window())
+            .collect();
+        Some(Self {
+            clean_exit,
+            windows,
+        })
+    }
+
+    /// Save session to `path` only when allowed by `privacy`. In private mode, removes any existing
+    /// session file at `path` and returns `false`.
+    pub fn save_respecting_privacy(
+        &self,
+        path: &Path,
+        privacy: &crate::settings::PrivacySettings,
+    ) -> bool {
+        if privacy.ephemeral_default || privacy.restore_session == "never" {
+            let _ = std::fs::remove_file(path);
+            return false;
+        }
+        self.save(path);
+        true
+    }
+
+    /// Load session from `path` respecting `privacy`. In private mode, removes any stale session
+    /// file and returns an empty default session.
+    pub fn load_respecting_privacy(
+        path: &Path,
+        privacy: &crate::settings::PrivacySettings,
+    ) -> Self {
+        if privacy.ephemeral_default || privacy.restore_session == "never" {
+            let _ = std::fs::remove_file(path);
+            return Self::default();
+        }
+        Self::load(path)
+    }
+
     pub fn tab_count(&self) -> usize {
         self.windows.iter().map(|w| w.tabs.len()).sum()
     }
 
-    /// Whether there is anything worth restoring: at least one real page.
+    /// Whether there is anything worth restoring: at least one real page or custom workspace.
     pub fn has_pages(&self) -> bool {
-        self.windows
-            .iter()
-            .flat_map(|w| &w.tabs)
-            .any(|t| t.url.starts_with("http://") || t.url.starts_with("https://"))
+        self.windows.iter().any(|w| {
+            w.tabs
+                .iter()
+                .any(|t| t.url.starts_with("http://") || t.url.starts_with("https://"))
+                || w.workspaces.len() > 1
+                || w.workspaces
+                    .first()
+                    .is_some_and(|ws| ws.name != "Main" || ws.color != "blue")
+        })
     }
 }
 
