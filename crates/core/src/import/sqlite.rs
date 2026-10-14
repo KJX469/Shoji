@@ -34,7 +34,9 @@ fn open(path: &Path) -> Result<Copy, ImportError> {
     std::fs::copy(path, &tmp).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         // A sharing violation (Windows error 32/33) means the browser holds the file open.
-        if matches!(e.raw_os_error(), Some(32) | Some(33)) || e.kind() == std::io::ErrorKind::PermissionDenied {
+        if matches!(e.raw_os_error(), Some(32) | Some(33))
+            || e.kind() == std::io::ErrorKind::PermissionDenied
+        {
             ImportError::Locked(path.to_path_buf())
         } else {
             ImportError::Other(e.to_string())
@@ -175,7 +177,11 @@ pub fn firefox_cookies(path: &Path) -> Result<Vec<Cookie>, ImportError> {
         .query_map([], |r| {
             let expiry: i64 = r.get(4)?;
             // Newer Firefox stores milliseconds; older stores seconds.
-            let expiry = if expiry > 100_000_000_000 { expiry / 1000 } else { expiry };
+            let expiry = if expiry > 100_000_000_000 {
+                expiry / 1000
+            } else {
+                expiry
+            };
             Ok(Cookie {
                 host: r.get(0)?,
                 name: r.get(1)?,
@@ -288,7 +294,11 @@ pub fn chromium_logins(
         .map_err(other)?;
     let rows = stmt
         .query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Vec<u8>>(2)?))
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Vec<u8>>(2)?,
+            ))
         })
         .map_err(other)?;
     let (mut out, mut skipped) = (Vec::new(), 0);
@@ -319,7 +329,8 @@ mod tests {
             true
         }
         fn decrypt(&self, blob: &[u8]) -> Option<Vec<u8>> {
-            blob.strip_prefix(b"v10").map(|b| b.iter().map(|x| x ^ 0x55).collect())
+            blob.strip_prefix(b"v10")
+                .map(|b| b.iter().map(|x| x ^ 0x55).collect())
         }
     }
 
@@ -351,7 +362,10 @@ mod tests {
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].url, "https://a.com/");
         assert_eq!(got[0].visits, 3);
-        assert_eq!(got[0].last_visit, (13_300_000_000_000_000i64 / 1000 - 11_644_473_600_000) as u64);
+        assert_eq!(
+            got[0].last_visit,
+            (13_300_000_000_000_000i64 / 1000 - 11_644_473_600_000) as u64
+        );
         let _ = std::fs::remove_file(&p);
     }
 
@@ -374,10 +388,26 @@ mod tests {
         )
         .unwrap();
         let far = 13_999_999_999_000_000i64;
-        c.execute("INSERT INTO cookies VALUES ('.a.com','sid','',?1,'/',?2,1,1,1)", rusqlite::params![enc("secret"), far]).unwrap();
-        c.execute("INSERT INTO cookies VALUES ('.a.com','plain','v',x'','/',0,0,0,-1)", []).unwrap();
-        c.execute("INSERT INTO cookies VALUES ('.a.com','locked','',?1,'/',?2,0,0,0)", rusqlite::params![b"v20xxxx".to_vec(), far]).unwrap();
-        c.execute("INSERT INTO cookies VALUES ('.a.com','old','x',x'','/',12000000000000000,0,0,0)", []).unwrap();
+        c.execute(
+            "INSERT INTO cookies VALUES ('.a.com','sid','',?1,'/',?2,1,1,1)",
+            rusqlite::params![enc("secret"), far],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO cookies VALUES ('.a.com','plain','v',x'','/',0,0,0,-1)",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO cookies VALUES ('.a.com','locked','',?1,'/',?2,0,0,0)",
+            rusqlite::params![b"v20xxxx".to_vec(), far],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO cookies VALUES ('.a.com','old','x',x'','/',12000000000000000,0,0,0)",
+            [],
+        )
+        .unwrap();
         drop(c);
         let (got, skipped) = chromium_cookies(&p, &Xor).unwrap();
         assert_eq!(skipped, 1);
@@ -398,14 +428,33 @@ mod tests {
             "CREATE TABLE logins(origin_url TEXT, username_value TEXT, password_value BLOB, blacklisted_by_user INTEGER);",
         )
         .unwrap();
-        c.execute("INSERT INTO logins VALUES ('https://a.com/','me',?1,0)", [enc("hunter2")]).unwrap();
-        c.execute("INSERT INTO logins VALUES ('https://b.com/','you',?1,0)", [b"v20zzz".to_vec()]).unwrap();
-        c.execute("INSERT INTO logins VALUES ('https://c.com/','never',?1,1)", [enc("x")]).unwrap();
-        c.execute("INSERT INTO logins VALUES ('android://x@com.app','a',?1,0)", [enc("y")]).unwrap();
+        c.execute(
+            "INSERT INTO logins VALUES ('https://a.com/','me',?1,0)",
+            [enc("hunter2")],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO logins VALUES ('https://b.com/','you',?1,0)",
+            [b"v20zzz".to_vec()],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO logins VALUES ('https://c.com/','never',?1,1)",
+            [enc("x")],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO logins VALUES ('android://x@com.app','a',?1,0)",
+            [enc("y")],
+        )
+        .unwrap();
         drop(c);
         let (got, skipped) = chromium_logins(&p, &Xor).unwrap();
         assert_eq!((got.len(), skipped), (1, 1));
-        assert_eq!((got[0].password.as_str(), got[0].username.as_str()), ("hunter2", "me"));
+        assert_eq!(
+            (got[0].password.as_str(), got[0].username.as_str()),
+            ("hunter2", "me")
+        );
         let _ = std::fs::remove_file(&p);
     }
 

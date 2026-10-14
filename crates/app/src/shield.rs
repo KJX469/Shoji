@@ -572,7 +572,8 @@ pub fn attach(webview: &WebView, shield: Shield, mode_for: ModeFor, tab_id: TabI
             if SEND_GPC.load(Ordering::Relaxed) {
                 if let Ok(headers) = unsafe { request.Headers() } {
                     let (name, value) = (wide("Sec-GPC"), wide("1"));
-                    let _ = unsafe { headers.SetHeader(PCWSTR(name.as_ptr()), PCWSTR(value.as_ptr())) };
+                    let _ =
+                        unsafe { headers.SetHeader(PCWSTR(name.as_ptr()), PCWSTR(value.as_ptr())) };
                 }
             }
             let mut ctx = COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL;

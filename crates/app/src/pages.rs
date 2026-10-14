@@ -430,9 +430,30 @@ pub fn passwords(s: &Settings) -> String {
             ("MODE", &s.appearance.theme),
             ("FONTS", s.fonts().id),
             ("CRANE", &theme::crane_svg("c", "")),
-            ("PRIVATE_MODE", if s.privacy.ephemeral_default { "true" } else { "false" }),
-            ("SAVE_ENABLED", if s.privacy.save_passwords { "true" } else { "false" }),
-            ("PRIVATE_NOTE", if s.privacy.ephemeral_default { " in private mode" } else { "" }),
+            (
+                "PRIVATE_MODE",
+                if s.privacy.ephemeral_default {
+                    "true"
+                } else {
+                    "false"
+                },
+            ),
+            (
+                "SAVE_ENABLED",
+                if s.privacy.save_passwords {
+                    "true"
+                } else {
+                    "false"
+                },
+            ),
+            (
+                "PRIVATE_NOTE",
+                if s.privacy.ephemeral_default {
+                    " in private mode"
+                } else {
+                    ""
+                },
+            ),
         ],
     )
 }

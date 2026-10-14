@@ -11,35 +11,115 @@
 static FILES: &[(&str, &[u8], bool)] = &[
     ("arc", include_bytes!("../assets/logos/arc.svg"), false),
     ("avast", include_bytes!("../assets/logos/avast.svg"), false),
-    ("brave-beta", include_bytes!("../assets/logos/brave-beta.svg"), false),
-    ("brave-nightly", include_bytes!("../assets/logos/brave-nightly.png"), true),
+    (
+        "brave-beta",
+        include_bytes!("../assets/logos/brave-beta.svg"),
+        false,
+    ),
+    (
+        "brave-nightly",
+        include_bytes!("../assets/logos/brave-nightly.png"),
+        true,
+    ),
     ("brave", include_bytes!("../assets/logos/brave.svg"), false),
-    ("ccleaner", include_bytes!("../assets/logos/ccleaner.svg"), false),
-    ("chrome-beta", include_bytes!("../assets/logos/chrome-beta.svg"), false),
-    ("chrome-canary", include_bytes!("../assets/logos/chrome-canary.svg"), false),
-    ("chrome-dev", include_bytes!("../assets/logos/chrome-dev.svg"), false),
-    ("chrome", include_bytes!("../assets/logos/chrome.svg"), false),
-    ("chromium", include_bytes!("../assets/logos/chromium.svg"), false),
+    (
+        "ccleaner",
+        include_bytes!("../assets/logos/ccleaner.svg"),
+        false,
+    ),
+    (
+        "chrome-beta",
+        include_bytes!("../assets/logos/chrome-beta.svg"),
+        false,
+    ),
+    (
+        "chrome-canary",
+        include_bytes!("../assets/logos/chrome-canary.svg"),
+        false,
+    ),
+    (
+        "chrome-dev",
+        include_bytes!("../assets/logos/chrome-dev.svg"),
+        false,
+    ),
+    (
+        "chrome",
+        include_bytes!("../assets/logos/chrome.svg"),
+        false,
+    ),
+    (
+        "chromium",
+        include_bytes!("../assets/logos/chromium.svg"),
+        false,
+    ),
     ("coccoc", include_bytes!("../assets/logos/coccoc.png"), true),
     ("comet", include_bytes!("../assets/logos/comet.svg"), false),
-    ("edge-beta", include_bytes!("../assets/logos/edge-beta.png"), true),
-    ("edge-dev", include_bytes!("../assets/logos/edge-dev.png"), true),
+    (
+        "edge-beta",
+        include_bytes!("../assets/logos/edge-beta.png"),
+        true,
+    ),
+    (
+        "edge-dev",
+        include_bytes!("../assets/logos/edge-dev.png"),
+        true,
+    ),
     ("edge", include_bytes!("../assets/logos/edge.svg"), false),
     ("epic", include_bytes!("../assets/logos/epic.png"), true),
-    ("firefox", include_bytes!("../assets/logos/firefox.svg"), false),
-    ("floorp", include_bytes!("../assets/logos/floorp.svg"), false),
+    (
+        "firefox",
+        include_bytes!("../assets/logos/firefox.svg"),
+        false,
+    ),
+    (
+        "floorp",
+        include_bytes!("../assets/logos/floorp.svg"),
+        false,
+    ),
     ("ie", include_bytes!("../assets/logos/ie.svg"), false),
-    ("librewolf", include_bytes!("../assets/logos/librewolf.svg"), false),
-    ("maxthon", include_bytes!("../assets/logos/maxthon.png"), true),
-    ("mullvad", include_bytes!("../assets/logos/mullvad.svg"), false),
-    ("opera-gx", include_bytes!("../assets/logos/opera-gx.svg"), false),
+    (
+        "librewolf",
+        include_bytes!("../assets/logos/librewolf.svg"),
+        false,
+    ),
+    (
+        "maxthon",
+        include_bytes!("../assets/logos/maxthon.png"),
+        true,
+    ),
+    (
+        "mullvad",
+        include_bytes!("../assets/logos/mullvad.svg"),
+        false,
+    ),
+    (
+        "opera-gx",
+        include_bytes!("../assets/logos/opera-gx.svg"),
+        false,
+    ),
     ("opera", include_bytes!("../assets/logos/opera.svg"), false),
-    ("palemoon", include_bytes!("../assets/logos/palemoon.png"), true),
+    (
+        "palemoon",
+        include_bytes!("../assets/logos/palemoon.png"),
+        true,
+    ),
     ("qq", include_bytes!("../assets/logos/qq.svg"), false),
-    ("safari", include_bytes!("../assets/logos/safari.svg"), false),
-    ("seamonkey", include_bytes!("../assets/logos/seamonkey.png"), true),
+    (
+        "safari",
+        include_bytes!("../assets/logos/safari.svg"),
+        false,
+    ),
+    (
+        "seamonkey",
+        include_bytes!("../assets/logos/seamonkey.png"),
+        true,
+    ),
     ("tor", include_bytes!("../assets/logos/tor.png"), true),
-    ("vivaldi", include_bytes!("../assets/logos/vivaldi.svg"), false),
+    (
+        "vivaldi",
+        include_bytes!("../assets/logos/vivaldi.svg"),
+        false,
+    ),
     ("whale", include_bytes!("../assets/logos/whale.svg"), false),
     ("yandex", include_bytes!("../assets/logos/yandex.png"), true),
     ("zen", include_bytes!("../assets/logos/zen.svg"), false),
@@ -84,7 +164,10 @@ pub fn data_uri(id: &str, color: &str, name: &str) -> String {
             if *png { "image/png" } else { "image/svg+xml" },
             base64(bytes)
         ),
-        None => format!("data:image/svg+xml;base64,{}", base64(tile(color, name).as_bytes())),
+        None => format!(
+            "data:image/svg+xml;base64,{}",
+            base64(tile(color, name).as_bytes())
+        ),
     }
 }
 
