@@ -199,6 +199,103 @@ fn session_file_roundtrips_and_tolerates_garbage() {
 }
 
 #[test]
+fn workspaces_and_splits_persist_roundtrip_migrate_and_respect_private_mode() {
+    use shoji_core::settings::PrivacySettings;
+    use shoji_core::tabs::{SplitOrientation, TabManager};
+
+    let dir = temp_dir("ws_session");
+    let path = dir.join("session.json");
+
+    // 1. Round-trip workspaces, tabs, active tab per workspace, order, and split state.
+    let mut tm = TabManager::new();
+    let t1 = tm.create_tab("https://alpha.example", 10);
+    let t2 = tm.create_tab("https://beta.example", 20);
+    tm.update_title(t1, "Alpha".into());
+    tm.update_title(t2, "Beta".into());
+    tm.switch_tab(t1, 25);
+    assert!(tm.open_split(t2));
+    assert!(tm.set_split_orientation(SplitOrientation::Horizontal));
+    assert!(tm.set_split_ratio(0.6));
+
+    let ws2 = tm.create_workspace("Research", "green");
+    tm.switch_workspace(ws2, 30);
+    let w2_blank = tm.active_tab_id().unwrap();
+    tm.update_url(w2_blank, "https://papers.example".into());
+    tm.update_title(w2_blank, "Papers".into());
+    let t4 = tm.create_tab("https://notes.example", 40);
+    tm.update_title(t4, "Notes".into());
+    tm.switch_tab(w2_blank, 45);
+
+    // Reorder workspaces so "Research" comes first.
+    assert!(tm.reorder_workspace(1, 0));
+
+    let normal_privacy = PrivacySettings {
+        ephemeral_default: false,
+        restore_session: "always".into(),
+        ..Default::default()
+    };
+
+    let session = Session::from_managers(&[&tm], true, &normal_privacy).unwrap();
+    assert!(session.save_respecting_privacy(&path, &normal_privacy));
+
+    let loaded = Session::load_respecting_privacy(&path, &normal_privacy);
+    assert_eq!(loaded.windows.len(), 1);
+    let mut restored = TabManager::new();
+    restored.restore_session_window(&loaded.windows[0], 100);
+
+    assert_eq!(restored.workspaces().len(), 2);
+    assert_eq!(restored.workspaces()[0].name, "Research");
+    assert_eq!(restored.workspaces()[0].color, "green");
+    assert_eq!(restored.workspaces()[1].name, "Main");
+    assert_eq!(restored.active_workspace_id(), ws2);
+    assert_eq!(restored.active_tab().unwrap().url, "https://papers.example");
+
+    // Switch back to Main workspace and verify its split and active tab survived.
+    assert!(restored.switch_workspace(1, 110));
+    assert_eq!(restored.active_tab().unwrap().url, "https://alpha.example");
+    let sp = restored.split().expect("split restored on Main");
+    assert_eq!(sp.orientation, SplitOrientation::Horizontal);
+    assert!((sp.ratio - 0.6).abs() < 1e-6);
+
+    // 2. Migration from legacy session format (no `workspaces` or `active_workspace` fields).
+    let legacy_json = r#"{
+        "clean_exit": true,
+        "windows": [{
+            "tabs": [
+                { "url": "https://legacy-one.example", "title": "One" },
+                { "url": "https://legacy-two.example", "title": "Two" }
+            ],
+            "active": 1
+        }]
+    }"#;
+    std::fs::write(&path, legacy_json).unwrap();
+    let legacy_session = Session::load(&path);
+    let mut migrated = TabManager::new();
+    migrated.restore_session_window(&legacy_session.windows[0], 200);
+    assert_eq!(migrated.workspaces().len(), 1);
+    assert_eq!(migrated.workspaces()[0].name, "Main");
+    assert_eq!(migrated.tabs().len(), 2);
+    assert_eq!(
+        migrated.active_tab().unwrap().url,
+        "https://legacy-two.example"
+    );
+
+    // 3. Private mode must never persist workspaces or their tabs, and clears any existing file.
+    let private_privacy = PrivacySettings {
+        ephemeral_default: true,
+        ..Default::default()
+    };
+    assert!(Session::from_managers(&[&tm], true, &private_privacy).is_none());
+    assert!(!session.save_respecting_privacy(&path, &private_privacy));
+    assert!(!path.exists());
+    let after_private = Session::load_respecting_privacy(&path, &private_privacy);
+    assert!(!after_private.has_pages());
+    assert!(after_private.windows.is_empty());
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn import_and_default_browser_messages_stay_off_web_content() {
     use shoji_core::ipc::UiToHostMessage as M;
     let start: M = serde_json::from_str(
