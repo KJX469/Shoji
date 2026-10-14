@@ -19,7 +19,7 @@ use shoji_brand::Accent;
 use shoji_core::env::{detect_webview2_runtime, is_process_elevated};
 use shoji_core::ipc::{HostToUiMessage, UiToHostMessage};
 use shoji_core::settings::Settings;
-use shoji_core::tabs::{normalize_url, TabId, TabManager, TabState, TabStatus};
+use shoji_core::tabs::{normalize_url, SplitOrientation, TabId, TabManager, TabState, TabStatus};
 use shoji_core::INTERNAL_SCHEME;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -38,8 +38,8 @@ use wry::{Rect, WebView, WebViewBuilder, WebViewBuilderExtWindows, WebViewExtWin
 const CHROME_HEIGHT: f64 = 76.0;
 const TRAY_HEIGHT: f64 = 38.0;
 const SIDEBAR_WIDTH: f64 = 320.0;
-/// Gap between the two panes of split view
-const SPLIT_GAP: f64 = 4.0;
+/// Draggable divider width/height between the two panes of split view
+const SPLIT_GAP: f64 = 6.0;
 /// Floating notepad, anchored to the top-right of the page area
 const NOTES_WIDTH: f64 = 440.0;
 const NOTES_MAX_HEIGHT: f64 = 620.0;
@@ -99,6 +99,36 @@ const LINK_PREVIEW_SCRIPT: &str = r#"(() => {
   }, { passive: true });
 })();"#;
 
+/// Lets a link dragged from one pane be dropped onto the other pane to navigate it.
+const SPLIT_DROP_SCRIPT: &str = r#"(() => {
+  if (window.top !== window || !window.ipc) return;
+  const editable = el => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+  addEventListener('dragstart', e => {
+    const a = e.target && e.target.closest && e.target.closest('a[href]');
+    if (a && a.href && e.dataTransfer) {
+      try { e.dataTransfer.setData('text/uri-list', a.href); } catch (_) {}
+    }
+  }, true);
+  addEventListener('dragover', e => {
+    if (editable(e.target) || !e.dataTransfer) return;
+    const types = [...(e.dataTransfer.types || [])];
+    if (types.includes('text/uri-list') || types.includes('text/plain')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'link';
+    }
+  });
+  addEventListener('drop', e => {
+    if (editable(e.target) || !e.dataTransfer) return;
+    const raw = (e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain') || '').trim();
+    const line = raw.split(/\r?\n/).find(l => l && !l.startsWith('#')) || '';
+    if (/^https?:\/\//i.test(line)) {
+      e.preventDefault();
+      e.stopPropagation();
+      window.ipc.postMessage(JSON.stringify({ action: 'LinkDropped', payload: { url: line.trim() } }));
+    }
+  });
+})();"#;
+
 #[derive(Debug)]
 pub(crate) enum BrowserEvent {
     /// From the tray icon, or a later launch of Shoji handed to this copy
@@ -152,6 +182,17 @@ pub(crate) enum BrowserEvent {
         state: &'static str,
     },
     TabSuspended(TabId),
+    /// Audio playback or mute state changed on `tab_id`
+    TabAudio {
+        tab_id: TabId,
+        playing: bool,
+        muted: bool,
+    },
+    /// HTML5 fullscreen state changed on `tab_id`
+    TabFullscreen {
+        tab_id: TabId,
+        fullscreen: bool,
+    },
     /// Byobu blocked something for this tab (or its lists changed: tab 0)
     ShieldTouched(TabId),
     /// The element picker produced a rule for `host`
@@ -285,7 +326,7 @@ fn now_secs() -> u64 {
         .unwrap_or_default()
 }
 
-/// Tab-group colours, in the order new groups pick them (crane accent ids).
+/// Tab-group and workspace colours, in the order new groups/workspaces pick them (crane accent ids).
 const GROUP_COLORS: [&str; 7] = ["blue", "green", "gold", "purple", "red", "cyan", "white"];
 
 /// Runs in the page (with a user gesture) to toggle picture-in-picture on its main video.
@@ -306,11 +347,30 @@ fn next_group_color(win: &BrowserWindow) -> &'static str {
         .unwrap_or(GROUP_COLORS[win.tabs.groups().len() % GROUP_COLORS.len()])
 }
 
+/// The first crane colour no workspace in this window uses yet.
+fn next_workspace_color(win: &BrowserWindow) -> &'static str {
+    GROUP_COLORS
+        .iter()
+        .find(|c| !win.tabs.workspaces().iter().any(|w| w.color == **c))
+        .copied()
+        .unwrap_or(GROUP_COLORS[win.tabs.workspaces().len() % GROUP_COLORS.len()])
+}
+
 /// The display tone of a group's colour.
 fn group_tone(win: &BrowserWindow, gid: u32) -> Option<String> {
     let g = win.tabs.groups().iter().find(|g| g.id == gid)?;
     Some(
         shoji_brand::theme::tones(Accent::from_id(&g.color))
+            .0
+            .to_string(),
+    )
+}
+
+/// The display tone of a workspace's colour.
+fn workspace_tone(win: &BrowserWindow, wid: u32) -> Option<String> {
+    let w = win.tabs.workspaces().iter().find(|w| w.id == wid)?;
+    Some(
+        shoji_brand::theme::tones(Accent::from_id(&w.color))
             .0
             .to_string(),
     )
@@ -417,6 +477,8 @@ struct Tab {
 enum Prompt {
     NewGroup(TabId),
     RenameGroup(u32),
+    NewWorkspace,
+    RenameWorkspace(u32),
 }
 
 struct BrowserWindow {
@@ -457,8 +519,14 @@ struct BrowserWindow {
     overlay_shown: Option<Instant>,
     overlay_items: Vec<shoji_core::ipc::OverlayItem>,
     prompt: Option<Prompt>,
-    /// The two tabs shown side by side
-    split: Option<[TabId; 2]>,
+    /// Tab currently in HTML5 fullscreen (e.g. fullscreen video in a split pane)
+    fullscreen_tab: Option<TabId>,
+    /// Whether the user is dragging the split divider
+    divider_dragging: bool,
+    /// Last cursor logical coordinates in this window
+    cursor_pos: (f64, f64),
+    /// Last click time on the split divider (for double-click reset to 50/50)
+    last_divider_click: Option<Instant>,
     /// Tabs currently showing the reader view
     reader: HashSet<TabId>,
     /// Last tint / page-state pushed to the chrome strip
@@ -472,52 +540,85 @@ impl BrowserWindow {
         CHROME_HEIGHT + TRAY_HEIGHT * trays as f64
     }
 
-    fn content_bounds(&self) -> Rect {
+    fn content_tuple(&self) -> (f64, f64, f64, f64) {
         let top = self.chrome_height();
         let width = if self.sidebar_open {
-            self.width - SIDEBAR_WIDTH
+            (self.width - SIDEBAR_WIDTH).max(1.0)
         } else {
-            self.width
+            self.width.max(1.0)
         };
-        bounds(0.0, top, width, self.height - top)
+        (0.0, top, width, (self.height - top).max(1.0))
+    }
+
+    fn content_bounds(&self) -> Rect {
+        let (x, y, w, h) = self.content_tuple();
+        bounds(x, y, w, h)
     }
 
     /// Whether the active tab is one of the two split-view panes.
     fn split_showing(&self) -> Option<[TabId; 2]> {
-        let active = self.tabs.active_tab_id()?;
-        self.split.filter(|p| p.contains(&active))
+        self.tabs.split_panes()
     }
 
-    /// Where tab `id` sits: the whole page area, or its half in split view.
-    fn rect_for(&self, id: TabId) -> Rect {
-        let top = self.chrome_height();
-        let width = if self.sidebar_open {
-            self.width - SIDEBAR_WIDTH
-        } else {
-            self.width
-        };
-        let height = self.height - top;
-        match self.split_showing() {
-            Some([a, b]) if id == a || id == b => {
-                let half = ((width - SPLIT_GAP) / 2.0).max(1.0);
-                if id == a {
-                    bounds(0.0, top, half, height)
-                } else {
-                    bounds(half + SPLIT_GAP, top, half, height)
-                }
-            }
-            _ => bounds(0.0, top, width, height),
+    /// Hit-test `(x, y)` against the draggable split divider gap.
+    fn divider_hit(&self, x: f64, y: f64) -> Option<shoji_core::tabs::SplitOrientation> {
+        if self.fullscreen_tab.is_some() {
+            return None;
         }
+        let split = self.tabs.visible_split()?;
+        let (dx, dy, dw, dh) = split.divider_rect(self.content_tuple(), SPLIT_GAP);
+        if x >= dx - 2.0 && x <= dx + dw + 2.0 && y >= dy - 2.0 && y <= dy + dh + 2.0 {
+            Some(split.orientation)
+        } else {
+            None
+        }
+    }
+
+    /// Where tab `id` sits: full window in fullscreen, its split pane rectangle, or the page area.
+    fn rect_for(&self, id: TabId) -> Rect {
+        if self.fullscreen_tab == Some(id) {
+            return bounds(0.0, 0.0, self.width, self.height);
+        }
+        let area = self.content_tuple();
+        if let Some(split) = self.tabs.visible_split() {
+            if id == split.panes[0] || id == split.panes[1] {
+                let [r0, r1] = split.layout(area, SPLIT_GAP);
+                let r = if id == split.panes[0] { r0 } else { r1 };
+                return bounds(r.0, r.1, r.2, r.3);
+            }
+        }
+        bounds(area.0, area.1, area.2, area.3)
     }
 
     fn active(&self) -> Option<&Tab> {
         self.views.get(&self.tabs.active_tab_id()?)
     }
 
-    /// Only the visible tab is resized; hidden tabs get their bounds when shown.
+    /// Only the visible tab(s) are resized; hidden tabs get their bounds when shown.
     fn layout(&mut self) {
+        if let Some(fs_id) = self.fullscreen_tab {
+            if let Some(chrome) = &self.chrome {
+                let _ = chrome.set_visible(false);
+            }
+            if let Some(sidebar) = &self.sidebar {
+                let _ = sidebar.set_visible(false);
+            }
+            for (&id, tab) in &self.views {
+                if id == fs_id {
+                    let _ = tab
+                        .view
+                        .set_bounds(bounds(0.0, 0.0, self.width, self.height));
+                    let _ = tab.view.set_visible(true);
+                } else if self.tabs.is_tab_visible(id) {
+                    let _ = tab.view.set_visible(false);
+                }
+            }
+            return;
+        }
+
         let top = self.chrome_height();
         if let Some(chrome) = &self.chrome {
+            let _ = chrome.set_visible(true);
             let _ = chrome.set_bounds(bounds(0.0, 0.0, self.width, top));
         }
         let visible: Vec<TabId> = match self.split_showing() {
@@ -525,11 +626,14 @@ impl BrowserWindow {
             None => self.tabs.active_tab_id().into_iter().collect(),
         };
         for id in visible {
+            let rect = self.rect_for(id);
             if let Some(tab) = self.views.get(&id) {
-                let _ = tab.view.set_bounds(self.rect_for(id));
+                let _ = tab.view.set_bounds(rect);
+                let _ = tab.view.set_visible(true);
             }
         }
         if let (true, Some(sidebar)) = (self.sidebar_open, &self.sidebar) {
+            let _ = sidebar.set_visible(true);
             let _ = sidebar.set_bounds(bounds(
                 self.width - SIDEBAR_WIDTH,
                 top,
@@ -665,7 +769,7 @@ impl BrowserWindow {
 
     /// Run a script in the window's internal pages (new tab, settings, welcome).
     fn eval_internal_tabs(&self, js: &str) {
-        for t in self.tabs.tabs() {
+        for t in self.tabs.all_tabs() {
             if is_internal(&t.url) {
                 if let Some(tab) = self.views.get(&t.id) {
                     let _ = tab.view.evaluate_script(js);
@@ -683,21 +787,19 @@ impl BrowserWindow {
     /// Bring `id` to the front, demoting whichever tab was visible.
     fn show_tab(&mut self, id: TabId) {
         let previous = self.tabs.active_tab_id();
+        let prev_split = self.tabs.split_panes();
         if !self.tabs.switch_tab(id, now_secs()) {
             return;
         }
         // Split view keeps both panes up; anything else that was showing goes away.
-        let pair = self.split.filter(|p| p.contains(&id));
+        let pair = self.tabs.split_panes();
         let keep = |t: TabId| t == id || pair.is_some_and(|p| p.contains(&t));
         let mut showing: Vec<TabId> = previous.into_iter().collect();
-        showing.extend(self.split.into_iter().flatten());
-        for t in showing {
-            if !keep(t) {
-                if let Some(tab) = self.views.get_mut(&t) {
-                    if tab.hidden_since.is_none() {
-                        Self::hide(tab);
-                    }
-                }
+        showing.extend(prev_split.into_iter().flatten());
+        showing.extend(pair.into_iter().flatten());
+        for (&tid, tab) in self.views.iter_mut() {
+            if !keep(tid) && (showing.contains(&tid) || tab.hidden_since.is_none()) {
+                Self::hide(tab);
             }
         }
         let mut panes = vec![id];
@@ -988,7 +1090,10 @@ impl BrowserApp {
                 overlay_shown: None,
                 overlay_items: Vec::new(),
                 prompt: None,
-                split: None,
+                fullscreen_tab: None,
+                divider_dragging: false,
+                cursor_pos: (0.0, 0.0),
+                last_divider_click: None,
                 reader: HashSet::new(),
                 last_page_sync: String::new(),
                 last_fav_sync: String::new(),
@@ -1176,9 +1281,7 @@ impl BrowserApp {
             .windows
             .get(&win_id)?
             .tabs
-            .tabs()
-            .iter()
-            .find(|t| t.id == tab)?
+            .get_tab_by_id(tab)?
             .url
             .clone();
         (url.starts_with("https://") || url.starts_with("http://")).then_some(url)
@@ -1421,6 +1524,7 @@ impl BrowserApp {
         }
         // Every tab, not just web ones: an internal tab can navigate to a site in place.
         builder = builder.with_initialization_script(HIDE_SCROLLBAR_SCRIPT);
+        builder = builder.with_initialization_script(SPLIT_DROP_SCRIPT);
         // Built blank, so document scripts are registered before the first navigation.
         let view = builder
             .build_as_child(window)
@@ -1492,6 +1596,7 @@ impl BrowserApp {
             "shoji://passwords" => "Passwords",
             _ => "New tab",
         };
+        let workspace = win.tabs.active_workspace_id();
         win.tabs.insert_tab(
             TabState {
                 id: tab_id,
@@ -1506,20 +1611,101 @@ impl BrowserApp {
                 status: TabStatus::Inactive,
                 last_active_timestamp_secs: now_secs(),
                 group: None,
+                workspace,
             },
             None,
         );
-        // insert_tab made it active in the model; demote the old visible view first.
-        for (id, other) in win.views.iter_mut() {
-            if *id != tab_id && other.hidden_since.is_none() {
-                BrowserWindow::hide(other);
-            }
-        }
         win.views.insert(tab_id, tab);
         win.show_tab(tab_id);
+        win.layout();
     }
 
-    fn close_tab(&mut self, win_id: WindowId, tab_id: TabId, event_loop: &ActiveEventLoop) {
+    /// Reconcile `win.views` with `win.tabs`: drop views for removed tabs, build views for any
+    /// newly created tabs, hide & suspend tabs in inactive workspaces, and show the active tab(s).
+    fn sync_window_views(&mut self, win_id: WindowId) {
+        let (window, rect, to_build, removed, inactive_ids) = {
+            let Some(win) = self.windows.get_mut(&win_id) else {
+                return;
+            };
+            let live_ids: HashSet<TabId> = win.tabs.all_tabs().map(|t| t.id).collect();
+            let max_id = live_ids.iter().map(|id| id.0).max().unwrap_or(0);
+            if max_id >= self.next_tab_id {
+                self.next_tab_id = max_id + 1;
+            }
+            let removed: Vec<TabId> = win
+                .views
+                .keys()
+                .copied()
+                .filter(|id| !live_ids.contains(id))
+                .collect();
+            for id in &removed {
+                if win.fullscreen_tab == Some(*id) {
+                    win.fullscreen_tab = None;
+                }
+                win.reader.remove(id);
+                self.last_upgrade.remove(id);
+                win.views.remove(id);
+                shield::hub().forget_tab(id.0);
+            }
+            let mut to_build = Vec::new();
+            for t in win.tabs.all_tabs() {
+                if !win.views.contains_key(&t.id) {
+                    let url = if t.url == "about:blank" || t.url.is_empty() {
+                        format!("{INTERNAL_SCHEME}newtab")
+                    } else {
+                        t.url.clone()
+                    };
+                    to_build.push((t.id, url));
+                }
+            }
+            let inactive_ids: HashSet<TabId> =
+                win.tabs.inactive_tabs().iter().map(|t| t.id).collect();
+            (
+                win.window.clone(),
+                win.content_bounds(),
+                to_build,
+                removed,
+                inactive_ids,
+            )
+        };
+        if !removed.is_empty() {
+            if let Ok(mut ctx) = self.pages.write() {
+                for id in &removed {
+                    ctx.notices.remove(&id.0);
+                }
+            }
+        }
+        for (id, url) in to_build {
+            if let Some(tab) = self.build_view(&window, id, &url, rect) {
+                if let Some(win) = self.windows.get_mut(&win_id) {
+                    if url == format!("{INTERNAL_SCHEME}newtab") {
+                        win.tabs.update_url(id, url);
+                    }
+                    win.views.insert(id, tab);
+                }
+            }
+        }
+        if let Some(win) = self.windows.get_mut(&win_id) {
+            for &id in &inactive_ids {
+                if let Some(tab) = win.views.get_mut(&id) {
+                    if tab.hidden_since.is_none() {
+                        BrowserWindow::hide(tab);
+                    }
+                    if !tab.suspended {
+                        webview::try_suspend(&tab.view, id, self.proxy.clone());
+                    }
+                }
+            }
+            if let Some(active) = win.tabs.active_tab_id() {
+                win.show_tab(active);
+            }
+            win.layout();
+            win.ui_dirty = true;
+            win.sidebar_dirty = true;
+        }
+    }
+
+    fn close_tab(&mut self, win_id: WindowId, tab_id: TabId, _event_loop: &ActiveEventLoop) {
         let Some(win) = self.windows.get_mut(&win_id) else {
             return;
         };
@@ -1542,24 +1728,8 @@ impl BrowserApp {
                 }
             }
         }
-        if win.split.is_some_and(|p| p.contains(&tab_id)) {
-            win.split = None;
-        }
-        win.reader.remove(&tab_id);
-        self.last_upgrade.remove(&tab_id);
-        win.views.remove(&tab_id);
-        match win.tabs.close_tab(tab_id) {
-            Some(next) => {
-                win.tabs.switch_tab(next, now_secs());
-                win.show_tab(next);
-                win.layout();
-            }
-            None => self.close_window(win_id, event_loop),
-        }
-        if let Ok(mut ctx) = self.pages.write() {
-            ctx.notices.remove(&tab_id.0);
-        }
-        shield::hub().forget_tab(tab_id.0);
+        let _ = win.tabs.close_workspace_tab(tab_id, now_secs());
+        self.sync_window_views(win_id);
         self.push_data();
     }
 
@@ -1620,11 +1790,12 @@ impl BrowserApp {
             return;
         }
         let window = win.window.clone();
-        let rect = win.content_bounds();
+        let rect = win.rect_for(active);
         if let Some(tab) = self.build_view(&window, active, &target, rect) {
             if let Some(win) = self.windows.get_mut(&win_id) {
                 win.views.insert(active, tab);
                 win.show_tab(active);
+                win.layout();
             }
         }
     }
@@ -1669,7 +1840,10 @@ impl BrowserApp {
         screen: Option<(f64, f64)>,
         event_loop: &ActiveEventLoop,
     ) {
-        let only_tab = self.windows.get(&src).map(|w| w.tabs.tabs().len()) == Some(1);
+        let only_tab = self
+            .windows
+            .get(&src)
+            .is_some_and(|w| w.tabs.tabs().len() == 1 && w.tabs.workspaces().len() == 1);
         let target = screen.and_then(|(x, y)| {
             self.windows.iter().find_map(|(id, w)| {
                 let pos = w.window.outer_position().ok()?;
@@ -1694,11 +1868,12 @@ impl BrowserApp {
         else {
             return;
         };
-        if win.split.is_some_and(|p| p.contains(&tab_id)) {
-            win.split = None;
+        if win.fullscreen_tab == Some(tab_id) {
+            win.fullscreen_tab = None;
         }
         win.reader.remove(&tab_id);
         let src_next = win.tabs.active_tab_id();
+        let src_has_other_workspaces = win.tabs.workspaces().len() > 1;
         let dst = match target.or_else(|| self.create_window(event_loop)) {
             Some(id) => id,
             None => return,
@@ -1726,9 +1901,10 @@ impl BrowserApp {
                 BrowserWindow::hide(other);
             }
         }
-        // Group ids are per window.
+        // Group and workspace ids are per window.
         let mut state = state;
         state.group = None;
+        state.workspace = dst_win.tabs.active_workspace_id();
         dst_win.tabs.insert_tab(state, None);
         dst_win.views.insert(tab_id, tab);
         dst_win.show_tab(tab_id);
@@ -1740,7 +1916,11 @@ impl BrowserApp {
             Some(next) => {
                 if let Some(win) = self.windows.get_mut(&src) {
                     win.show_tab(next);
+                    win.layout();
                 }
+            }
+            None if src_has_other_workspaces => {
+                self.create_tab(src, None);
             }
             None => self.close_window(src, event_loop),
         }
@@ -1814,34 +1994,13 @@ impl BrowserApp {
     }
 
     fn build_session(&self, clean: bool) -> shoji_core::userdata::Session {
-        use shoji_core::userdata::{Session, SessionTab, SessionWindow};
         let mut windows = Vec::new();
         for win in self.windows.values() {
-            let active_id = win.tabs.active_tab_id();
-            let mut tabs = Vec::new();
-            let mut active = 0;
-            for t in win.tabs.tabs() {
-                if !(t.url.starts_with("http://") || t.url.starts_with("https://")) {
-                    continue;
-                }
-                if Some(t.id) == active_id {
-                    active = tabs.len();
-                }
-                tabs.push(SessionTab {
-                    url: t.url.clone(),
-                    title: t.title.clone(),
-                    group: t.group,
-                });
-            }
-            if !tabs.is_empty() {
-                windows.push(SessionWindow {
-                    tabs,
-                    active,
-                    groups: win.tabs.groups().to_vec(),
-                });
+            if let Some(sw) = win.tabs.to_session_window() {
+                windows.push(sw);
             }
         }
-        let mut session = Session {
+        let mut session = shoji_core::userdata::Session {
             clean_exit: clean,
             windows,
         };
@@ -1898,45 +2057,15 @@ impl BrowserApp {
         &mut self,
         win_id: WindowId,
         saved: &shoji_core::userdata::SessionWindow,
-        event_loop: &ActiveEventLoop,
+        _event_loop: &ActiveEventLoop,
     ) {
-        // A lone blank new-tab page is replaced by the restored tabs.
-        let blank = self.windows.get(&win_id).and_then(|w| {
-            let tabs = w.tabs.tabs();
-            (tabs.len() == 1 && tabs[0].url == format!("{INTERNAL_SCHEME}newtab"))
-                .then(|| tabs[0].id)
-        });
-        let mut ids = Vec::new();
-        for t in &saved.tabs {
-            self.create_tab(win_id, Some(t.url.clone()));
-            if let Some(id) = self
-                .windows
-                .get(&win_id)
-                .and_then(|w| w.tabs.active_tab_id())
-            {
-                ids.push(id);
-            }
-        }
-        if let Some(win) = self.windows.get_mut(&win_id) {
-            win.tabs.restore_groups(saved.groups.clone());
-            for (id, t) in ids.iter().zip(&saved.tabs) {
-                win.tabs.update_title(*id, t.title.clone());
-                if t.group.is_some() {
-                    win.tabs.set_tab_group(*id, t.group);
-                }
-            }
-            win.tabs.prune_groups();
-        }
-        if let Some(blank) = blank {
-            self.close_tab(win_id, blank, event_loop);
-        }
-        if let Some(id) = ids.get(saved.active).or(ids.last()).copied() {
-            if let Some(win) = self.windows.get_mut(&win_id) {
-                win.show_tab(id);
-                win.layout();
-                win.ui_dirty = true;
-            }
-        }
+        let Some(win) = self.windows.get_mut(&win_id) else {
+            return;
+        };
+        win.views.clear();
+        win.reader.clear();
+        win.tabs.restore_session_window(saved, now_secs());
+        self.sync_window_views(win_id);
     }
 
     fn restore_session(&mut self, win_id: WindowId, event_loop: &ActiveEventLoop) {
@@ -2079,6 +2208,16 @@ impl BrowserApp {
                 gather_group(win, tab, gid);
             }
             Some(Prompt::RenameGroup(gid)) => win.tabs.rename_group(gid, text),
+            Some(Prompt::NewWorkspace) => {
+                let color = next_workspace_color(win);
+                let ws_id = win.tabs.create_workspace(text, color);
+                self.switch_workspace(win_id, ws_id);
+                return;
+            }
+            Some(Prompt::RenameWorkspace(ws_id)) => {
+                win.tabs.rename_workspace(ws_id, text);
+                win.sidebar_dirty = true;
+            }
             None => {}
         }
         win.ui_dirty = true;
@@ -2108,6 +2247,18 @@ impl BrowserApp {
             it.color = t.group.and_then(|g| group_tone(win, g));
             out.push(it);
         }
+        for ws in win.tabs.workspaces() {
+            if ws.id != win.tabs.active_workspace_id() {
+                let mut it = item(
+                    "action",
+                    format!("ws-switch:{}", ws.id),
+                    &format!("Switch to workspace: {}", ws.name),
+                    String::new(),
+                );
+                it.color = workspace_tone(win, ws.id);
+                out.push(it);
+            }
+        }
         for f in self.favourites.items() {
             out.push(item("url", f.url.clone(), &f.title, f.url.clone()));
         }
@@ -2115,6 +2266,11 @@ impl BrowserApp {
             ("new-tab", "New tab", "Ctrl+T"),
             ("new-window", "New window", "Ctrl+N"),
             ("reopen", "Reopen closed tab", "Ctrl+Shift+T"),
+            ("spaces", "Spaces sidebar", "Alt+W"),
+            ("ws-new", "New workspace", "Alt+Shift+N"),
+            ("split-toggle", "Toggle split view", "Ctrl+Shift+S"),
+            ("split-orient", "Flip split view orientation", "Alt+Shift+S"),
+            ("split-focus", "Focus other split pane", "Alt+S"),
             (
                 "favourite",
                 "Add or remove this page from favourites",
@@ -2139,11 +2295,17 @@ impl BrowserApp {
             );
             out.push(item("url", page.to_string(), label, page.to_string()));
         }
-        if win.split.is_some() {
+        if win.tabs.visible_split().is_some() {
             out.push(item(
                 "action",
                 "split-exit".into(),
                 "Exit split view",
+                "Ctrl+Shift+S".into(),
+            ));
+            out.push(item(
+                "action",
+                "split-reset".into(),
+                "Reset split divider to 50/50",
                 String::new(),
             ));
         } else {
@@ -2189,14 +2351,36 @@ impl BrowserApp {
             return out;
         };
         let active = win.tabs.active_tab_id();
-        if win.split.is_some_and(|p| p.contains(&tab_id)) {
+        if win.tabs.is_in_split(tab_id) {
             out.push(item("split-exit".into(), "Exit split view", None));
-        } else if Some(tab_id) != active {
+            out.push(item("split-orient".into(), "Flip split orientation", None));
+            out.push(item("split-reset".into(), "Reset split to 50/50", None));
+        } else if Some(tab_id) != active && tab.workspace == win.tabs.active_workspace_id() {
             out.push(item(
                 format!("split:{}", tab_id.0),
-                "Open in split view with the current tab",
+                "Open in split view",
                 None,
             ));
+        }
+        if tab.is_audio_playing || tab.is_muted {
+            out.push(item(
+                format!("mute:{}", tab_id.0),
+                if tab.is_muted {
+                    "Unmute tab"
+                } else {
+                    "Mute tab"
+                },
+                None,
+            ));
+        }
+        for ws in win.tabs.workspaces() {
+            if ws.id != tab.workspace {
+                out.push(item(
+                    format!("ws-move:{}:{}", tab_id.0, ws.id),
+                    &format!("Move to workspace: {}", ws.name),
+                    workspace_tone(win, ws.id),
+                ));
+            }
         }
         for g in win.tabs.groups() {
             if tab.group != Some(g.id) {
@@ -2239,6 +2423,69 @@ impl BrowserApp {
         out
     }
 
+    fn workspace_menu_items(
+        &self,
+        win_id: WindowId,
+        ws_id: u32,
+    ) -> Vec<shoji_core::ipc::OverlayItem> {
+        use shoji_core::ipc::OverlayItem;
+        let item = |value: String, label: &str, color: Option<String>| OverlayItem {
+            kind: "action".into(),
+            value,
+            label: label.to_string(),
+            sub: String::new(),
+            color,
+        };
+        let mut out = Vec::new();
+        let Some(win) = self.windows.get(&win_id) else {
+            return out;
+        };
+        for ws in win.tabs.workspaces() {
+            let prefix = if ws.id == win.tabs.active_workspace_id() {
+                "● "
+            } else {
+                ""
+            };
+            out.push(item(
+                format!("ws-switch:{}", ws.id),
+                &format!("{prefix}{}", ws.name),
+                workspace_tone(win, ws.id),
+            ));
+        }
+        out.push(item("ws-new".into(), "New workspace…", None));
+        out.push(item("spaces".into(), "Manage spaces in sidebar", None));
+        out.push(item(
+            format!("ws-rename:{ws_id}"),
+            "Rename workspace…",
+            None,
+        ));
+        out.push(item(
+            format!("ws-color:{ws_id}"),
+            "Change workspace color",
+            workspace_tone(win, ws_id),
+        ));
+        if let Some(idx) = win.tabs.workspaces().iter().position(|w| w.id == ws_id) {
+            if idx > 0 {
+                out.push(item(
+                    format!("ws-reorder:{}:{}", idx, idx - 1),
+                    "Move workspace earlier",
+                    None,
+                ));
+            }
+            if idx + 1 < win.tabs.workspaces().len() {
+                out.push(item(
+                    format!("ws-reorder:{}:{}", idx, idx + 1),
+                    "Move workspace later",
+                    None,
+                ));
+            }
+        }
+        if win.tabs.workspaces().len() > 1 {
+            out.push(item(format!("ws-delete:{ws_id}"), "Delete workspace", None));
+        }
+        out
+    }
+
     fn run_action(&mut self, win_id: WindowId, value: &str, event_loop: &ActiveEventLoop) {
         use UiToHostMessage as M;
         let mut parts = value.splitn(3, ':');
@@ -2250,6 +2497,7 @@ impl BrowserApp {
             "new-tab" => self.create_tab(win_id, None),
             "new-window" => self.new_window(event_loop, None),
             "reopen" => self.handle_command(win_id, Command::ReopenClosedTab, event_loop),
+            "spaces" => self.toggle_sidebar(win_id, "spaces"),
             "downloads" => self.handle_ipc(win_id, None, M::ToggleDownloadsSidebar, event_loop),
             "notes" => self.handle_ipc(win_id, None, M::ToggleNotes, event_loop),
             "find" => self.handle_ipc(win_id, None, M::ToggleFindBar, event_loop),
@@ -2262,6 +2510,76 @@ impl BrowserApp {
             "devtools" => self.handle_ipc(win_id, None, M::OpenDevTools, event_loop),
             "split" => self.split_with(win_id, tab),
             "split-exit" => self.split_with(win_id, None),
+            "split-toggle" => self.handle_ipc(win_id, None, M::ToggleSplit, event_loop),
+            "split-orient" => self.handle_ipc(win_id, None, M::ToggleSplitOrientation, event_loop),
+            "split-focus" => self.handle_ipc(win_id, None, M::SwitchSplitPane, event_loop),
+            "split-reset" => self.handle_ipc(win_id, None, M::ResetSplitRatio, event_loop),
+            "mute" => {
+                if let Some(t) = tab {
+                    self.handle_ipc(win_id, None, M::ToggleMuteTab { tab_id: t }, event_loop);
+                }
+            }
+            "ws-new" => self.open_prompt(win_id, Prompt::NewWorkspace, "Name this workspace", ""),
+            "ws-switch" => {
+                if let Ok(ws_id) = a.parse::<u32>() {
+                    self.switch_workspace(win_id, ws_id);
+                }
+            }
+            "ws-rename" => {
+                if let Ok(ws_id) = a.parse::<u32>() {
+                    let current = self
+                        .windows
+                        .get(&win_id)
+                        .and_then(|w| w.tabs.workspaces().iter().find(|ws| ws.id == ws_id))
+                        .map(|ws| ws.name.clone())
+                        .unwrap_or_default();
+                    self.open_prompt(
+                        win_id,
+                        Prompt::RenameWorkspace(ws_id),
+                        "Rename workspace",
+                        &current,
+                    );
+                }
+            }
+            "ws-color" => {
+                if let (Ok(ws_id), Some(win)) = (a.parse::<u32>(), self.windows.get_mut(&win_id)) {
+                    let current = win
+                        .tabs
+                        .workspaces()
+                        .iter()
+                        .find(|ws| ws.id == ws_id)
+                        .map(|ws| ws.color.clone());
+                    if let Some(current) = current {
+                        let i = GROUP_COLORS.iter().position(|c| *c == current).unwrap_or(0);
+                        win.tabs
+                            .set_workspace_color(ws_id, GROUP_COLORS[(i + 1) % GROUP_COLORS.len()]);
+                        win.ui_dirty = true;
+                        win.sidebar_dirty = true;
+                    }
+                }
+            }
+            "ws-reorder" => {
+                if let (Ok(from), Ok(to), Some(win)) = (
+                    a.parse::<usize>(),
+                    b.parse::<usize>(),
+                    self.windows.get_mut(&win_id),
+                ) {
+                    if win.tabs.reorder_workspace(from, to) {
+                        win.ui_dirty = true;
+                        win.sidebar_dirty = true;
+                    }
+                }
+            }
+            "ws-delete" => {
+                if let Ok(ws_id) = a.parse::<u32>() {
+                    self.delete_workspace(win_id, ws_id);
+                }
+            }
+            "ws-move" => {
+                if let (Some(t), Ok(ws)) = (tab, b.parse::<u32>()) {
+                    self.move_tab_to_workspace(win_id, t, ws);
+                }
+            }
             "group-new" => {
                 if let Some(t) = tab {
                     self.open_prompt(win_id, Prompt::NewGroup(t), "Name this group", "");
@@ -2336,30 +2654,55 @@ impl BrowserApp {
         let Some(win) = self.windows.get_mut(&win_id) else {
             return;
         };
-        let Some(active) = win.tabs.active_tab_id() else {
-            return;
-        };
         match other {
             None => {
-                if let Some(pair) = win.split.take() {
-                    // The pane that wasn't active goes back to the background.
-                    for t in pair.into_iter().filter(|t| *t != active) {
-                        if let Some(tab) = win.views.get_mut(&t) {
-                            BrowserWindow::hide(tab);
-                        }
-                    }
-                }
+                win.tabs.close_split();
             }
             Some(o) => {
-                if o == active || !win.views.contains_key(&o) {
+                if !win.views.contains_key(&o) || !win.tabs.open_split(o) {
                     return;
                 }
-                win.split = Some([active, o]);
             }
         }
-        win.show_tab(active);
+        if let Some(active) = win.tabs.active_tab_id() {
+            win.show_tab(active);
+        }
         win.layout();
         win.ui_dirty = true;
+        win.sidebar_dirty = true;
+    }
+
+    /// Switch `win_id` to `ws_id`, suspending the outgoing workspace's tabs and restoring the
+    /// incoming workspace's active tab (and split view if any).
+    fn switch_workspace(&mut self, win_id: WindowId, ws_id: u32) {
+        let switched = self.windows.get_mut(&win_id).is_some_and(|win| {
+            win.fullscreen_tab = None;
+            win.tabs.switch_workspace(ws_id, now_secs())
+        });
+        if switched {
+            self.sync_window_views(win_id);
+        }
+    }
+
+    fn delete_workspace(&mut self, win_id: WindowId, ws_id: u32) {
+        let deleted = self
+            .windows
+            .get_mut(&win_id)
+            .is_some_and(|win| win.tabs.delete_workspace(ws_id, now_secs()));
+        if deleted {
+            self.sync_window_views(win_id);
+            self.push_data();
+        }
+    }
+
+    fn move_tab_to_workspace(&mut self, win_id: WindowId, tab_id: TabId, target_ws: u32) {
+        let moved = self.windows.get_mut(&win_id).is_some_and(|win| {
+            win.tabs
+                .move_tab_to_workspace(tab_id, target_ws, now_secs())
+        });
+        if moved {
+            self.sync_window_views(win_id);
+        }
     }
 
     fn toggle_reader(&mut self, win_id: WindowId) {
@@ -2773,8 +3116,22 @@ impl BrowserApp {
             }
             M::OpenNewWindow => self.new_window(event_loop, None),
             M::SwitchTab { id } => {
+                let target_ws = self
+                    .windows
+                    .get(&win_id)
+                    .and_then(|w| w.tabs.get_tab_by_id(id).map(|t| t.workspace));
+                if let Some(ws) = target_ws {
+                    if self
+                        .windows
+                        .get(&win_id)
+                        .is_some_and(|w| w.tabs.active_workspace_id() != ws)
+                    {
+                        self.switch_workspace(win_id, ws);
+                    }
+                }
                 if let Some(win) = self.windows.get_mut(&win_id) {
                     win.show_tab(id);
+                    win.layout();
                 }
             }
             M::CloseTab { id } => self.close_tab(win_id, id, event_loop),
@@ -3432,8 +3789,10 @@ impl BrowserApp {
             M::OverlayChoose { kind, value } => {
                 // Navigation and tab switches focus the page themselves; actions that open a
                 // prompt must keep the focus for it.
-                let opens_prompt =
-                    value.starts_with("group-new") || value.starts_with("group-rename");
+                let opens_prompt = value.starts_with("group-new")
+                    || value.starts_with("group-rename")
+                    || value.starts_with("ws-new")
+                    || value.starts_with("ws-rename");
                 self.hide_overlay(win_id, kind == "action" && !opens_prompt);
                 match kind.as_str() {
                     "url" => self.navigate(win_id, &value),
@@ -3446,8 +3805,23 @@ impl BrowserApp {
                     }
                     "tab" => {
                         if let Ok(id) = value.parse::<u64>() {
+                            let tab_id = TabId(id);
+                            let ws = self
+                                .windows
+                                .get(&win_id)
+                                .and_then(|w| w.tabs.get_tab_by_id(tab_id).map(|t| t.workspace));
+                            if let Some(ws) = ws {
+                                if self
+                                    .windows
+                                    .get(&win_id)
+                                    .is_some_and(|w| w.tabs.active_workspace_id() != ws)
+                                {
+                                    self.switch_workspace(win_id, ws);
+                                }
+                            }
                             if let Some(win) = self.windows.get_mut(&win_id) {
-                                win.show_tab(TabId(id));
+                                win.show_tab(tab_id);
+                                win.layout();
                             }
                         }
                     }
@@ -3468,6 +3842,16 @@ impl BrowserApp {
                 let h = items.len() as f64 * 32.0 + 10.0;
                 self.show_overlay(win_id, "menu", items, [x, y.max(30.0), w, h], "", "", "");
             }
+            M::WorkspaceMenu { workspace_id, x, y } => {
+                let items = self.workspace_menu_items(win_id, workspace_id);
+                let Some(win) = self.windows.get(&win_id) else {
+                    return;
+                };
+                let w = 240.0f64.min(win.width - 8.0);
+                let x = x.min(win.width - w - 4.0).max(4.0);
+                let h = items.len() as f64 * 32.0 + 10.0;
+                self.show_overlay(win_id, "menu", items, [x, y.max(30.0), w, h], "", "", "");
+            }
             M::ToggleReader => self.toggle_reader(win_id),
             M::TogglePictureInPicture => {
                 if let Some(tab) = self.windows.get(&win_id).and_then(|w| w.active()) {
@@ -3481,6 +3865,153 @@ impl BrowserApp {
                 }
             }
             M::SplitWith { tab_id } => self.split_with(win_id, tab_id),
+            M::ToggleSplit => {
+                let toggled = self
+                    .windows
+                    .get_mut(&win_id)
+                    .is_some_and(|win| win.tabs.toggle_split(now_secs()));
+                if toggled {
+                    self.sync_window_views(win_id);
+                }
+            }
+            M::SetSplitRatio { ratio } => {
+                if let Some(win) = self.windows.get_mut(&win_id) {
+                    if win.tabs.set_split_ratio(ratio) {
+                        win.layout();
+                        win.ui_dirty = true;
+                    }
+                }
+            }
+            M::ResetSplitRatio => {
+                if let Some(win) = self.windows.get_mut(&win_id) {
+                    if win.tabs.reset_split_ratio() {
+                        win.layout();
+                        win.ui_dirty = true;
+                    }
+                }
+            }
+            M::SetSplitOrientation { orientation } => {
+                if let Some(win) = self.windows.get_mut(&win_id) {
+                    if win.tabs.set_split_orientation(orientation) {
+                        win.layout();
+                        win.ui_dirty = true;
+                    }
+                }
+            }
+            M::ToggleSplitOrientation => {
+                if let Some(win) = self.windows.get_mut(&win_id) {
+                    if win.tabs.toggle_split_orientation().is_some() {
+                        win.layout();
+                        win.ui_dirty = true;
+                    }
+                }
+            }
+            M::SwitchSplitPane => {
+                if let Some(win) = self.windows.get_mut(&win_id) {
+                    if let Some(next) = win.tabs.switch_split_pane(now_secs()) {
+                        win.show_tab(next);
+                    }
+                }
+            }
+            M::ToggleWorkspacesSidebar => self.toggle_sidebar(win_id, "spaces"),
+            M::CreateWorkspace { name, color } => {
+                let ws_id = if let Some(win) = self.windows.get_mut(&win_id) {
+                    let color = if color.trim().is_empty() {
+                        next_workspace_color(win).to_string()
+                    } else {
+                        color
+                    };
+                    let name = if name.trim().is_empty() {
+                        format!("Workspace {}", win.tabs.workspaces().len() + 1)
+                    } else {
+                        name
+                    };
+                    Some(win.tabs.create_workspace(&name, &color))
+                } else {
+                    None
+                };
+                if let Some(ws_id) = ws_id {
+                    self.switch_workspace(win_id, ws_id);
+                }
+            }
+            M::SwitchWorkspace { id } => {
+                self.switch_workspace(win_id, id);
+            }
+            M::RenameWorkspace { id, name } => {
+                if let Some(win) = self.windows.get_mut(&win_id) {
+                    win.tabs.rename_workspace(id, &name);
+                    win.ui_dirty = true;
+                    win.sidebar_dirty = true;
+                }
+            }
+            M::SetWorkspaceColor { id, color } => {
+                if let Some(win) = self.windows.get_mut(&win_id) {
+                    win.tabs.set_workspace_color(id, &color);
+                    win.ui_dirty = true;
+                    win.sidebar_dirty = true;
+                }
+            }
+            M::ReorderWorkspace {
+                from_index,
+                to_index,
+            } => {
+                if let Some(win) = self.windows.get_mut(&win_id) {
+                    if win.tabs.reorder_workspace(from_index, to_index) {
+                        win.ui_dirty = true;
+                        win.sidebar_dirty = true;
+                    }
+                }
+            }
+            M::DeleteWorkspace { id } => {
+                self.delete_workspace(win_id, id);
+            }
+            M::MoveTabToWorkspace {
+                tab_id,
+                workspace_id,
+            } => {
+                self.move_tab_to_workspace(win_id, tab_id, workspace_id);
+            }
+            M::ToggleMuteTab { tab_id } => {
+                if let Some(win) = self.windows.get_mut(&win_id) {
+                    let next = win
+                        .tabs
+                        .get_tab_by_id(tab_id)
+                        .map(|t| !t.is_muted)
+                        .unwrap_or(false);
+                    if let Some(tab) = win.views.get(&tab_id) {
+                        webview::set_muted(&tab.view, next);
+                    }
+                    win.tabs.set_tab_muted(tab_id, next);
+                    win.ui_dirty = true;
+                    win.sidebar_dirty = true;
+                }
+            }
+            M::LinkDropped { url } => {
+                let Ok(url) = normalize_url(&url, self.settings.search_url_template()) else {
+                    return;
+                };
+                let in_split = self
+                    .windows
+                    .get(&win_id)
+                    .is_some_and(|w| w.tabs.visible_split().is_some());
+                if in_split {
+                    if let Some(target_pane) = from_tab {
+                        if let Some(win) = self.windows.get_mut(&win_id) {
+                            win.show_tab(target_pane);
+                        }
+                        self.navigate(win_id, &url);
+                    }
+                } else {
+                    let prev = self
+                        .windows
+                        .get(&win_id)
+                        .and_then(|w| w.tabs.active_tab_id());
+                    self.create_tab(win_id, Some(url));
+                    if let Some(prev) = prev {
+                        self.split_with(win_id, Some(prev));
+                    }
+                }
+            }
             M::RestoreSession => self.restore_session(win_id, event_loop),
             M::DismissSession => {
                 self.pending_session = None;
@@ -3617,6 +4148,7 @@ impl BrowserApp {
                 };
                 let id = tabs[index].id;
                 win.show_tab(id);
+                win.layout();
             }
             Command::ZoomIn => ipc(self, M::ZoomIn),
             Command::ZoomOut => ipc(self, M::ZoomOut),
@@ -3625,6 +4157,22 @@ impl BrowserApp {
             Command::Palette => ipc(self, M::OpenPalette),
             Command::ToggleFavourite => ipc(self, M::ToggleFavourite),
             Command::Reader => ipc(self, M::ToggleReader),
+            Command::ToggleSplit => ipc(self, M::ToggleSplit),
+            Command::ToggleSplitOrientation => ipc(self, M::ToggleSplitOrientation),
+            Command::SwitchSplitPane => ipc(self, M::SwitchSplitPane),
+            Command::Workspaces => ipc(self, M::ToggleWorkspacesSidebar),
+            Command::NewWorkspace => {
+                self.open_prompt(win_id, Prompt::NewWorkspace, "Name this workspace", "");
+            }
+            Command::SelectWorkspace(i) => {
+                let ws_id = self
+                    .windows
+                    .get(&win_id)
+                    .and_then(|w| w.tabs.workspaces().get(i).map(|ws| ws.id));
+                if let Some(ws_id) = ws_id {
+                    self.switch_workspace(win_id, ws_id);
+                }
+            }
         }
     }
 
@@ -3650,7 +4198,11 @@ impl BrowserApp {
                     tabs: win.tabs.tabs().to_vec(),
                     active_tab_id: win.tabs.active_tab_id(),
                     groups: win.tabs.groups().to_vec(),
-                    split: win.split,
+                    split: win.tabs.split_panes(),
+                    split_state: win.tabs.visible_split().cloned(),
+                    workspaces: win.tabs.workspaces().to_vec(),
+                    active_workspace_id: win.tabs.active_workspace_id(),
+                    inactive_tabs: win.tabs.inactive_tabs().to_vec(),
                 };
                 let title = match win.tabs.active_tab() {
                     Some(t) if !is_internal(&t.url) && !t.title.is_empty() => {
@@ -3664,9 +4216,11 @@ impl BrowserApp {
                 }
                 if let Ok(json) = serde_json::to_string(&msg) {
                     if json != win.last_ui_json {
-                        win.eval_chrome(&format!(
-                            "window.__shellUpdate && window.__shellUpdate({json})"
-                        ));
+                        let js = format!("window.__shellUpdate && window.__shellUpdate({json})");
+                        win.eval_chrome(&js);
+                        if win.sidebar_open {
+                            win.eval_sidebar(&js);
+                        }
                         win.last_ui_json = json;
                     }
                 }
@@ -3693,6 +4247,12 @@ impl BrowserApp {
                 if let Ok(json) = serde_json::to_string(&msg) {
                     win.eval_sidebar(&format!(
                         "window.__sidebarSync && window.__sidebarSync({json})"
+                    ));
+                }
+                if !win.last_ui_json.is_empty() {
+                    win.eval_sidebar(&format!(
+                        "window.__shellUpdate && window.__shellUpdate({})",
+                        win.last_ui_json
                     ));
                 }
             }
@@ -3814,6 +4374,7 @@ impl BrowserApp {
                 .tabs
                 .tabs()
                 .iter()
+                .chain(win.tabs.inactive_tabs().iter())
                 .map(|t| (t.id, t.url.clone()))
                 .collect();
             let active = win.tabs.active_tab_id();
@@ -3990,61 +4551,81 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) else {
                     return;
                 };
-                let Some(state) = win.tabs.tabs_mut().iter_mut().find(|t| t.id == tab_id) else {
-                    return;
-                };
                 let mut changed = false;
                 let mut moved: Option<(String, String)> = None;
                 if let Some(url) = url {
                     // Notice pages keep showing the address that failed.
                     if !url.starts_with("http://shoji.notice-") {
                         let url = display_url(&url);
-                        if state.url != url {
-                            if is_internal(&url) != is_internal(&state.url) {
-                                state.favicon_uri = None;
+                        if let Some(cur_url) = win.tabs.get_tab_by_id(tab_id).map(|t| t.url.clone())
+                        {
+                            if cur_url != url {
+                                if is_internal(&url) != is_internal(&cur_url) {
+                                    win.tabs.update_favicon(tab_id, None);
+                                }
+                                moved = Some((cur_url, url.to_string()));
+                                if let Some(tab) = win.views.get_mut(&tab_id) {
+                                    tab.tint = None;
+                                    tab.has_video = false;
+                                }
+                                win.reader.remove(&tab_id);
+                                win.tabs.update_url(tab_id, url.to_string());
+                                if !self.settings.privacy.ephemeral_default && !is_internal(&url) {
+                                    let cur_title = win
+                                        .tabs
+                                        .get_tab_by_id(tab_id)
+                                        .map(|t| t.title.clone())
+                                        .unwrap_or_default();
+                                    let now = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map_or(0, |d| d.as_millis() as u64);
+                                    self.history.record(&url, &cur_title, now);
+                                }
+                                if let Some(state) =
+                                    win.tabs.tabs_mut().iter_mut().find(|t| t.id == tab_id)
+                                {
+                                    if state.status == TabStatus::Crashed {
+                                        state.status = TabStatus::Active;
+                                    }
+                                }
+                                changed = true;
+                                win.sidebar_dirty = true;
                             }
-                            moved = Some((state.url.clone(), url.to_string()));
-                            if let Some(tab) = win.views.get_mut(&tab_id) {
-                                tab.tint = None;
-                                tab.has_video = false;
+                        }
+                    }
+                }
+                if let Some(title) = title {
+                    if let Some(cur) = win.tabs.get_tab_by_id(tab_id) {
+                        if cur.title != title {
+                            let cur_url = cur.url.clone();
+                            if !self.settings.privacy.ephemeral_default && !is_internal(&cur_url) {
+                                self.history.set_title(&cur_url, &title);
                             }
-                            win.reader.remove(&tab_id);
-                            state.url = url.into_owned();
-                            if !self.settings.privacy.ephemeral_default && !is_internal(&state.url)
-                            {
-                                let now = std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .map_or(0, |d| d.as_millis() as u64);
-                                self.history.record(&state.url, &state.title, now);
-                            }
-                            if state.status == TabStatus::Crashed {
-                                state.status = TabStatus::Active;
-                            }
+                            win.tabs.update_title(tab_id, title);
                             changed = true;
                             win.sidebar_dirty = true;
                         }
                     }
                 }
-                if let Some(title) = title {
-                    if state.title != title {
-                        if !self.settings.privacy.ephemeral_default && !is_internal(&state.url) {
-                            self.history.set_title(&state.url, &title);
-                        }
-                        state.title = title;
-                        changed = true;
-                    }
-                }
                 if let Some((back, fwd)) = history {
-                    if (state.can_go_back, state.can_go_forward) != (back, fwd) {
-                        state.can_go_back = back;
-                        state.can_go_forward = fwd;
+                    if win
+                        .tabs
+                        .get_tab_by_id(tab_id)
+                        .is_some_and(|t| (t.can_go_back, t.can_go_forward) != (back, fwd))
+                    {
+                        win.tabs.update_history_state(tab_id, back, fwd);
                         changed = true;
                     }
                 }
                 if let Some(icon) = favicon {
-                    if state.favicon_uri != icon {
-                        state.favicon_uri = icon;
+                    if win
+                        .tabs
+                        .get_tab_by_id(tab_id)
+                        .is_some_and(|t| t.favicon_uri != icon)
+                    {
+                        win.tabs.update_favicon(tab_id, icon);
                         changed = true;
+                        win.sidebar_dirty = true;
                     }
                 }
                 win.ui_dirty |= changed;
@@ -4063,6 +4644,28 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                             }
                         }
                     }
+                }
+            }
+            BrowserEvent::TabAudio {
+                tab_id,
+                playing,
+                muted,
+            } => {
+                if let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) {
+                    win.tabs.set_audio_playing(tab_id, playing);
+                    win.tabs.set_tab_muted(tab_id, muted);
+                    win.ui_dirty = true;
+                    win.sidebar_dirty = true;
+                }
+            }
+            BrowserEvent::TabFullscreen { tab_id, fullscreen } => {
+                if let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) {
+                    win.fullscreen_tab = fullscreen.then_some(tab_id);
+                    win.window.set_fullscreen(
+                        fullscreen.then_some(winit::window::Fullscreen::Borderless(None)),
+                    );
+                    win.layout();
+                    win.sync_frame();
                 }
             }
             BrowserEvent::NewTabFrom(tab_id, url) => {
@@ -4178,8 +4781,7 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
             }
             BrowserEvent::TabFocused(tab_id) => {
                 if let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) {
-                    let in_split = win.split.is_some_and(|p| p.contains(&tab_id));
-                    if in_split && win.tabs.active_tab_id() != Some(tab_id) {
+                    if win.tabs.is_in_split(tab_id) && win.tabs.active_tab_id() != Some(tab_id) {
                         win.show_tab(tab_id);
                     }
                 }
@@ -4290,13 +4892,14 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
             }
             BrowserEvent::TabSuspended(tab_id) => {
                 if let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) {
-                    if win.tabs.active_tab_id() != Some(tab_id) {
+                    if !win.tabs.is_tab_visible(tab_id) {
                         if let Some(tab) = win.views.get_mut(&tab_id) {
                             tab.suspended = true;
                             tab.hidden_since = None;
                         }
                         win.tabs.set_tab_suspended(tab_id, true);
                         win.ui_dirty = true;
+                        win.sidebar_dirty = true;
                     }
                 }
             }
@@ -4320,6 +4923,18 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                     win.sync_frame();
                 }
             }
+            WindowEvent::ScaleFactorChanged { .. } => {
+                if let Some(win) = self.windows.get_mut(&window_id) {
+                    let logical = win
+                        .window
+                        .inner_size()
+                        .to_logical::<f64>(win.window.scale_factor());
+                    win.width = logical.width;
+                    win.height = logical.height;
+                    win.layout();
+                    win.sync_frame();
+                }
+            }
             WindowEvent::ThemeChanged(theme) => {
                 if self.settings.appearance.theme == "system" {
                     if let Some(win) = self.windows.get(&window_id) {
@@ -4330,8 +4945,73 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
             WindowEvent::Focused(focused) => {
                 if let Some(win) = self.windows.get_mut(&window_id) {
                     win.sync_frame();
-                    if let (true, Some(tab)) = (focused, win.active()) {
-                        webview::wake(&tab.view);
+                    if focused {
+                        if let Some([a, b]) = win.tabs.split_panes() {
+                            for id in [a, b] {
+                                if let Some(tab) = win.views.get(&id) {
+                                    webview::wake(&tab.view);
+                                }
+                            }
+                        } else if let Some(tab) = win.active() {
+                            webview::wake(&tab.view);
+                        }
+                    }
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                if let Some(win) = self.windows.get_mut(&window_id) {
+                    let logical = position.to_logical::<f64>(win.window.scale_factor());
+                    win.cursor_pos = (logical.x, logical.y);
+                    if win.divider_dragging {
+                        let area = win.content_tuple();
+                        if let Some(ratio) = win
+                            .tabs
+                            .visible_split()
+                            .map(|s| s.ratio_from_cursor(area, logical.x, logical.y, SPLIT_GAP))
+                        {
+                            if win.tabs.set_split_ratio(ratio) {
+                                win.layout();
+                                win.ui_dirty = true;
+                            }
+                        }
+                    } else {
+                        let icon = match win.divider_hit(logical.x, logical.y) {
+                            Some(SplitOrientation::Vertical) => winit::window::CursorIcon::EwResize,
+                            Some(SplitOrientation::Horizontal) => {
+                                winit::window::CursorIcon::NsResize
+                            }
+                            None => winit::window::CursorIcon::Default,
+                        };
+                        win.window.set_cursor(icon);
+                    }
+                }
+            }
+            WindowEvent::MouseInput {
+                state,
+                button: winit::event::MouseButton::Left,
+                ..
+            } => {
+                if let Some(win) = self.windows.get_mut(&window_id) {
+                    if state.is_pressed() {
+                        let (x, y) = win.cursor_pos;
+                        if win.divider_hit(x, y).is_some() {
+                            if win
+                                .last_divider_click
+                                .is_some_and(|t| t.elapsed() < Duration::from_millis(350))
+                            {
+                                win.last_divider_click = None;
+                                win.divider_dragging = false;
+                                if win.tabs.reset_split_ratio() {
+                                    win.layout();
+                                    win.ui_dirty = true;
+                                }
+                            } else {
+                                win.last_divider_click = Some(Instant::now());
+                                win.divider_dragging = true;
+                            }
+                        }
+                    } else {
+                        win.divider_dragging = false;
                     }
                 }
             }

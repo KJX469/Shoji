@@ -772,10 +772,11 @@ impl TabManager {
                 self.switch_tab(restored_id, current_time_secs);
                 if let Some(panes) = self.split_panes() {
                     for tab in &mut self.tabs {
-                        if panes.contains(&tab.id) && tab.id != restored_id {
-                            if tab.status != TabStatus::Crashed {
-                                tab.status = TabStatus::Inactive;
-                            }
+                        if panes.contains(&tab.id)
+                            && tab.id != restored_id
+                            && tab.status != TabStatus::Crashed
+                        {
+                            tab.status = TabStatus::Inactive;
                         }
                     }
                 }
@@ -1542,15 +1543,9 @@ impl TabManager {
             });
 
             if sw.id == active_ws_id {
-                let split_panes = split
-                    .as_ref()
-                    .filter(|s| ws_active_id.is_some_and(|a| s.panes.contains(&a)))
-                    .map(|s| s.panes);
                 for tab in &mut ws_tabs {
                     if Some(tab.id) == ws_active_id {
                         tab.status = TabStatus::Active;
-                    } else if split_panes.is_some_and(|p| p.contains(&tab.id)) {
-                        tab.status = TabStatus::Inactive;
                     } else {
                         tab.status = TabStatus::Inactive;
                     }
