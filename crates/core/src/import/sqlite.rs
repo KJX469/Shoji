@@ -273,6 +273,42 @@ fn now_secs() -> i64 {
         .map_or(0, |d| d.as_secs() as i64)
 }
 
+/// Chromium saved logins. Returns the readable ones and how many could not be decrypted.
+pub fn chromium_logins(
+    path: &Path,
+    decryptor: &dyn Decryptor,
+) -> Result<(Vec<crate::vault::Draft>, usize), ImportError> {
+    let db = open(path)?;
+    let mut stmt = db
+        .conn()
+        .prepare(
+            "SELECT origin_url, username_value, password_value FROM logins \
+             WHERE blacklisted_by_user = 0 AND password_value IS NOT NULL",
+        )
+        .map_err(other)?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Vec<u8>>(2)?))
+        })
+        .map_err(other)?;
+    let (mut out, mut skipped) = (Vec::new(), 0);
+    for (url, username, blob) in rows.flatten() {
+        if !web(&url) {
+            continue;
+        }
+        match decryptor.decrypt(&blob) {
+            Some(p) if !p.is_empty() => out.push(crate::vault::Draft {
+                url,
+                username,
+                password: String::from_utf8_lossy(&p).into_owned(),
+                ..Default::default()
+            }),
+            _ => skipped += 1,
+        }
+    }
+    Ok((out, skipped))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -351,6 +387,25 @@ mod tests {
         assert_eq!(got[0].same_site, "lax");
         assert!(got[0].secure && got[0].http_only);
         assert_eq!(got[1].expires, None);
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn chromium_logins_decrypt() {
+        let p = temp("logins");
+        let c = Connection::open(&p).unwrap();
+        c.execute_batch(
+            "CREATE TABLE logins(origin_url TEXT, username_value TEXT, password_value BLOB, blacklisted_by_user INTEGER);",
+        )
+        .unwrap();
+        c.execute("INSERT INTO logins VALUES ('https://a.com/','me',?1,0)", [enc("hunter2")]).unwrap();
+        c.execute("INSERT INTO logins VALUES ('https://b.com/','you',?1,0)", [b"v20zzz".to_vec()]).unwrap();
+        c.execute("INSERT INTO logins VALUES ('https://c.com/','never',?1,1)", [enc("x")]).unwrap();
+        c.execute("INSERT INTO logins VALUES ('android://x@com.app','a',?1,0)", [enc("y")]).unwrap();
+        drop(c);
+        let (got, skipped) = chromium_logins(&p, &Xor).unwrap();
+        assert_eq!((got.len(), skipped), (1, 1));
+        assert_eq!((got[0].password.as_str(), got[0].username.as_str()), ("hunter2", "me"));
         let _ = std::fs::remove_file(&p);
     }
 

@@ -19,6 +19,7 @@ pub struct Kinds {
     pub favourites: bool,
     pub history: bool,
     pub cookies: bool,
+    pub passwords: bool,
 }
 
 impl Default for Kinds {
@@ -27,6 +28,7 @@ impl Default for Kinds {
             favourites: true,
             history: true,
             cookies: true,
+            passwords: true,
         }
     }
 }
@@ -90,6 +92,7 @@ pub struct Report {
     pub favourites: usize,
     pub history: usize,
     pub cookies: usize,
+    pub passwords: usize,
     /// Things that could not be brought over, as short sentences for the user
     pub notes: Vec<String>,
     /// The source browser must be closed for some data to be read
@@ -101,6 +104,8 @@ pub struct Imported {
     pub favourites: Vec<Favourite>,
     pub history: Vec<HistoryEntry>,
     pub cookies: Vec<Cookie>,
+    /// Saved logins, ready for the password manager
+    pub logins: Vec<crate::vault::Draft>,
     pub report: Report,
 }
 
@@ -138,11 +143,12 @@ pub fn read_profile(
                     Err(e) => note(&mut out, "History", e),
                 }
             }
-            let have_key = kinds.cookies && decryptor.load_key(&profile.local_state);
-            if kinds.cookies && !have_key {
+            let need_key = kinds.cookies || kinds.passwords;
+            let have_key = need_key && decryptor.load_key(&profile.local_state);
+            if need_key && !have_key {
                 out.report
                     .notes
-                    .push(format!("Sign-ins in {name} are protected and can't be read"));
+                    .push(format!("Sign-ins and passwords in {name} are protected and can't be read"));
             }
             if kinds.cookies && have_key {
                 progress("Reading sign-ins");
@@ -164,6 +170,20 @@ pub fn read_profile(
                     None => {}
                 }
             }
+            if kinds.passwords && have_key {
+                progress("Reading passwords");
+                match sqlite::chromium_logins(&dir.join("Login Data"), decryptor) {
+                    Ok((l, skipped)) => {
+                        out.logins = l;
+                        if skipped > 0 {
+                            out.report.notes.push(format!(
+                                "{skipped} passwords are locked to {name} and can't be moved"
+                            ));
+                        }
+                    }
+                    Err(e) => note(&mut out, "Passwords", e),
+                }
+            }
         }
         Family::Firefox => {
             let dir = &profile.dir;
@@ -180,6 +200,11 @@ pub fn read_profile(
                     Ok(h) => out.history = h,
                     Err(e) => note(&mut out, "History", e),
                 }
+            }
+            if kinds.passwords && dir.join("logins.json").exists() {
+                out.report.notes.push(format!(
+                    "{name} keeps passwords in a format Shoji can't open. Export them from {name} (Passwords → Export) and use Import in Shoji's password manager"
+                ));
             }
             if kinds.cookies {
                 progress("Reading sign-ins");
@@ -208,6 +233,7 @@ pub fn read_profile(
     out.report.favourites = out.favourites.len();
     out.report.history = out.history.len();
     out.report.cookies = out.cookies.len();
+    out.report.passwords = out.logins.len();
     out
 }
 
