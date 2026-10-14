@@ -271,6 +271,56 @@ impl History {
         self.flush();
     }
 
+    /// One page of the history list, most recently visited first, filtered by `query` (every
+    /// word must appear in the title or address). Returns the page and how many entries match.
+    pub fn page(&self, query: &str, offset: usize, limit: usize) -> (Vec<&HistoryEntry>, usize) {
+        let words: Vec<String> = query
+            .to_lowercase()
+            .split_whitespace()
+            .map(String::from)
+            .collect();
+        let mut hits: Vec<&HistoryEntry> = self
+            .items
+            .iter()
+            .filter(|e| {
+                words.is_empty() || {
+                    let hay = format!("{} {}", e.title, e.url).to_lowercase();
+                    words.iter().all(|w| hay.contains(w))
+                }
+            })
+            .collect();
+        hits.sort_by_key(|e| std::cmp::Reverse(e.last_visit));
+        let total = hits.len();
+        let page = hits.into_iter().skip(offset).take(limit).collect();
+        (page, total)
+    }
+
+    /// Forget these pages. Returns how many were removed.
+    pub fn remove(&mut self, urls: &[String]) -> usize {
+        let before = self.items.len();
+        let gone: std::collections::HashSet<&str> = urls.iter().map(String::as_str).collect();
+        self.items.retain(|e| !gone.contains(e.url.as_str()));
+        let removed = before - self.items.len();
+        if removed > 0 {
+            self.dirty = true;
+            self.flush();
+        }
+        removed
+    }
+
+    /// Forget everything visited at or after `since_ms` (Unix milliseconds). Returns how many
+    /// were removed.
+    pub fn clear_since(&mut self, since_ms: u64) -> usize {
+        let before = self.items.len();
+        self.items.retain(|e| e.last_visit < since_ms);
+        let removed = before - self.items.len();
+        if removed > 0 {
+            self.dirty = true;
+            self.flush();
+        }
+        removed
+    }
+
     /// Write to disk if anything changed, keeping the newest [`MAX_HISTORY`].
     pub fn flush(&mut self) {
         if !self.dirty {
@@ -278,12 +328,172 @@ impl History {
         }
         self.dirty = false;
         if self.items.len() > MAX_HISTORY {
-            self.items.sort_by(|a, b| b.last_visit.cmp(&a.last_visit));
+            self.items.sort_by_key(|e| std::cmp::Reverse(e.last_visit));
             self.items.truncate(MAX_HISTORY);
         }
         if let Ok(json) = serde_json::to_string(&self.items) {
             let _ = write_atomic(&self.path, &json);
         }
+    }
+}
+
+/* ------------------------------------------------------------- downloads */
+
+/// One file the user downloaded.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DownloadEntry {
+    /// Stable id for the list (not the engine's per-session download id)
+    pub key: u64,
+    pub name: String,
+    /// Full path the file was saved to
+    pub path: String,
+    pub bytes: u64,
+    /// "downloading", "done" or "stopped"
+    pub state: String,
+    /// Unix milliseconds the download began
+    pub started: u64,
+    /// The host the file came from, when known
+    #[serde(default)]
+    pub source: String,
+}
+
+/// Cap on how many downloads are remembered.
+pub const MAX_DOWNLOADS: usize = 500;
+
+/// The list of downloads, newest first, kept across restarts.
+#[derive(Debug, Default)]
+pub struct DownloadLog {
+    path: PathBuf,
+    items: Vec<DownloadEntry>,
+    dirty: bool,
+}
+
+impl DownloadLog {
+    pub fn load(path: PathBuf) -> Self {
+        let mut items: Vec<DownloadEntry> = read_json(&path);
+        let mut dirty = false;
+        // A download still marked running was cut off by a crash or quit.
+        for e in &mut items {
+            if e.state == "downloading" {
+                e.state = "stopped".into();
+                dirty = true;
+            }
+        }
+        Self { path, items, dirty }
+    }
+
+    pub fn items(&self) -> &[DownloadEntry] {
+        &self.items
+    }
+
+    pub fn get(&self, key: u64) -> Option<&DownloadEntry> {
+        self.items.iter().find(|e| e.key == key)
+    }
+
+    /// Note a download that has just begun; returns its key.
+    pub fn start(&mut self, name: &str, path: &str, source: &str, now_ms: u64) -> u64 {
+        let key = self.items.iter().map(|e| e.key).max().unwrap_or(0) + 1;
+        self.items.insert(
+            0,
+            DownloadEntry {
+                key,
+                name: name.chars().take(200).collect(),
+                path: path.to_string(),
+                bytes: 0,
+                state: "downloading".into(),
+                started: now_ms,
+                source: source.chars().take(120).collect(),
+            },
+        );
+        self.items.truncate(MAX_DOWNLOADS);
+        self.dirty = true;
+        key
+    }
+
+    /// Record how a download ended ("done" or "stopped") and its final size.
+    pub fn finish(&mut self, key: u64, state: &str, bytes: u64) {
+        if let Some(e) = self.items.iter_mut().find(|e| e.key == key) {
+            e.state = state.to_string();
+            if bytes > 0 {
+                e.bytes = bytes;
+            }
+            self.dirty = true;
+        }
+    }
+
+    /// Take a download off the list (the file itself is untouched).
+    pub fn remove(&mut self, key: u64) -> bool {
+        let before = self.items.len();
+        self.items.retain(|e| e.key != key);
+        self.dirty |= self.items.len() != before;
+        self.items.len() != before
+    }
+
+    /// Forget downloads begun at or after `since_ms`.
+    pub fn clear_since(&mut self, since_ms: u64) {
+        let before = self.items.len();
+        self.items.retain(|e| e.started < since_ms);
+        self.dirty |= self.items.len() != before;
+    }
+
+    pub fn flush(&mut self) {
+        if !self.dirty {
+            return;
+        }
+        self.dirty = false;
+        if let Ok(json) = serde_json::to_string(&self.items) {
+            let _ = write_atomic(&self.path, &json);
+        }
+    }
+}
+
+/* ---------------------------------------------------------------- cranes */
+
+/// How many paper cranes have been folded. Each closed tab and each saved file folds one;
+/// a thousand (senbazuru) is a wish. Purely a keepsake: it counts, it never reports.
+#[derive(Debug, Default)]
+pub struct Cranes {
+    path: PathBuf,
+    count: u32,
+    dirty: bool,
+}
+
+/// Cranes in a full string-of-strings: 25 strings of 40.
+pub const THOUSAND: u32 = 1000;
+
+impl Cranes {
+    pub fn load(path: PathBuf) -> Self {
+        #[derive(Deserialize, Default)]
+        struct File {
+            cranes: u32,
+        }
+        let f: File = read_json(&path);
+        Self {
+            path,
+            count: f.cranes,
+            dirty: false,
+        }
+    }
+
+    pub fn count(&self) -> u32 {
+        self.count
+    }
+
+    /// Fold `n` more. Returns true when this crossed a thousand.
+    pub fn fold(&mut self, n: u32) -> bool {
+        let before = self.count;
+        self.count = self.count.saturating_add(n);
+        self.dirty = true;
+        before / THOUSAND != self.count / THOUSAND
+    }
+
+    pub fn flush(&mut self) {
+        if !self.dirty {
+            return;
+        }
+        self.dirty = false;
+        let json = format!("{{\"cranes\":{}}}", self.count);
+        let _ = write_atomic(&self.path, &json);
     }
 }
 
@@ -439,6 +649,65 @@ impl Session {
     }
 }
 
+#[cfg(test)]
+mod crane_tests {
+    use super::*;
+
+    #[test]
+    fn counts_persists_and_notices_a_thousand() {
+        let p = std::env::temp_dir().join(format!("shoji_cranes_{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        let mut c = Cranes::load(p.clone());
+        assert_eq!(c.count(), 0);
+        assert!(!c.fold(998));
+        assert!(!c.fold(1));
+        assert!(c.fold(1), "the thousandth crane is noticed once");
+        assert!(!c.fold(1));
+        c.flush();
+        assert_eq!(Cranes::load(p.clone()).count(), 1001);
+        let _ = std::fs::remove_file(&p);
+    }
+}
+
+#[cfg(test)]
+mod download_tests {
+    use super::*;
+
+    fn path(n: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("shoji_dl_{}_{n}.json", std::process::id()))
+    }
+
+    #[test]
+    fn logs_finishes_and_recovers() {
+        let p = path("a");
+        let _ = std::fs::remove_file(&p);
+        let mut log = DownloadLog::load(p.clone());
+        let a = log.start("a.zip", "C:\\d\\a.zip", "example.com", 10);
+        let b = log.start("b.pdf", "C:\\d\\b.pdf", "", 20);
+        assert_ne!(a, b);
+        assert_eq!(log.items()[0].key, b, "newest first");
+        log.finish(a, "done", 4096);
+        log.flush();
+        let again = DownloadLog::load(p.clone());
+        assert_eq!(
+            again.get(a).map(|e| (e.state.as_str(), e.bytes)),
+            Some(("done", 4096))
+        );
+        assert_eq!(again.get(b).map(|e| e.state.as_str()), Some("stopped"));
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn removes_and_clears_by_time() {
+        let mut log = DownloadLog::load(path("b"));
+        let old = log.start("old", "p", "", 100);
+        let new = log.start("new", "p", "", 900);
+        log.clear_since(500);
+        assert!(log.get(new).is_none() && log.get(old).is_some());
+        assert!(log.remove(old) && !log.remove(old));
+    }
+}
+
 fn read_json_or<T: for<'de> Deserialize<'de>>(path: &Path, default: impl FnOnce() -> T) -> T {
     std::fs::read_to_string(path)
         .ok()
@@ -449,6 +718,26 @@ fn read_json_or<T: for<'de> Deserialize<'de>>(path: &Path, default: impl FnOnce(
 #[cfg(test)]
 mod history_tests {
     use super::*;
+
+    #[test]
+    fn pages_removes_and_clears_by_time() {
+        let mut h = History::load(std::env::temp_dir().join("shoji_hist_pages_unused.json"));
+        for (i, u) in ["https://a.test/", "https://b.test/", "https://c.test/"]
+            .iter()
+            .enumerate()
+        {
+            h.record(u, &format!("Page {i}"), 100 * (i as u64 + 1));
+        }
+        let (page, total) = h.page("", 0, 2);
+        assert_eq!(total, 3);
+        assert_eq!(page[0].url, "https://c.test/");
+        assert_eq!(page.len(), 2);
+        assert_eq!(h.page("page 1", 0, 10).1, 1);
+        assert_eq!(h.clear_since(200), 2);
+        assert_eq!(h.len(), 1);
+        assert_eq!(h.remove(&["https://a.test/".to_string()]), 1);
+        assert!(h.is_empty());
+    }
 
     fn path(n: &str) -> PathBuf {
         std::env::temp_dir().join(format!("shoji_hist_{}_{n}.json", std::process::id()))

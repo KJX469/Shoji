@@ -36,8 +36,32 @@ use winit::window::{Window, WindowId};
 use wry::{Rect, WebView, WebViewBuilder, WebViewBuilderExtWindows, WebViewExtWindows};
 
 const CHROME_HEIGHT: f64 = 76.0;
-const TRAY_HEIGHT: f64 = 38.0;
+/// Width of the side panel while it is pinned open
 const SIDEBAR_WIDTH: f64 = 320.0;
+/// Corner radius of the floating dropdowns, and how long they take to fold away
+const POP_RADIUS: f64 = 14.0;
+const POP_CLOSE_MS: u64 = 140;
+
+/// Width of the dropdown for each side-panel mode.
+fn pop_width(mode: &str) -> f64 {
+    match mode {
+        "menu" => 292.0,
+        "downloads" => 372.0,
+        "dark" => 348.0,
+        _ => 340.0,
+    }
+}
+
+/// The toolbar button a dropdown hangs from (a key of the chrome strip's anchor report).
+fn pop_anchor(mode: &str) -> &'static str {
+    match mode {
+        "security" => "lock",
+        "shield" => "shield",
+        "downloads" => "downloads",
+        "dark" => "dark",
+        _ => "menu",
+    }
+}
 /// Gap between the two panes of split view
 const SPLIT_GAP: f64 = 4.0;
 /// Floating notepad, anchored to the top-right of the page area
@@ -147,11 +171,26 @@ pub(crate) enum BrowserEvent {
     DownloadProgress {
         download_id: u64,
         filename: String,
+        /// Full path the file is being saved to
+        path: String,
+        /// Host the file came from (may be empty)
+        source: String,
         received_bytes: i64,
         total_bytes: i64,
         state: &'static str,
     },
     TabSuspended(TabId),
+    /// A page could not be found (`offline` false) or the network is down (`offline` true)
+    Unreachable {
+        tab_id: TabId,
+        uri: String,
+        offline: bool,
+    },
+    /// A tab started or finished loading a page
+    TabLoading {
+        tab_id: TabId,
+        loading: bool,
+    },
     /// Byobu blocked something for this tab (or its lists changed: tab 0)
     ShieldTouched(TabId),
     /// The element picker produced a rule for `host`
@@ -186,6 +225,8 @@ struct PageContext {
     restore_tabs: usize,
     /// Number of remembered per-site choices (shown in Settings)
     site_choices: usize,
+    /// Paper cranes folded so far, for the wish page
+    cranes: u32,
 }
 
 type SharedPages = Arc<RwLock<PageContext>>;
@@ -203,6 +244,11 @@ fn internal_page(ctx: &PageContext, page: &str) -> Option<String> {
         ),
         "welcome" => pages::welcome(s),
         "passwords" => pages::passwords(s),
+        "history" => pages::history(s, "history"),
+        "downloads" => pages::history(s, "downloads"),
+        "wish" => pages::fun(s, "wish", ctx.cranes),
+        "tea" => pages::fun(s, "tea", ctx.cranes),
+        "koan" => pages::fun(s, "koan", ctx.cranes),
         "byobu" => pages::byobu(s),
         "settings" => pages::settings(s, &ctx.engine_version, &ctx.data_dir, ctx.site_choices),
         _ => {
@@ -424,9 +470,23 @@ struct BrowserWindow {
     tabs: TabManager,
     views: HashMap<TabId, Tab>,
     chrome: Option<WebView>,
+    /// The dropdown behind the toolbar's menu, site, shield, downloads and dark buttons. It
+    /// floats over the page; only when pinned (`sidebar_docked`) does it take page width.
     sidebar: Option<WebView>,
     sidebar_open: bool,
     sidebar_mode: &'static str,
+    sidebar_docked: bool,
+    /// Natural height of the dropdown's content, reported by its page
+    pop_height: f64,
+    /// When the closing animation ends and the dropdown can be hidden
+    pop_hide_at: Option<Instant>,
+    /// When the dropdown was last opened (focus settling just after it is not a click away)
+    pop_opened: Option<Instant>,
+    /// When (and which) dropdown a click elsewhere just closed, so the button that opened it
+    /// does not reopen it in the same click
+    pop_blurred: Option<(Instant, &'static str)>,
+    /// Horizontal centre of each toolbar button, reported by the chrome strip
+    anchors: HashMap<String, f64>,
     notes: Option<WebView>,
     notes_open: bool,
     notes_expanded: bool,
@@ -438,7 +498,15 @@ struct BrowserWindow {
     width: f64,
     height: f64,
     find_open: bool,
+    /// The last address recorded in history for each tab, so a visit counts once
+    recorded: HashMap<TabId, String>,
+    /// The text last searched for, for F3 / Ctrl+G
+    find_query: String,
+    /// The window is full screen with the toolbar hidden
+    fullscreen: bool,
     permission_open: bool,
+    /// Frames of the floating find and permission cards (None while closed)
+    tray_rects: [Option<Frame>; 3],
     /// Tab strip needs a sync at the end of this event-loop turn
     ui_dirty: bool,
     sidebar_dirty: bool,
@@ -467,19 +535,53 @@ struct BrowserWindow {
 }
 
 impl BrowserWindow {
+    /// Height of the title bar and toolbar. The find and permission cards float over the page,
+    /// so this never changes and the page is never resized by them.
     fn chrome_height(&self) -> f64 {
-        let trays = self.find_open as u8 + self.permission_open as u8;
-        CHROME_HEIGHT + TRAY_HEIGHT * trays as f64
+        if self.fullscreen {
+            0.0
+        } else {
+            CHROME_HEIGHT
+        }
+    }
+
+    /// Width the page gives up to a pinned side panel (floating dropdowns take none).
+    fn docked_width(&self) -> f64 {
+        if self.sidebar_open && self.sidebar_docked {
+            SIDEBAR_WIDTH
+        } else {
+            0.0
+        }
     }
 
     fn content_bounds(&self) -> Rect {
         let top = self.chrome_height();
-        let width = if self.sidebar_open {
-            self.width - SIDEBAR_WIDTH
+        bounds(
+            0.0,
+            top,
+            self.width - self.docked_width(),
+            self.height - top,
+        )
+    }
+
+    /// Where the floating dropdown sits: under its toolbar button, right edge kept inside.
+    fn popover_frame(&self) -> Frame {
+        let w = pop_width(self.sidebar_mode).min((self.width - 16.0).max(200.0));
+        let top = CHROME_HEIGHT + 2.0;
+        let max_h = (self.height - top - 12.0).max(120.0);
+        let h = if self.pop_height > 0.0 {
+            self.pop_height
         } else {
-            self.width
-        };
-        bounds(0.0, top, width, self.height - top)
+            260.0
+        }
+        .clamp(72.0, max_h);
+        let cx = self
+            .anchors
+            .get(pop_anchor(self.sidebar_mode))
+            .copied()
+            .unwrap_or(self.width - 40.0);
+        let x = (cx - w / 2.0).clamp(8.0, (self.width - w - 8.0).max(8.0));
+        [x, top, w, h]
     }
 
     /// Whether the active tab is one of the two split-view panes.
@@ -491,11 +593,7 @@ impl BrowserWindow {
     /// Where tab `id` sits: the whole page area, or its half in split view.
     fn rect_for(&self, id: TabId) -> Rect {
         let top = self.chrome_height();
-        let width = if self.sidebar_open {
-            self.width - SIDEBAR_WIDTH
-        } else {
-            self.width
-        };
+        let width = self.width - self.docked_width();
         let height = self.height - top;
         match self.split_showing() {
             Some([a, b]) if id == a || id == b => {
@@ -518,7 +616,30 @@ impl BrowserWindow {
     fn layout(&mut self) {
         let top = self.chrome_height();
         if let Some(chrome) = &self.chrome {
-            let _ = chrome.set_bounds(bounds(0.0, 0.0, self.width, top));
+            let cards: Vec<Frame> = self.tray_rects.iter().flatten().copied().collect();
+            if cards.is_empty() {
+                let _ = chrome.set_bounds(bounds(0.0, 0.0, self.width, top));
+                webview::clear_region(chrome);
+            } else {
+                // The strip grows to cover the cards but is clipped to the bar and the cards, so
+                // the page underneath still shows and takes clicks everywhere else.
+                let scale = self.window.scale_factor();
+                let reach = cards.iter().map(|c| c[1] + c[3]).fold(top, f64::max) + 8.0;
+                let _ = chrome.set_bounds(bounds(0.0, 0.0, self.width, reach));
+                let px = |v: f64| (v * scale).round() as i32;
+                let mut rects = vec![(0, 0, px(self.width), px(top), 0)];
+                rects.extend(cards.iter().map(|c| {
+                    (
+                        px(c[0]),
+                        px(c[1]),
+                        px(c[0] + c[2]),
+                        px(c[1] + c[3]),
+                        px(12.0),
+                    )
+                }));
+                webview::set_union_region(chrome, &rects);
+                webview::bring_to_top(chrome);
+            }
         }
         let visible: Vec<TabId> = match self.split_showing() {
             Some(pair) => pair.to_vec(),
@@ -530,12 +651,26 @@ impl BrowserWindow {
             }
         }
         if let (true, Some(sidebar)) = (self.sidebar_open, &self.sidebar) {
-            let _ = sidebar.set_bounds(bounds(
-                self.width - SIDEBAR_WIDTH,
-                top,
-                SIDEBAR_WIDTH,
-                self.height - top,
-            ));
+            if self.sidebar_docked {
+                let _ = sidebar.set_bounds(bounds(
+                    self.width - SIDEBAR_WIDTH,
+                    top,
+                    SIDEBAR_WIDTH,
+                    self.height - top,
+                ));
+                webview::clear_region(sidebar);
+            } else {
+                let f = self.popover_frame();
+                let _ = sidebar.set_bounds(frame_rect(f));
+                let scale = self.window.scale_factor();
+                webview::set_round_region(
+                    sidebar,
+                    (f[2] * scale).round() as i32,
+                    (f[3] * scale).round() as i32,
+                    (POP_RADIUS * scale).round() as i32,
+                );
+                webview::bring_to_top(sidebar);
+            }
         }
         if let (true, Some(n)) = (self.notes_open, &self.notes) {
             let sheet = self.notes_sheet();
@@ -554,11 +689,7 @@ impl BrowserWindow {
     /// top-right corner of the page area.
     fn notes_desk(&self) -> Frame {
         let top = self.chrome_height() + NOTES_MARGIN;
-        let sidebar = if self.sidebar_open {
-            SIDEBAR_WIDTH
-        } else {
-            0.0
-        };
+        let sidebar = self.docked_width();
         let right = self.width - sidebar - NOTES_MARGIN;
         let width = NOTES_EXPANDED_MAX_WIDTH.min(right - NOTES_MARGIN).max(1.0);
         [
@@ -631,12 +762,33 @@ impl BrowserWindow {
 
     /// Floating panels stay above the page views (which are re-stacked as tabs are created).
     fn raise_overlays(&self) {
+        if let (true, Some(chrome)) = (self.tray_rects.iter().any(Option::is_some), &self.chrome) {
+            webview::bring_to_top(chrome);
+        }
         if let (true, Some(notes)) = (self.notes_open, &self.notes) {
             webview::bring_to_top(notes);
+        }
+        if let (true, Some(sidebar)) = (self.sidebar_open, &self.sidebar) {
+            webview::bring_to_top(sidebar);
         }
         if let (true, Some(overlay)) = (self.overlay_open, &self.overlay) {
             webview::bring_to_top(overlay);
         }
+    }
+
+    /// Hide the dropdown once its closing animation has played. Returns the time it is next due.
+    fn step_popover(&mut self) -> Option<Instant> {
+        let due = self.pop_hide_at?;
+        if Instant::now() < due {
+            return Some(due);
+        }
+        self.pop_hide_at = None;
+        if !self.sidebar_open {
+            if let Some(s) = &self.sidebar {
+                let _ = s.set_visible(false);
+            }
+        }
+        None
     }
 
     /// Tell the title bar whether the window is maximized / focused (only when it changed).
@@ -779,6 +931,20 @@ struct BrowserApp {
     shield: shoji_byobu::Shield,
     favourites: shoji_core::userdata::Favourites,
     history: shoji_core::userdata::History,
+    /// Files downloaded, newest first
+    downloads: shoji_core::userdata::DownloadLog,
+    /// Paper cranes folded so far (one per closed tab and per saved file)
+    cranes: shoji_core::userdata::Cranes,
+    /// Reload presses in quick succession, for the crane's remark
+    reloads: Vec<Instant>,
+    /// Told the user about their pile of tabs this session
+    hoarding_told: bool,
+    /// Engine download id -> key in `downloads` while it is running
+    dl_keys: HashMap<u64, u64>,
+    /// The history page should open with its clear-data card showing
+    clear_pending: bool,
+    /// When the history and download lists were last written to disk
+    stores_flushed: Instant,
     vault: shoji_core::vault::Vault,
     /// A login the user just submitted on a page, waiting for their answer to "save it?"
     pending_login: Option<PendingLogin>,
@@ -819,6 +985,8 @@ impl BrowserApp {
         let favourites = shoji_core::userdata::Favourites::load(data_dir.join("favourites.json"));
         let site_data = shoji_core::userdata::SiteData::load(data_dir.join("sitedata.json"));
         let history = shoji_core::userdata::History::load(data_dir.join("history.json"));
+        let downloads = shoji_core::userdata::DownloadLog::load(data_dir.join("downloads.json"));
+        let cranes = shoji_core::userdata::Cranes::load(data_dir.join("cranes.json"));
         let vault = shoji_core::vault::Vault::load(data_dir.join("vault.json"));
 
         // Tabs from the last run. Private mode keeps none; otherwise a crash or force-close
@@ -860,6 +1028,7 @@ impl BrowserApp {
             recent: Vec::new(),
             restore_tabs,
             site_choices: site_data.count(),
+            cranes: cranes.count(),
         }));
         let shield = shoji_byobu::Shield::new();
         shield::init(proxy.clone());
@@ -881,6 +1050,13 @@ impl BrowserApp {
             notebook: shoji_core::notes::Notebook::load(data_dir.join("notes.json")),
             favourites,
             history,
+            downloads,
+            cranes,
+            reloads: Vec::new(),
+            hoarding_told: false,
+            dl_keys: HashMap::new(),
+            clear_pending: false,
+            stores_flushed: Instant::now(),
             vault,
             pending_login: None,
             pending_cookies: Mutex::new(Vec::new()),
@@ -965,6 +1141,12 @@ impl BrowserApp {
                 sidebar: None,
                 sidebar_open: false,
                 sidebar_mode: "menu",
+                sidebar_docked: false,
+                pop_height: 0.0,
+                pop_hide_at: None,
+                pop_opened: None,
+                pop_blurred: None,
+                anchors: HashMap::new(),
                 notes: None,
                 notes_open: false,
                 notes_expanded: false,
@@ -974,7 +1156,11 @@ impl BrowserApp {
                 width: size.width,
                 height: size.height,
                 find_open: false,
+                recorded: HashMap::new(),
+                find_query: String::new(),
+                fullscreen: false,
                 permission_open: false,
+                tray_rects: [None, None, None],
                 ui_dirty: true,
                 sidebar_dirty: false,
                 last_ui_json: String::new(),
@@ -1502,6 +1688,7 @@ impl BrowserApp {
                 can_go_back: false,
                 can_go_forward: false,
                 is_audio_playing: false,
+                notice: false,
                 is_muted: false,
                 status: TabStatus::Inactive,
                 last_active_timestamp_secs: now_secs(),
@@ -1517,6 +1704,16 @@ impl BrowserApp {
         }
         win.views.insert(tab_id, tab);
         win.show_tab(tab_id);
+        let open = win.tabs.tabs().len();
+        if open >= 40 && !self.hoarding_told {
+            self.hoarding_told = true;
+            self.toast(&serde_json::json!({
+                "title": format!("{open} tabs open"),
+                "text": "Which one is the real one?",
+                "pose": "look",
+                "ms": 6500,
+            }));
+        }
     }
 
     fn close_tab(&mut self, win_id: WindowId, tab_id: TabId, event_loop: &ActiveEventLoop) {
@@ -1561,12 +1758,14 @@ impl BrowserApp {
         }
         shield::hub().forget_tab(tab_id.0);
         self.push_data();
+        self.fold_crane();
     }
 
     fn open_internal(&mut self, win_id: WindowId, page: &str) {
         let url = format!("{INTERNAL_SCHEME}{page}");
         if let Some(win) = self.windows.get_mut(&win_id) {
             win.sidebar_open = false;
+            win.pop_hide_at = None;
             if let Some(s) = &win.sidebar {
                 let _ = s.set_visible(false);
             }
@@ -1585,11 +1784,18 @@ impl BrowserApp {
             Ok(t) => t,
             Err(e) => return eprintln!("Navigation blocked: {e}"),
         };
-        if target == "shoji://settings" {
-            return self.open_internal(win_id, "settings");
-        }
-        if target == "shoji://passwords" {
-            return self.open_internal(win_id, "passwords");
+        for page in [
+            "settings",
+            "passwords",
+            "history",
+            "downloads",
+            "wish",
+            "tea",
+            "koan",
+        ] {
+            if target == format!("{INTERNAL_SCHEME}{page}") {
+                return self.open_internal(win_id, page);
+            }
         }
         let Some(active) = self
             .windows
@@ -2126,8 +2332,18 @@ impl BrowserApp {
             ("downloads", "Downloads", "Ctrl+J"),
             ("notes", "Quick note", ""),
             ("dark", "Turn dark websites on or off", ""),
+            ("history", "History", "Ctrl+H"),
+            ("clear-data", "Clear browsing data…", "Ctrl+Shift+Del"),
+            ("darkpanel", "Dark website settings…", ""),
             ("settings", "Settings", ""),
             ("passwords", "Passwords", ""),
+            ("view-source", "View page source", "Ctrl+U"),
+            ("save-page", "Save page as…", "Ctrl+S"),
+            ("fullscreen", "Full screen", "F11"),
+            ("wish", "Make a wish", "Senbazuru: a thousand cranes"),
+            ("tea", "Take a tea break", "418"),
+            ("koan", "A word from the crane", "A koan or a haiku"),
+            ("fold", "Fold a crane", ""),
             ("devtools", "Developer tools", "F12"),
         ] {
             out.push(item("action", name.to_string(), label, sub.to_string()));
@@ -2259,6 +2475,20 @@ impl BrowserApp {
             "favourite" => self.handle_ipc(win_id, None, M::ToggleFavourite, event_loop),
             "settings" => self.open_internal(win_id, "settings"),
             "passwords" => self.open_internal(win_id, "passwords"),
+            "history" => self.handle_command(win_id, Command::History, event_loop),
+            "clear-data" => self.handle_command(win_id, Command::ClearData, event_loop),
+            "darkpanel" => self.toggle_sidebar(win_id, "dark"),
+            "view-source" => self.handle_command(win_id, Command::ViewSource, event_loop),
+            "save-page" => self.handle_command(win_id, Command::SavePage, event_loop),
+            "fullscreen" => self.handle_command(win_id, Command::FullScreen, event_loop),
+            "wish" => self.open_internal(win_id, "wish"),
+            "tea" => self.open_internal(win_id, "tea"),
+            "koan" => self.open_internal(win_id, "koan"),
+            "fold" => self.toast(&serde_json::json!({
+                "title": "Folded.",
+                "text": "One square, a few creases, and it flies.",
+                "pose": "unfold",
+            })),
             "devtools" => self.handle_ipc(win_id, None, M::OpenDevTools, event_loop),
             "split" => self.split_with(win_id, tab),
             "split-exit" => self.split_with(win_id, None),
@@ -2497,13 +2727,21 @@ impl BrowserApp {
             return;
         };
         if win.sidebar_open && win.sidebar_mode == mode {
-            return self.close_sidebar(win_id);
+            return self.close_sidebar(win_id, true);
+        }
+        // Clicking the button that opened a dropdown first moves focus away from it, which
+        // already closed it; that same click must not open it again.
+        if let Some((at, was)) = win.pop_blurred.take() {
+            if was == mode && at.elapsed() < Duration::from_millis(350) {
+                return;
+            }
         }
         if win.sidebar.is_none() {
             let proxy = self.proxy.clone();
             let dark = window::is_dark(&win.window, &self.settings.appearance.theme);
             win.sidebar = WebViewBuilder::new()
                 .with_bounds(bounds(0.0, 0.0, SIDEBAR_WIDTH, 1.0))
+                .with_visible(false)
                 .with_html(pages::sidebar(&self.settings))
                 .with_custom_protocol("shoji".into(), |_, request| font_response(&request))
                 .with_incognito(true)
@@ -2522,21 +2760,106 @@ impl BrowserApp {
         }
         win.sidebar_open = true;
         win.sidebar_mode = mode;
+        win.pop_hide_at = None;
+        win.pop_opened = Some(Instant::now());
         win.sidebar_dirty = true;
+        win.layout();
+        let [x, _, w, _] = win.popover_frame();
+        let cx = win
+            .anchors
+            .get(pop_anchor(mode))
+            .copied()
+            .unwrap_or(win.width - 40.0);
+        let caret = (cx - x).clamp(18.0, w - 18.0);
+        let js = format!(
+            "window.__popOpen && window.__popOpen({{mode:'{mode}',caret:{caret},docked:{}}})",
+            win.sidebar_docked
+        );
         if let Some(s) = &win.sidebar {
             let _ = s.set_visible(true);
+            webview::bring_to_top(s);
+            let _ = s.evaluate_script(&js);
+            if !win.sidebar_docked {
+                webview::focus(s);
+            }
         }
-        win.layout();
         win.sync_zoom();
+        if mode == "downloads" {
+            self.push_downloads();
+        }
     }
 
-    fn close_sidebar(&mut self, win_id: WindowId) {
-        if let Some(win) = self.windows.get_mut(&win_id) {
-            win.sidebar_open = false;
+    /// Send the saved downloads list to the dropdown and any open downloads page.
+    /// Fold one more paper crane; at the thousandth the crane says so.
+    fn fold_crane(&mut self) {
+        let crossed = self.cranes.fold(1);
+        if let Ok(mut ctx) = self.pages.write() {
+            ctx.cranes = self.cranes.count();
+        }
+        if crossed {
+            let toast = serde_json::json!({
+                "title": "A thousand cranes",
+                "text": "Senbazuru is complete. Make a wish at shoji://wish",
+                "pose": "cheer",
+                "ms": 9000,
+                "actions": [{"label": "Make a wish", "action": "OpenPage", "payload": {"page": "wish"}, "primary": true}],
+            });
+            self.toast(&toast);
+        }
+    }
+
+    /// Show the crane's card in the focused window (or every window if none has focus).
+    fn toast(&self, toast: &serde_json::Value) {
+        let js = format!("window.__toast && window.__toast({toast})");
+        let focused: Vec<&BrowserWindow> = self
+            .windows
+            .values()
+            .filter(|w| w.window.has_focus())
+            .collect();
+        if focused.is_empty() {
+            for win in self.windows.values() {
+                win.eval_chrome(&js);
+            }
+        } else {
+            for win in focused {
+                win.eval_chrome(&js);
+            }
+        }
+    }
+
+    fn push_downloads(&mut self) {
+        let json = serde_json::to_string(self.downloads.items()).unwrap_or_else(|_| "[]".into());
+        let js = format!("window.__downloadsList && window.__downloadsList({json})");
+        for win in self.windows.values() {
+            win.eval_sidebar(&js);
+        }
+        self.eval_all_internal(&js);
+    }
+
+    /// Close the dropdown (or pinned panel). `refocus` hands the keyboard back to the page, as
+    /// when the user pressed Esc; a click elsewhere has already given focus to what it hit.
+    fn close_sidebar(&mut self, win_id: WindowId, refocus: bool) {
+        let Some(win) = self.windows.get_mut(&win_id) else {
+            return;
+        };
+        if !win.sidebar_open {
+            return;
+        }
+        win.sidebar_open = false;
+        if win.sidebar_docked {
             if let Some(s) = &win.sidebar {
                 let _ = s.set_visible(false);
             }
             win.layout();
+        } else {
+            // Let the page fold the dropdown away, then hide it.
+            win.eval_sidebar("window.__popClose && window.__popClose()");
+            win.pop_hide_at = Some(Instant::now() + Duration::from_millis(POP_CLOSE_MS));
+        }
+        if refocus {
+            if let Some(tab) = win.active() {
+                webview::focus(&tab.view);
+            }
         }
     }
 
@@ -2577,6 +2900,9 @@ impl BrowserApp {
         }
         if s.appearance.dark_websites != before.appearance.dark_websites
             || s.appearance.dark_websites_exclude != before.appearance.dark_websites_exclude
+            || s.appearance.dark_theme != before.appearance.dark_theme
+            || s.appearance.dark_site_themes != before.appearance.dark_site_themes
+            || s.appearance.dark_schedule != before.appearance.dark_schedule
         {
             // Swap the per-document script for future pages and restyle open ones in place.
             let script = pages::dark_document_script(s);
@@ -2585,12 +2911,13 @@ impl BrowserApp {
                 "window.__setDarkSkip && window.__setDarkSkip({})",
                 serde_json::to_string(&s.appearance.dark_websites_exclude).unwrap_or_default()
             );
-            for win in self.windows.values() {
+            for win in self.windows.values_mut() {
                 for tab in win.views.values() {
                     webview::set_document_script(&tab.view, &tab.dark_script, script.as_deref());
                     let _ = tab.view.evaluate_script(&apply);
                 }
                 win.eval_internal_tabs(&skip);
+                win.sidebar_dirty = true;
             }
         }
         if s.accent() != before.accent() {
@@ -2733,6 +3060,158 @@ impl BrowserApp {
                     }
                 });
             }
+            M::ToggleDarkPanel => self.toggle_sidebar(win_id, "dark"),
+            M::OpenPage { page } => {
+                if let Some(page) = [
+                    "history",
+                    "downloads",
+                    "passwords",
+                    "byobu",
+                    "settings",
+                    "wish",
+                    "tea",
+                    "koan",
+                ]
+                .into_iter()
+                .find(|p| *p == page)
+                {
+                    self.open_internal(win_id, page);
+                }
+            }
+            M::PrintPage => self.handle_command(win_id, Command::Print, event_loop),
+            M::OpenClearData => self.handle_command(win_id, Command::ClearData, event_loop),
+            M::HistoryQuery {
+                query,
+                offset,
+                limit,
+                seq,
+            } => {
+                let private = self.settings.privacy.ephemeral_default;
+                let (items, total) = self.history.page(&query, offset, limit.clamp(1, 200));
+                let items: Vec<serde_json::Value> = items
+                    .iter()
+                    .map(|h| {
+                        serde_json::json!({
+                            "url": h.url, "title": h.title, "visits": h.visits, "last": h.last_visit,
+                        })
+                    })
+                    .collect();
+                let clear = offset == 0 && std::mem::take(&mut self.clear_pending);
+                let data = serde_json::json!({
+                    "items": items, "total": total, "private": private, "clear": clear,
+                });
+                self.eval_all_internal(&format!(
+                    "window.__historyPage && window.__historyPage({seq},{data})"
+                ));
+            }
+            M::HistoryRemove { urls } => {
+                self.history.remove(&urls);
+                self.eval_all_internal("window.__historyChanged && window.__historyChanged()");
+            }
+            M::DownloadsQuery => self.push_downloads(),
+            M::DownloadAction { key, action } => {
+                let Some(entry) = self.downloads.get(key).cloned() else {
+                    return;
+                };
+                let path = std::path::PathBuf::from(&entry.path);
+                match action.as_str() {
+                    "open" if path.is_file() => {
+                        let _ = std::process::Command::new("explorer").arg(&path).spawn();
+                    }
+                    "show" => {
+                        if path.is_file() {
+                            let _ = std::process::Command::new("explorer")
+                                .arg(format!("/select,{}", path.display()))
+                                .spawn();
+                        } else if let Some(dir) = path.parent().filter(|d| d.is_dir()) {
+                            let _ = std::process::Command::new("explorer").arg(dir).spawn();
+                        }
+                    }
+                    "remove" => {
+                        self.downloads.remove(key);
+                        self.push_downloads();
+                    }
+                    _ => {}
+                }
+            }
+            M::ClearBrowsingData {
+                range,
+                history,
+                downloads,
+                cookies,
+                cache,
+            } => {
+                let now_ms = now_secs() * 1000;
+                let span_ms: Option<u64> = match range.as_str() {
+                    "hour" => Some(3_600_000),
+                    "day" => Some(86_400_000),
+                    "week" => Some(7 * 86_400_000),
+                    "month" => Some(30 * 86_400_000),
+                    _ => None,
+                };
+                let since_ms = span_ms.map(|s| now_ms.saturating_sub(s));
+                let mut forgot = 0;
+                if history {
+                    forgot = match since_ms {
+                        Some(since) => self.history.clear_since(since),
+                        None => {
+                            let n = self.history.len();
+                            self.history.clear();
+                            n
+                        }
+                    };
+                }
+                if downloads {
+                    self.downloads.clear_since(since_ms.unwrap_or(0));
+                    self.downloads.flush();
+                    self.push_downloads();
+                }
+                if cookies || cache {
+                    let since_secs = since_ms.map(|ms| ms as f64 / 1000.0);
+                    if let Some(tab) = self.windows.get(&win_id).and_then(|w| w.active()) {
+                        webview::clear_browsing_data(&tab.view, cookies, cache, since_secs);
+                    }
+                }
+                self.eval_all_internal(&format!(
+                    "window.__dataCleared && window.__dataCleared({{history:{forgot}}})"
+                ));
+                self.eval_all_internal("window.__historyChanged && window.__historyChanged()");
+            }
+            M::TrayRects {
+                find,
+                permission,
+                toast,
+            } => {
+                if let Some(win) = self.windows.get_mut(&win_id) {
+                    win.tray_rects = [find, permission, toast];
+                    win.layout();
+                    win.raise_overlays();
+                }
+            }
+            M::SetDarkTheme { host, theme } => {
+                let host = host.map(|h| shoji_core::settings::extract_domain(&h));
+                self.update_settings(|s| match host {
+                    Some(h) if !h.is_empty() => {
+                        s.appearance.dark_websites_exclude.retain(|e| *e != h);
+                        s.appearance.dark_site_themes.insert(h, theme);
+                        s.appearance.dark_websites = Some(true);
+                    }
+                    _ => s.appearance.dark_theme = theme,
+                });
+            }
+            M::ResetDarkSite { host } => {
+                let host = shoji_core::settings::extract_domain(&host);
+                self.update_settings(|s| {
+                    s.appearance.dark_site_themes.remove(&host);
+                    s.appearance.dark_websites_exclude.retain(|e| *e != host);
+                });
+            }
+            M::SetDarkSchedule { enabled, from, to } => {
+                self.update_settings(|s| {
+                    s.appearance.dark_schedule =
+                        shoji_core::settings::DarkSchedule { enabled, from, to };
+                });
+            }
             M::ToggleNotes => {
                 if self.windows.get(&win_id).is_some_and(|w| w.notes_open) {
                     self.close_notes(win_id);
@@ -2830,7 +3309,7 @@ impl BrowserApp {
                         webview::focus(&tab.view);
                     }
                 }
-                self.close_sidebar(win_id);
+                self.close_sidebar(win_id, false);
             }
             M::ShieldState { refresh, log } => {
                 if refresh {
@@ -2845,7 +3324,58 @@ impl BrowserApp {
                 }
             }
             M::ToggleDownloadsSidebar => self.toggle_sidebar(win_id, "downloads"),
-            M::CloseSidebar => self.close_sidebar(win_id),
+            M::CloseSidebar => self.close_sidebar(win_id, true),
+            M::SidebarBlur => {
+                let mode = self.windows.get(&win_id).map(|w| w.sidebar_mode);
+                let open = self.windows.get(&win_id).is_some_and(|w| {
+                    w.sidebar_open
+                        && !w.sidebar_docked
+                        && w.pop_hide_at.is_none()
+                        && w.pop_opened
+                            .is_none_or(|t| t.elapsed() > Duration::from_millis(300))
+                });
+                if let (true, Some(mode)) = (open, mode) {
+                    self.close_sidebar(win_id, false);
+                    if let Some(win) = self.windows.get_mut(&win_id) {
+                        win.pop_blurred = Some((Instant::now(), mode));
+                    }
+                }
+            }
+            M::SidebarHeight { height } => {
+                if let Some(win) = self.windows.get_mut(&win_id) {
+                    let height = height.clamp(40.0, 1200.0).ceil();
+                    if (win.pop_height - height).abs() > 0.5 {
+                        win.pop_height = height;
+                        if win.sidebar_open && !win.sidebar_docked {
+                            win.layout();
+                        }
+                    }
+                }
+            }
+            M::PinSidebar { pinned } => {
+                if let Some(win) = self.windows.get_mut(&win_id) {
+                    if win.sidebar_open && win.sidebar_docked != pinned {
+                        win.sidebar_docked = pinned;
+                        win.layout();
+                        let js =
+                            format!("window.__popMode && window.__popMode({{docked:{pinned}}})");
+                        win.eval_sidebar(&js);
+                        if !pinned {
+                            if let Some(s) = &win.sidebar {
+                                webview::focus(s);
+                            }
+                        }
+                    }
+                }
+            }
+            M::ToolbarAnchors { items } => {
+                if let Some(win) = self.windows.get_mut(&win_id) {
+                    win.anchors = items.into_iter().collect();
+                    if win.sidebar_open && !win.sidebar_docked {
+                        win.layout();
+                    }
+                }
+            }
             M::OpenCertificateDialog { host } => cert::open_certificate_dialog(&host),
             M::ReorderTab {
                 from_index,
@@ -2889,7 +3419,7 @@ impl BrowserApp {
                 }
             }
             M::ToggleFindBar => {
-                self.close_sidebar(win_id);
+                self.close_sidebar(win_id, false);
                 if let Some(win) = self.windows.get(&win_id) {
                     win.eval_chrome("window.__toggleFindBar && window.__toggleFindBar()");
                     if let Some(c) = &win.chrome {
@@ -2909,7 +3439,8 @@ impl BrowserApp {
                 }
             }
             M::FindInPage { query, forward } => {
-                if let Some(win) = self.windows.get(&win_id) {
+                if let Some(win) = self.windows.get_mut(&win_id) {
+                    win.find_query = query.clone();
                     win.find(&query, forward);
                 }
             }
@@ -3591,8 +4122,22 @@ impl BrowserApp {
                     let _ = tab.view.print();
                 }
             }
-            Command::Reload => self.reload(win_id, false),
-            Command::HardReload => self.reload(win_id, true),
+            Command::Reload | Command::HardReload => {
+                // Five reloads in a few seconds earns the crane's sympathy.
+                let now = Instant::now();
+                self.reloads
+                    .retain(|t| now.duration_since(*t) < Duration::from_secs(6));
+                self.reloads.push(now);
+                if self.reloads.len() >= 5 {
+                    self.reloads.clear();
+                    self.toast(&serde_json::json!({
+                        "title": "It's not you.",
+                        "text": "Probably them. Maybe try again in a minute?",
+                        "pose": "tilt",
+                    }));
+                }
+                self.reload(win_id, cmd == Command::HardReload);
+            }
             Command::Back => ipc(self, M::GoBack),
             Command::Forward => ipc(self, M::GoForward),
             Command::NextTab | Command::PrevTab | Command::SelectTab(_) => {
@@ -3625,6 +4170,73 @@ impl BrowserApp {
             Command::Palette => ipc(self, M::OpenPalette),
             Command::ToggleFavourite => ipc(self, M::ToggleFavourite),
             Command::Reader => ipc(self, M::ToggleReader),
+            Command::History => self.open_internal(win_id, "history"),
+            Command::ClearData => {
+                let open = self
+                    .windows
+                    .get(&win_id)
+                    .is_some_and(|w| w.tabs.tabs().iter().any(|t| t.url == "shoji://history"));
+                if open {
+                    self.open_internal(win_id, "history");
+                    self.eval_all_internal("window.__showClear && window.__showClear()");
+                } else {
+                    self.clear_pending = true;
+                    self.open_internal(win_id, "history");
+                }
+            }
+            Command::Favourites | Command::TabSearch => ipc(self, M::OpenPalette),
+            Command::Settings => self.open_internal(win_id, "settings"),
+            Command::NextTabPage => self.handle_command(win_id, Command::NextTab, event_loop),
+            Command::PrevTabPage => self.handle_command(win_id, Command::PrevTab, event_loop),
+            Command::FocusAddressF6 => {
+                self.handle_command(win_id, Command::FocusAddress, event_loop)
+            }
+            Command::Home => self.navigate(win_id, "shoji://newtab"),
+            Command::ViewSource => {
+                let url = self
+                    .windows
+                    .get(&win_id)
+                    .and_then(|w| w.tabs.active_tab())
+                    .map(|t| t.url.clone())
+                    .unwrap_or_default();
+                if url.starts_with("http://") || url.starts_with("https://") {
+                    self.create_tab(win_id, Some(format!("view-source:{url}")));
+                }
+            }
+            Command::SavePage => {
+                if let Some(tab) = self.windows.get(&win_id).and_then(|w| w.active()) {
+                    webview::save_page(&tab.view);
+                }
+            }
+            Command::FullScreen => {
+                if let Some(win) = self.windows.get_mut(&win_id) {
+                    win.fullscreen = !win.fullscreen;
+                    let mode = win
+                        .fullscreen
+                        .then_some(winit::window::Fullscreen::Borderless(None));
+                    win.window.set_fullscreen(mode);
+                    if let Some(c) = &win.chrome {
+                        let _ = c.set_visible(!win.fullscreen);
+                    }
+                    win.layout();
+                }
+            }
+            Command::FindNext | Command::FindPrev => {
+                let forward = cmd == Command::FindNext;
+                let open = self.windows.get(&win_id).is_some_and(|w| w.find_open);
+                if open {
+                    let query = self
+                        .windows
+                        .get(&win_id)
+                        .map(|w| w.find_query.clone())
+                        .unwrap_or_default();
+                    if let Some(win) = self.windows.get(&win_id) {
+                        win.find(&query, forward);
+                    }
+                } else {
+                    ipc(self, M::ToggleFindBar);
+                }
+            }
         }
     }
 
@@ -3694,6 +4306,11 @@ impl BrowserApp {
                     win.eval_sidebar(&format!(
                         "window.__sidebarSync && window.__sidebarSync({json})"
                     ));
+                }
+                if win.sidebar_mode == "dark" {
+                    let host = extract_host(&url).unwrap_or_default();
+                    let json = pages::dark_panel_json(&self.settings, &host);
+                    win.eval_sidebar(&format!("window.__darkPanel && window.__darkPanel({json})"));
                 }
             }
             // Page-derived toolbar state: tint colour, picture-in-picture, reader, favourite star.
@@ -3806,6 +4423,7 @@ impl BrowserApp {
             };
             win.sidebar = None;
             win.sidebar_open = false;
+            win.pop_hide_at = None;
             win.overlay = None;
             win.overlay_open = false;
             win.overlay_ready = false;
@@ -3997,8 +4615,29 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 let mut moved: Option<(String, String)> = None;
                 if let Some(url) = url {
                     // Notice pages keep showing the address that failed.
-                    if !url.starts_with("http://shoji.notice-") {
+                    if url.starts_with("http://shoji.notice-") {
+                        if !state.notice {
+                            state.notice = true;
+                            changed = true;
+                        }
+                    } else {
+                        if state.notice {
+                            state.notice = false;
+                            changed = true;
+                        }
                         let url = display_url(&url);
+                        // A page the host navigated to already has its address on the tab, so
+                        // record visits by what the engine reports, once per address.
+                        if !self.settings.privacy.ephemeral_default
+                            && !is_internal(&url)
+                            && win.recorded.get(&tab_id).map(String::as_str) != Some(&*url)
+                        {
+                            win.recorded.insert(tab_id, url.to_string());
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map_or(0, |d| d.as_millis() as u64);
+                            self.history.record(&url, &state.title, now);
+                        }
                         if state.url != url {
                             if is_internal(&url) != is_internal(&state.url) {
                                 state.favicon_uri = None;
@@ -4010,13 +4649,6 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                             }
                             win.reader.remove(&tab_id);
                             state.url = url.into_owned();
-                            if !self.settings.privacy.ephemeral_default && !is_internal(&state.url)
-                            {
-                                let now = std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .map_or(0, |d| d.as_millis() as u64);
-                                self.history.record(&state.url, &state.title, now);
-                            }
                             if state.status == TabStatus::Crashed {
                                 state.status = TabStatus::Active;
                             }
@@ -4156,11 +4788,49 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
             BrowserEvent::DownloadProgress {
                 download_id,
                 filename,
+                path,
+                source,
                 received_bytes,
                 total_bytes,
                 state,
             } => {
+                let now_ms = now_secs() * 1000;
+                let key = match self.dl_keys.get(&download_id) {
+                    Some(k) => *k,
+                    None => {
+                        let k = self.downloads.start(&filename, &path, &source, now_ms);
+                        self.dl_keys.insert(download_id, k);
+                        k
+                    }
+                };
+                if state != "InProgress" {
+                    let ended = if state == "Completed" {
+                        "done"
+                    } else {
+                        "stopped"
+                    };
+                    self.downloads
+                        .finish(key, ended, received_bytes.max(0) as u64);
+                    self.dl_keys.remove(&download_id);
+                    self.push_downloads();
+                    if state == "Completed" {
+                        self.fold_crane();
+                        let toast = serde_json::json!({
+                            "title": filename,
+                            "text": "Saved to your downloads",
+                            "pose": "bow",
+                            "actions": [
+                                {"label": "Open", "action": "DownloadAction", "payload": {"key": key, "action": "open"}, "primary": true},
+                                {"label": "Show", "action": "DownloadAction", "payload": {"key": key, "action": "show"}},
+                            ],
+                        });
+                        self.toast(&toast);
+                    }
+                } else if received_bytes == 0 {
+                    self.push_downloads();
+                }
                 let json = serde_json::json!({
+                    "key": key,
                     "download_id": download_id,
                     "filename": filename,
                     "received_bytes": received_bytes,
@@ -4174,6 +4844,48 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 for win in self.windows.values() {
                     win.eval_chrome(&chrome_js);
                     win.eval_sidebar(&sidebar_js);
+                }
+            }
+            BrowserEvent::Unreachable {
+                tab_id,
+                uri,
+                offline,
+            } => {
+                let Some(host) = extract_host(&uri) else {
+                    return;
+                };
+                // HTTPS-only mode's own fallback page takes this one's place just after an upgrade.
+                let upgrading = self.settings.privacy.https_only
+                    && self
+                        .upgraded
+                        .get(&host)
+                        .is_some_and(|t| t.elapsed() < Duration::from_secs(60));
+                if upgrading && offline {
+                    return;
+                }
+                let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get(&id)) else {
+                    return;
+                };
+                if let Ok(mut ctx) = self.pages.write() {
+                    ctx.notices.insert(
+                        tab_id.0,
+                        pages::unreachable(&self.settings, tab_id.0, &host, offline),
+                    );
+                }
+                if let Some(tab) = win.views.get(&tab_id) {
+                    let _ = tab
+                        .view
+                        .load_url(&format!("{INTERNAL_ORIGIN}notice-{}/", tab_id.0));
+                }
+            }
+            BrowserEvent::TabLoading { tab_id, loading } => {
+                if let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) {
+                    if let Some(state) = win.tabs.tabs_mut().iter_mut().find(|t| t.id == tab_id) {
+                        if state.is_loading != loading {
+                            state.is_loading = loading;
+                            win.ui_dirty = true;
+                        }
+                    }
                 }
             }
             BrowserEvent::TabFocused(tab_id) => {
@@ -4353,8 +5065,18 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.flush();
         let mut animating = false;
+        let mut pop_due: Option<Instant> = None;
         for win in self.windows.values_mut() {
             animating |= win.step_notes();
+            pop_due = pop_due.into_iter().chain(win.step_popover()).min();
+        }
+        if self.stores_flushed.elapsed() > Duration::from_secs(20) {
+            self.stores_flushed = Instant::now();
+            self.history.flush();
+            self.cranes.flush();
+            if !self.settings.privacy.ephemeral_default {
+                self.downloads.flush();
+            }
         }
         let session_due = self.maybe_write_session();
         let vault_due = self.vault_tick();
@@ -4363,6 +5085,7 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
             .into_iter()
             .chain(session_due)
             .chain(vault_due)
+            .chain(pop_due)
             .min();
         // While something animates, wake for the next frame; otherwise sleep until needed.
         let frame = animating.then(|| Instant::now() + Duration::from_millis(8));

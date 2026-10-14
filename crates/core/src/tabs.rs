@@ -29,6 +29,9 @@ pub struct TabState {
     pub can_go_forward: bool,
     pub is_audio_playing: bool,
     pub is_muted: bool,
+    /// Showing one of Shoji's own notices (page not found, crash...) in place of `url`
+    #[serde(default)]
+    pub notice: bool,
     pub status: TabStatus,
     pub last_active_timestamp_secs: u64,
     /// Tab group this tab belongs to, if any
@@ -89,6 +92,7 @@ impl TabManager {
             can_go_back: false,
             can_go_forward: false,
             is_audio_playing: false,
+            notice: false,
             is_muted: false,
             status: TabStatus::Active,
             last_active_timestamp_secs: current_time_secs,

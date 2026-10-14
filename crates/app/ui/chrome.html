@@ -74,10 +74,15 @@
     #btnNotes.open { background: var(--tint); color: var(--ink); }
     .dl-count { position: absolute; top: 1px; right: 0; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; font-size: 9px; font-weight: 700; line-height: 14px; background: var(--tone); color: var(--on-tone); }
 
-    /* Third row: find and permission trays */
-    .tray { display: none; align-items: center; gap: 8px; height: 38px; padding: 0 12px; background: var(--surface); border-bottom: 1px solid var(--line); flex-shrink: 0; }
-    .tray.open { display: flex; }
-    #findBar { justify-content: flex-end; }
+    /* Find and permission cards: float over the page (the host clips this strip to them), so
+       opening one never moves or resizes the page underneath. */
+    .tray { position: fixed; z-index: 20; top: 82px; display: none; align-items: center; gap: 8px; height: 46px; padding: 0 10px 0 14px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 12px; }
+    .tray.open { display: flex; animation: tray-in .18s cubic-bezier(.2, .8, .2, 1); }
+    .tray.open.leaving { animation: tray-out .13s ease-in forwards; }
+    @keyframes tray-in { from { opacity: 0; transform: translateY(-10px) scale(.97); } }
+    @keyframes tray-out { to { opacity: 0; transform: translateY(-8px) scale(.97); } }
+    #findBar { right: 12px; transform-origin: top right; }
+    #permissionBar { left: 12px; max-width: calc(100vw - 24px); transform-origin: top left; }
     #findInput { width: 240px; height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font: inherit; outline: none; user-select: text; }
     #findInput:focus { border-color: var(--accent); }
     #findCount { min-width: 48px; text-align: center; font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
@@ -89,6 +94,47 @@
     .pill.primary:hover { filter: brightness(.96); }
     .pill.quiet { background: var(--surface-2); }
     .pill.quiet:hover { background: var(--press); }
+
+    /* Loading: a small crane flaps in the tab, and a brush stroke crosses the toolbar */
+    .tab-crane { display: none; width: 16px; height: 16px; flex-shrink: 0; }
+    .tab.loading .tab-crane { animation: pet-waddle .7s ease-in-out infinite alternate; }
+    .tab.loading .tab-crane path:nth-of-type(2), .tab.loading .tab-crane path:nth-of-type(3) { animation: pet-flap .3s ease-in-out infinite alternate; }
+    .tab .zz { display: none; position: absolute; left: 22px; top: 3px; font: italic 600 10px var(--font-display); color: var(--ink-3); pointer-events: none; }
+    .tab.asleep .zz { display: block; animation: zz 2.6s ease-in-out infinite; }
+    .tab.asleep .favicon { opacity: .55; filter: grayscale(.8); }
+    .tab.asleep .title { color: var(--ink-3); }
+    @keyframes zz { 0%, 100% { opacity: 0; transform: translate(0, 3px); } 50% { opacity: 1; transform: translate(2px, -1px); } }
+    .tab.loading .favicon { display: none; }
+    .tab.loading .tab-crane { display: block; }
+    .nav { position: relative; }
+    .nav::after { content: ""; position: absolute; left: 0; bottom: -1px; height: 2px; width: 34%; border-radius: 2px; opacity: 0; pointer-events: none;
+      background: linear-gradient(90deg, transparent, var(--tone) 35%, var(--accent) 80%, transparent); }
+    body.loading .nav::after { opacity: 1; animation: brush 1.5s cubic-bezier(.45, 0, .25, 1) infinite; }
+    @keyframes brush { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+    #btnReload .x { display: none; }
+    body.loading #btnReload .reload { display: none; }
+    body.loading #btnReload .x { display: block; }
+
+    /* Closing a tab folds it away */
+    .tab.folding { pointer-events: none; animation: tab-fold .2s cubic-bezier(.5, 0, .9, .6) forwards; transform-origin: 50% 100%; overflow: hidden; }
+    @keyframes tab-fold { to { opacity: 0; transform: translateY(10px) scale(.55, .35) rotate(-3deg); flex-basis: 0; min-width: 0; padding: 0; margin: 0; } }
+
+    /* The site seal: a small vermilion stamp that presses in when a secure page has loaded */
+    .lock .seal { display: grid; place-items: center; width: 17px; height: 17px; border-radius: 4px; border: 1.5px solid var(--seal); color: var(--seal);
+      font: 700 10.5px/1 "Yu Mincho", "MS Mincho", "Hiragino Mincho ProN", serif; letter-spacing: 0; }
+    .lock .seal.stamp { animation: stamp .42s cubic-bezier(.2, 1.5, .4, 1) both; }
+    @keyframes stamp { 0% { opacity: 0; transform: scale(1.9) rotate(-14deg); } 55% { opacity: 1; transform: scale(.92) rotate(2deg); } 100% { transform: none; } }
+    :root { --seal: #b8433b; }
+    :root[data-mode="dark"] { --seal: #e0706a; }
+    @media (prefers-color-scheme: dark) { :root:not([data-mode="light"]) { --seal: #e0706a; } }
+
+    /* A small card with the crane, for things worth a word: a finished download, a koan */
+    #toast { right: 12px; transform-origin: top right; max-width: min(460px, calc(100vw - 24px)); gap: 10px; }
+    body.find-open #toast { top: 136px; }
+    #toast .crane { width: 30px; height: 30px; flex-shrink: 0; }
+    #toast .msg { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+    #toast .msg b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #toast .msg span { color: var(--ink-3); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     /* Tab groups: a coloured label ahead of the first tab, and a coloured line under each tab */
     .group-chip { align-self: center; flex: 0 0 auto; display: block; line-height: 22px; max-width: 120px; height: 22px; margin: 0 2px 0 6px; padding: 0 9px; border-radius: 11px; font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #26231f; background: var(--g, var(--tone)); app-region: no-drag; cursor: default; }
@@ -114,14 +160,14 @@
     #btnShield .count[hidden] { display: none; }
 
     /* Page-tinted toolbar: a soft wash of the site's own colour over the toolbar rows */
-    html[data-tint] .nav, html[data-tint] .tray { background: color-mix(in srgb, var(--page-tint) 16%, var(--surface)); }
+    html[data-tint] .nav { background: color-mix(in srgb, var(--page-tint) 16%, var(--surface)); }
     html[data-tint] body { background: color-mix(in srgb, var(--page-tint) 22%, var(--bg-sunk)); }
     html[data-tint] .tab.active { background: color-mix(in srgb, var(--page-tint) 16%, var(--surface)); }
     .nav, .tray, body, .tab.active { transition: background-color .25s; }
 
     /* Windows 11 frosted toolbar: the window's Mica backdrop shows through */
     html[data-frost="1"], html[data-frost="1"] body { background: transparent; }
-    html[data-frost="1"] .nav, html[data-frost="1"] .tray { background: color-mix(in srgb, var(--surface) 60%, transparent); border-bottom-color: transparent; }
+    html[data-frost="1"] .nav { background: color-mix(in srgb, var(--surface) 60%, transparent); border-bottom-color: transparent; }
     html[data-frost="1"] .tab.active { background: color-mix(in srgb, var(--surface) 75%, transparent); }
     html[data-frost="1"] #omnibox { background: color-mix(in srgb, var(--surface-2) 70%, transparent); }
   </style>
@@ -150,8 +196,9 @@
     <button class="btn" id="btnForward" onclick="post('GoForward')" disabled title="Forward (Alt+Right)" aria-label="Forward">
       <svg class="i" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
     </button>
-    <button class="btn" id="btnReload" onclick="post('Reload')" title="Reload (Ctrl+R)" aria-label="Reload">
-      <svg class="i" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>
+    <button class="btn" id="btnReload" onclick="post(document.body.classList.contains('loading') ? 'Stop' : 'Reload')" title="Reload (Ctrl+R)" aria-label="Reload">
+      <svg class="i reload" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>
+      <svg class="i x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
 
     <div class="omni">
@@ -181,7 +228,7 @@
       <svg class="i" viewBox="0 0 24 24"><path d="M12 3l7 3v5.5c0 4.3-3 7.7-7 9.5-4-1.8-7-5.2-7-9.5V6z"/><path class="check" d="M9 12l2 2 4-4"/><path class="slash" d="M5 4l14 16"/></svg>
       <span class="count" id="shieldCount" hidden>0</span>
     </button>
-    <button class="btn" id="btnDark" onclick="post('ToggleDarkWebsites')" oncontextmenu="event.preventDefault(); toggleDarkSite()" aria-label="Dark websites">
+    <button class="btn" id="btnDark" onclick="post('ToggleDarkPanel')" oncontextmenu="event.preventDefault(); toggleDarkSite()" aria-label="Dark websites">
       <svg class="i" viewBox="0 0 24 24" id="darkIcon"></svg>
     </button>
     <button class="btn" id="btnNotes" onclick="post('ToggleNotes')" title="Quick note" aria-label="Quick note">
@@ -206,6 +253,12 @@
     <button class="btn" onclick="closeFind()" title="Close (Esc)" aria-label="Close find"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   </div>
 
+  <div class="tray" id="toast" role="status">
+    {{CRANE_MARK}}
+    <div class="msg"><b id="toastTitle"></b><span id="toastText"></span></div>
+    <span id="toastActs" style="display:flex;gap:6px;margin-left:6px"></span>
+  </div>
+
   <div class="tray" id="permissionBar">
     <div class="perm-msg">
       <svg class="i" viewBox="0 0 24 24" id="permIcon"></svg>
@@ -218,6 +271,8 @@
   </div>
 
   <script>
+{{PET_JS}}
+    const Pet_calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
     const ICONS = {
       lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
       open: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/>',
@@ -354,7 +409,9 @@
     };
     window.__shieldSync = d => {
       const b = $('btnShield');
+      const wasHidden = b.hidden;
       b.hidden = d.state === 'none';
+      if (wasHidden !== b.hidden) reportAnchors();
       b.dataset.state = d.state;
       const n = d.blocked + d.replaced;
       const shown = d.state === 'on' && n > 0;
@@ -372,12 +429,13 @@
     };
 
     /* Tabs: create each element once, then patch only what changed */
+    const CRANE_MARK = `{{CRANE_MARK_TAB}}`;
     function buildTab(id) {
       const el = document.createElement('div');
       el.className = 'tab';
       el.id = 'tab-' + id;
       el.setAttribute('role', 'tab');
-      el.innerHTML = '<img class="favicon" alt=""><span class="title"></span>' +
+      el.innerHTML = '<img class="favicon" alt="">' + CRANE_MARK + '<span class="zz">z</span><span class="title"></span>' +
         '<button class="close" tabindex="-1" aria-label="Close tab"><svg class="i" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg></button>';
       el.querySelector('.favicon').onerror = function () { this.src = SHOJI_FAVICON; };
       el.onmousedown = e => { if (e.button === 1) { e.preventDefault(); post('CloseTab', { id }); } };
@@ -442,7 +500,15 @@
         order.push({ tab });
       });
       const keep = new Set(order.map(o => o.chip ? 'grp-' + o.chip.id : 'tab-' + o.tab.id));
-      for (const child of [...container.children]) if (!keep.has(child.id)) child.remove();
+      for (const child of [...container.children]) {
+        if (keep.has(child.id) || child.classList.contains('folding')) continue;
+        if (child.classList.contains('tab') && !Pet_calm) {
+          child.classList.add('folding');
+          setTimeout(() => child.remove(), 210);
+        } else {
+          child.remove();
+        }
+      }
 
       order.forEach((o, position) => {
         let el;
@@ -468,6 +534,8 @@
         if (g) { el.dataset.group = g.id; el.style.setProperty('--g', toneOf(g.color)); }
         else { delete el.dataset.group; el.style.removeProperty('--g'); }
         el.classList.toggle('split-pane', !!state.split && state.split.includes(tab.id));
+        el.classList.toggle('loading', !!tab.is_loading);
+        el.classList.toggle('asleep', tab.status === 'Suspended');
         const active = tab.id === state_.active_tab_id;
         el.classList.toggle('active', active);
         setAttr(el, 'aria-selected', String(active));
@@ -497,14 +565,20 @@
       }
       try { activeHost = internal ? '' : new URL(tab.url).hostname.replace(/^www\./, ''); } catch { activeHost = ''; }
       syncDark();
+      document.body.classList.toggle('loading', !!tab.is_loading);
       $('btnBack').disabled = !tab.can_go_back;
       $('btnForward').disabled = !tab.can_go_forward;
-      const kind = internal ? 'shoji' : (tab.url.startsWith('https://') ? 'lock' : 'open');
+      const kind = internal || tab.notice ? 'shoji' : (tab.url.startsWith('https://') ? 'lock' : 'open');
       const lock = $('btnLock');
       if (lock.dataset.kind !== kind) {
         lock.dataset.kind = kind;
         lock.className = 'lock' + (kind === 'open' ? ' insecure' : '');
-        $('lockIcon').innerHTML = ICONS[kind];
+        if (kind === 'lock') {
+          // A secure page gets its seal: a vermilion stamp that presses in.
+          lock.innerHTML = '<span class="seal' + (Pet_calm ? '' : ' stamp') + '" aria-hidden="true">\u5B89</span>';
+        } else {
+          lock.innerHTML = '<svg class="i" viewBox="0 0 24 24" id="lockIcon">' + ICONS[kind] + '</svg>';
+        }
         lock.title = kind === 'shoji' ? 'Shoji page' : (kind === 'lock' ? 'Connection is secure' : 'Connection is not secure');
       }
     }
@@ -535,9 +609,9 @@
       btn.classList.toggle('on', on);
       $('darkIcon').innerHTML = on ? MOON.replace('<path', '<path fill="currentColor"')
         : MOON + (excluded && prefs.darkWebsites ? '<path d="M4 4l16 16"/>' : '');
-      btn.title = !prefs.darkWebsites ? 'Dark websites: off. Click to turn on'
-        : excluded ? 'Dark websites: skipped on ' + activeHost + '. Right-click to include it'
-        : 'Dark websites: on. Click to turn off, right-click to skip this site';
+      btn.title = !prefs.darkWebsites ? 'Dark websites: off. Click to adjust'
+        : excluded ? 'Dark websites: skipped on ' + activeHost + '. Click to adjust, right-click to include it'
+        : 'Dark websites: on. Click to adjust, right-click to skip this site';
     }
     function toggleDarkSite() { if (activeHost) post('ToggleDarkSite', { host: activeHost }); }
     window.__syncNotes = open => $('btnNotes').classList.toggle('open', open);
@@ -572,11 +646,57 @@
     }
 
     /* Find in page */
+    function reportTrays() {
+      const rect = id => {
+        const el = $(id);
+        return el.classList.contains('open') ? [el.offsetLeft, el.offsetTop, el.offsetWidth, el.offsetHeight] : null;
+      };
+      document.body.classList.toggle('find-open', $('findBar').classList.contains('open') && !$('findBar').classList.contains('leaving'));
+      post('TrayRects', { find: rect('findBar'), permission: rect('permissionBar'), toast: rect('toast') });
+    }
+
+    /* The crane's word: a card that appears, says something, and goes away by itself. */
+    let toastTimer = 0;
+    window.__toast = t => {
+      const el = $('toast');
+      clearTimeout(toastTimer);
+      $('toastTitle').textContent = t.title || '';
+      $('toastText').textContent = t.text || '';
+      $('toastText').hidden = !t.text;
+      const acts = $('toastActs');
+      acts.textContent = '';
+      (t.actions || []).forEach(a => {
+        const b = document.createElement('button');
+        b.className = 'pill ' + (a.primary ? 'primary' : 'quiet');
+        b.textContent = a.label;
+        b.onclick = () => { post(a.action, a.payload || null); dismissToast(); };
+        acts.appendChild(b);
+      });
+      const pet = el.querySelector('.crane');
+      if (pet && window.Pet) Pet.pose(pet, t.pose || 'bow');
+      el.classList.remove('leaving');
+      el.classList.add('open');
+      reportTrays();
+      toastTimer = setTimeout(dismissToast, t.ms || 5200);
+    };
+    function dismissToast() {
+      clearTimeout(toastTimer);
+      if ($('toast').classList.contains('open')) leaveTray($('toast'), () => {});
+    }
+    $('toast').addEventListener('mouseenter', () => clearTimeout(toastTimer));
+    $('toast').addEventListener('mouseleave', () => { toastTimer = setTimeout(dismissToast, 1800); });
+    function leaveTray(el, then) {
+      if (el.classList.contains('leaving')) return;
+      el.classList.add('leaving');
+      setTimeout(() => { el.classList.remove('open', 'leaving'); reportTrays(); then(); }, 130);
+    }
     function toggleFindBar() {
       const bar = $('findBar');
-      if (bar.classList.contains('open')) return closeFind();
+      if (bar.classList.contains('open') && !bar.classList.contains('leaving')) return closeFind();
+      bar.classList.remove('leaving');
       bar.classList.add('open');
       post('OpenFindInPage');
+      reportTrays();
       const input = $('findInput');
       input.focus();
       input.select();
@@ -584,8 +704,7 @@
     }
     function closeFind() {
       if (!$('findBar').classList.contains('open')) return;
-      $('findBar').classList.remove('open');
-      post('CloseFindInPage');
+      leaveTray($('findBar'), () => post('CloseFindInPage'));
     }
     function find(forward) {
       const query = $('findInput').value;
@@ -607,15 +726,31 @@
       $('permIcon').innerHTML = k.includes('camera') ? ICONS.camera : k.includes('micro') ? ICONS.mic
         : k.includes('geo') ? ICONS.location : k.includes('notif') ? ICONS.bell : ICONS.info;
       $('permMsg').textContent = `${d.origin} wants to use your ${d.permission_kind.toLowerCase()}`;
+      $('permissionBar').classList.remove('leaving');
       $('permissionBar').classList.add('open');
       post('OpenPermissionPrompt');
+      reportTrays();
     };
     function resolvePermission(allow) {
       if (pendingPermission !== null) post('PermissionResponse', { permission_id: pendingPermission, allow });
       pendingPermission = null;
-      $('permissionBar').classList.remove('open');
-      post('ClosePermissionPrompt');
+      leaveTray($('permissionBar'), () => post('ClosePermissionPrompt'));
     }
+
+    /* Toolbar anchors: the dropdowns hang from the button that opened them. */
+    let anchorFrame = 0;
+    function reportAnchors() {
+      cancelAnimationFrame(anchorFrame);
+      anchorFrame = requestAnimationFrame(() => {
+        const items = {};
+        for (const [key, id] of [['menu', 'btnMenu'], ['downloads', 'btnDownloads'], ['dark', 'btnDark'], ['shield', 'btnShield'], ['lock', 'btnLock']]) {
+          const b = $(id).getBoundingClientRect();
+          if (b.width > 0) items[key] = Math.round((b.left + b.width / 2) * 10) / 10;
+        }
+        post('ToolbarAnchors', { items });
+      });
+    }
+    addEventListener('resize', () => { reportAnchors(); reportTrays(); });
 
     /* Keyboard navigation within the tab list */
     $('tabs').addEventListener('keydown', e => {
@@ -640,7 +775,10 @@
 
     $('lockIcon').innerHTML = ICONS.shoji;
     window.__syncFav(false);
+    // Pose the little crane in the toast to match its message, now that the page has the kit.
+    new ResizeObserver(reportAnchors).observe(document.querySelector('.nav'));
     post('ChromeReady');
+    reportAnchors();
   </script>
 </body>
 </html>

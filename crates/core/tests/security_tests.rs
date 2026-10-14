@@ -390,6 +390,45 @@ fn test_security_v10_web_content_ipc_allowlist() {
         UiToHostMessage::UninstallShoji {
             confirm: "UNINSTALL".into(),
         },
+        // History, downloads and look-and-feel belong to Shoji's own pages.
+        UiToHostMessage::DownloadAction {
+            key: 1,
+            action: "open".into(),
+        },
+        UiToHostMessage::ClearBrowsingData {
+            range: "all".into(),
+            history: true,
+            downloads: true,
+            cookies: true,
+            cache: true,
+        },
+        UiToHostMessage::HistoryRemove {
+            urls: vec!["https://a.com/".into()],
+        },
+        UiToHostMessage::HistoryQuery {
+            query: String::new(),
+            offset: 0,
+            limit: 10,
+            seq: 1,
+        },
+        UiToHostMessage::OpenPage {
+            page: "settings".into(),
+        },
+        UiToHostMessage::SetDarkTheme {
+            host: None,
+            theme: DarkTheme::default(),
+        },
+        UiToHostMessage::SetDarkSchedule {
+            enabled: true,
+            from: "20:00".into(),
+            to: "07:00".into(),
+        },
+        UiToHostMessage::PinSidebar { pinned: true },
+        UiToHostMessage::TrayRects {
+            find: Some([0.0, 0.0, 9000.0, 9000.0]),
+            permission: None,
+            toast: None,
+        },
     ];
     for msg in privileged {
         assert!(

@@ -212,6 +212,37 @@ pub fn attach_tab_events(
         );
     }
 
+    // Loading state, for the toolbar's progress stroke and the tab's flapping crane
+    {
+        let on_start = proxy.clone();
+        let mut token = Default::default();
+        let _ = unsafe {
+            core.add_NavigationStarting(
+                &NavigationStartingEventHandler::create(Box::new(move |_, _| {
+                    let _ = on_start.send_event(BrowserEvent::TabLoading {
+                        tab_id,
+                        loading: true,
+                    });
+                    Ok(())
+                })),
+                &mut token,
+            )
+        };
+        let on_done = proxy.clone();
+        let _ = unsafe {
+            core.add_NavigationCompleted(
+                &NavigationCompletedEventHandler::create(Box::new(move |_, _| {
+                    let _ = on_done.send_event(BrowserEvent::TabLoading {
+                        tab_id,
+                        loading: false,
+                    });
+                    Ok(())
+                })),
+                &mut token,
+            )
+        };
+    }
+
     // Title
     {
         let core_t = core.clone();
@@ -398,9 +429,20 @@ pub fn attach_tab_events(
                 map.get_or_insert_with(HashMap::new)
                     .insert(id, DownloadOp(op.clone()));
             }
+            let target_path = target.to_string_lossy().into_owned();
+            let source = {
+                let mut uri = PWSTR::null();
+                if unsafe { op.Uri(&mut uri) }.is_ok() {
+                    crate::extract_host(&take(uri)).unwrap_or_default()
+                } else {
+                    String::new()
+                }
+            };
             let report = {
                 let op = op.clone();
                 let proxy = proxy.clone();
+                let target_path = target_path.clone();
+                let source = source.clone();
                 move || {
                     let (received_bytes, total_bytes, state) = download_state(&op);
                     if state != "InProgress" {
@@ -411,6 +453,8 @@ pub fn attach_tab_events(
                     let _ = proxy.send_event(BrowserEvent::DownloadProgress {
                         download_id: id,
                         filename: filename.clone(),
+                        path: target_path.clone(),
+                        source: source.clone(),
                         received_bytes,
                         total_bytes,
                         state,
@@ -442,6 +486,8 @@ pub fn attach_tab_events(
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default(),
+                path: target_path,
+                source,
                 received_bytes: 0,
                 total_bytes,
                 state: "InProgress",
@@ -755,6 +801,49 @@ pub fn clear_saved_logins(webview: &WebView) -> bool {
     unsafe { p2.ClearBrowsingData(kinds, &handler) }.is_ok()
 }
 
+/// Clear browsing data held by the engine: cookies and site storage, and/or the cache. With
+/// `since_secs` (Unix seconds) only data from that time on goes; `None` clears everything.
+pub fn clear_browsing_data(
+    webview: &WebView,
+    cookies: bool,
+    cache: bool,
+    since_secs: Option<f64>,
+) -> bool {
+    let mut bits = 0;
+    if cookies {
+        bits |= COREWEBVIEW2_BROWSING_DATA_KINDS_ALL_SITE.0;
+    }
+    if cache {
+        bits |= COREWEBVIEW2_BROWSING_DATA_KINDS_DISK_CACHE.0
+            | COREWEBVIEW2_BROWSING_DATA_KINDS_CACHE_STORAGE.0;
+    }
+    if bits == 0 {
+        return true;
+    }
+    let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
+        return false;
+    };
+    let Ok(core13) = core.cast::<ICoreWebView2_13>() else {
+        return false;
+    };
+    let Ok(profile) = (unsafe { core13.Profile() }) else {
+        return false;
+    };
+    let Ok(p2) = profile.cast::<ICoreWebView2Profile2>() else {
+        return false;
+    };
+    let kinds = COREWEBVIEW2_BROWSING_DATA_KINDS(bits);
+    let handler = ClearBrowsingDataCompletedHandler::create(Box::new(|_| Ok(())));
+    match since_secs {
+        Some(start) => {
+            // The end of the range is "now and beyond".
+            unsafe { p2.ClearBrowsingDataInTimeRange(kinds, start, 4_102_444_800.0, &handler) }
+                .is_ok()
+        }
+        None => unsafe { p2.ClearBrowsingData(kinds, &handler) }.is_ok(),
+    }
+}
+
 /// Report when the user clicks into a tab (split view: the pane that was clicked becomes active).
 pub fn attach_focus(webview: &WebView, tab_id: TabId, proxy: EventLoopProxy<BrowserEvent>) {
     let handler = FocusChangedEventHandler::create(Box::new(move |_, _| {
@@ -796,6 +885,26 @@ pub fn attach_nav_failures(webview: &WebView, tab_id: TabId, proxy: EventLoopPro
                 | COREWEBVIEW2_WEB_ERROR_STATUS_VALID_AUTHENTICATION_CREDENTIALS_REQUIRED
                 | COREWEBVIEW2_WEB_ERROR_STATUS_VALID_PROXY_AUTHENTICATION_REQUIRED
         );
+        // A page that could not be found or reached at all gets Shoji's own explanation
+        // instead of the engine's plain error page.
+        let unreachable = match status {
+            COREWEBVIEW2_WEB_ERROR_STATUS_HOST_NAME_NOT_RESOLVED => Some(false),
+            COREWEBVIEW2_WEB_ERROR_STATUS_DISCONNECTED
+            | COREWEBVIEW2_WEB_ERROR_STATUS_SERVER_UNREACHABLE => Some(true),
+            _ => None,
+        };
+        if let Some(offline) = unreachable {
+            let mut uri = PWSTR::null();
+            unsafe { sender.Source(&mut uri)? };
+            let uri = take(uri);
+            if uri.starts_with("http://") || uri.starts_with("https://") {
+                let _ = proxy.send_event(BrowserEvent::Unreachable {
+                    tab_id,
+                    uri,
+                    offline,
+                });
+            }
+        }
         if !connect_failure {
             return Ok(());
         }
@@ -892,4 +1001,56 @@ pub fn bring_to_top(webview: &WebView) {
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
         )
     };
+}
+
+/// Clip a child webview to a rounded rectangle of `width` x `height` physical pixels, so a
+/// floating dropdown has soft corners.
+pub fn set_round_region(webview: &WebView, width: i32, height: i32, radius: i32) {
+    use windows::Win32::Graphics::Gdi::{CreateRoundRectRgn, SetWindowRgn};
+    unsafe {
+        let region = CreateRoundRectRgn(0, 0, width + 1, height + 1, radius * 2, radius * 2);
+        SetWindowRgn(webview.hwnd(), Some(region), true);
+    }
+}
+
+/// Clip a child webview to the union of rounded rectangles, each `(left, top, right, bottom,
+/// radius)` in physical pixels. Everything outside them neither draws nor takes clicks.
+pub fn set_union_region(webview: &WebView, rects: &[(i32, i32, i32, i32, i32)]) {
+    use windows::Win32::Graphics::Gdi::{
+        CombineRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn, RGN_OR,
+    };
+    unsafe {
+        let mut union = None;
+        for &(l, t, r, b, radius) in rects {
+            let piece = CreateRoundRectRgn(l, t, r + 1, b + 1, radius * 2, radius * 2);
+            match union {
+                None => union = Some(piece),
+                Some(acc) => {
+                    CombineRgn(Some(acc), Some(acc), Some(piece), RGN_OR);
+                    let _ = DeleteObject(piece.into());
+                }
+            }
+        }
+        SetWindowRgn(webview.hwnd(), union, true);
+    }
+}
+
+/// Remove any clip set with [`set_region`] or [`set_round_region`].
+pub fn clear_region(webview: &WebView) {
+    use windows::Win32::Graphics::Gdi::SetWindowRgn;
+    unsafe {
+        SetWindowRgn(webview.hwnd(), None, true);
+    }
+}
+
+/// Ask the engine to save the page being shown (its own "Save as" dialog: HTML, MHTML or PDF).
+pub fn save_page(webview: &WebView) {
+    let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
+        return;
+    };
+    let Ok(core25) = core.cast::<ICoreWebView2_25>() else {
+        return;
+    };
+    let handler = ShowSaveAsUICompletedHandler::create(Box::new(|_, _| Ok(())));
+    let _ = unsafe { core25.ShowSaveAsUI(&handler) };
 }

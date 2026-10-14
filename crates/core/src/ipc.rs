@@ -81,7 +81,91 @@ pub enum UiToHostMessage {
         log: bool,
     },
     ToggleDownloadsSidebar,
+    /// Where the find and permission cards sit in the chrome strip (x, y, width, height in
+    /// logical px), or `None` while one is closed. The strip is clipped to them.
+    TrayRects {
+        #[serde(default)]
+        find: Option<[f64; 4]>,
+        #[serde(default)]
+        permission: Option<[f64; 4]>,
+        #[serde(default)]
+        toast: Option<[f64; 4]>,
+    },
+    /// The dark-websites dropdown
+    ToggleDarkPanel,
+    /// Open (or switch to) one of Shoji's own pages: "history", "downloads", "passwords",
+    /// "byobu" or "settings"
+    OpenPage {
+        page: String,
+    },
+    PrintPage,
+    /// Open the history page with its clear-browsing-data card showing
+    OpenClearData,
+    /// One page of the history list for the history page; answered with `__historyPage`
+    HistoryQuery {
+        #[serde(default)]
+        query: String,
+        #[serde(default)]
+        offset: usize,
+        #[serde(default = "default_page")]
+        limit: usize,
+        seq: u64,
+    },
+    /// Take these pages out of the history
+    HistoryRemove {
+        urls: Vec<String>,
+    },
+    /// The saved downloads list, answered with `__downloadsList`
+    DownloadsQuery,
+    /// Do something with a saved download: "open", "show" (in its folder) or "remove" (from
+    /// the list; the file stays). `key` is the id from the list.
+    DownloadAction {
+        key: u64,
+        action: String,
+    },
+    /// Clear browsing data from the last `range` ("hour", "day", "week", "month" or "all")
+    ClearBrowsingData {
+        range: String,
+        #[serde(default)]
+        history: bool,
+        #[serde(default)]
+        downloads: bool,
+        #[serde(default)]
+        cookies: bool,
+        #[serde(default)]
+        cache: bool,
+    },
     CloseSidebar,
+    /// The dropdown lost focus (the user clicked elsewhere)
+    SidebarBlur,
+    /// The dropdown's content wants this many logical pixels of height
+    SidebarHeight {
+        height: f64,
+    },
+    /// Pin the dropdown as a side panel that takes page width, or float it again
+    PinSidebar {
+        pinned: bool,
+    },
+    /// Horizontal centre of each toolbar button (logical px), so dropdowns hang from them
+    ToolbarAnchors {
+        items: std::collections::BTreeMap<String, f64>,
+    },
+    /// Set how websites are darkened: for `host`, or for every site when it is `None`
+    SetDarkTheme {
+        #[serde(default)]
+        host: Option<String>,
+        theme: crate::settings::DarkTheme,
+    },
+    /// Forget a site's own dark look and exclusion
+    ResetDarkSite {
+        host: String,
+    },
+    /// Darken websites only between two times of day
+    SetDarkSchedule {
+        enabled: bool,
+        from: String,
+        to: String,
+    },
     /// Open the native Windows certificate dialog for the given host
     OpenCertificateDialog {
         host: String,
@@ -329,6 +413,10 @@ fn yes() -> bool {
 
 fn default_length() -> usize {
     20
+}
+
+fn default_page() -> usize {
+    100
 }
 
 impl UiToHostMessage {
