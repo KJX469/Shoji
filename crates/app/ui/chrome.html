@@ -534,7 +534,11 @@
         if (g) { el.dataset.group = g.id; el.style.setProperty('--g', toneOf(g.color)); }
         else { delete el.dataset.group; el.style.removeProperty('--g'); }
         el.classList.toggle('split-pane', !!state.split && state.split.includes(tab.id));
-        el.classList.toggle('loading', !!tab.is_loading);
+        // A page that never reports completion (a download, a cancelled load) stops looking
+        // busy after a while rather than flapping for ever.
+        if (tab.is_loading) { if (!el.dataset.ls) el.dataset.ls = Date.now(); } else { delete el.dataset.ls; }
+        const busy = !!tab.is_loading && Date.now() - (+el.dataset.ls || Date.now()) < 30000;
+        el.classList.toggle('loading', busy);
         el.classList.toggle('asleep', tab.status === 'Suspended');
         const active = tab.id === state_.active_tab_id;
         el.classList.toggle('active', active);
@@ -565,7 +569,8 @@
       }
       try { activeHost = internal ? '' : new URL(tab.url).hostname.replace(/^www\./, ''); } catch { activeHost = ''; }
       syncDark();
-      document.body.classList.toggle('loading', !!tab.is_loading);
+      const act = $('tab-' + tab.id);
+      document.body.classList.toggle('loading', !!tab.is_loading && !!act && act.classList.contains('loading'));
       $('btnBack').disabled = !tab.can_go_back;
       $('btnForward').disabled = !tab.can_go_forward;
       const kind = internal || tab.notice ? 'shoji' : (tab.url.startsWith('https://') ? 'lock' : 'open');
@@ -773,6 +778,14 @@
       $('winMax').title = $('winMax').ariaLabel = w.maximized ? 'Restore' : 'Maximize';
     };
 
+    // Re-check busy tabs now and then: a tab stuck "loading" for 30 s stops looking busy.
+    setInterval(() => {
+      const now = Date.now();
+      document.querySelectorAll('.tab.loading').forEach(el => {
+        if (now - (+el.dataset.ls || now) > 30000) el.classList.remove('loading');
+      });
+      document.body.classList.toggle('loading', !!document.querySelector('.tab.active.loading'));
+    }, 4000);
     $('lockIcon').innerHTML = ICONS.shoji;
     window.__syncFav(false);
     // Pose the little crane in the toast to match its message, now that the page has the kit.

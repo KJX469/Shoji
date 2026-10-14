@@ -72,10 +72,23 @@ pub fn webview_theme(pref: &str) -> wry::Theme {
     }
 }
 
+static DARK_FRAME: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(theme::FRAME_DARK);
+static DARK_PAGE: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(theme::PAGE_DARK);
+
+/// Set the colours the dark browser is drawn with (the title bar and the pre-paint colour of
+/// webviews), as `0xRRGGBB`. Follows the user's dark-mode adjustments.
+pub fn set_dark_colors(frame: u32, page: u32) {
+    use std::sync::atomic::Ordering::Relaxed;
+    DARK_FRAME.store(frame, Relaxed);
+    DARK_PAGE.store(page, Relaxed);
+}
+
 /// Page background used to pre-paint webviews so they never flash white.
 pub fn page_rgba(dark: bool) -> (u8, u8, u8, u8) {
     let c = if dark {
-        theme::PAGE_DARK
+        DARK_PAGE.load(std::sync::atomic::Ordering::Relaxed)
     } else {
         theme::PAGE_LIGHT
     };
@@ -93,15 +106,20 @@ pub fn apply_frame(window: &Window, dark: bool) {
     use windows::Win32::UI::WindowsAndMessaging::{SetClassLongPtrW, GCLP_HBRBACKGROUND};
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
-    // One brush per mode for the life of the process (window classes share it).
-    static BRUSHES: std::sync::OnceLock<(isize, isize)> = std::sync::OnceLock::new();
+    // One brush per colour for the life of the process (window classes share them).
+    static BRUSHES: std::sync::Mutex<Vec<(u32, isize)>> = std::sync::Mutex::new(Vec::new());
     let bgr = |rgb: u32| COLORREF(((rgb & 0xff) << 16) | (rgb & 0xff00) | ((rgb >> 16) & 0xff));
-    let (light_brush, dark_brush) = *BRUSHES.get_or_init(|| unsafe {
-        (
-            CreateSolidBrush(bgr(theme::FRAME_LIGHT)).0 as isize,
-            CreateSolidBrush(bgr(theme::FRAME_DARK)).0 as isize,
-        )
-    });
+    let dark_frame = DARK_FRAME.load(std::sync::atomic::Ordering::Relaxed);
+    let brush_for = |rgb: u32| -> isize {
+        let mut brushes = BRUSHES.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, b)) = brushes.iter().find(|(c, _)| *c == rgb) {
+            return *b;
+        }
+        let b = unsafe { CreateSolidBrush(bgr(rgb)).0 as isize };
+        brushes.push((rgb, b));
+        b
+    };
+    let (light_brush, dark_brush) = (brush_for(theme::FRAME_LIGHT), brush_for(dark_frame));
 
     let Ok(handle) = window.window_handle() else {
         return;
@@ -110,11 +128,7 @@ pub fn apply_frame(window: &Window, dark: bool) {
         return;
     };
     let hwnd = HWND(h.hwnd.get() as _);
-    let caption = bgr(if dark {
-        theme::FRAME_DARK
-    } else {
-        theme::FRAME_LIGHT
-    });
+    let caption = bgr(if dark { dark_frame } else { theme::FRAME_LIGHT });
     let text = bgr(if dark { 0xebe6dc } else { 0x2b2924 });
     let dark_flag: i32 = dark.into();
     unsafe {

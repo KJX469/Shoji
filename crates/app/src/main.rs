@@ -505,6 +505,8 @@ struct BrowserWindow {
     /// The window is full screen with the toolbar hidden
     fullscreen: bool,
     permission_open: bool,
+    /// The chrome strip currently has a window region set (cards are showing)
+    chrome_clipped: bool,
     /// Frames of the floating find and permission cards (None while closed)
     tray_rects: [Option<Frame>; 3],
     /// Tab strip needs a sync at the end of this event-loop turn
@@ -619,8 +621,12 @@ impl BrowserWindow {
             let cards: Vec<Frame> = self.tray_rects.iter().flatten().copied().collect();
             if cards.is_empty() {
                 let _ = chrome.set_bounds(bounds(0.0, 0.0, self.width, top));
-                webview::clear_region(chrome);
+                if self.chrome_clipped {
+                    self.chrome_clipped = false;
+                    webview::clear_region(chrome);
+                }
             } else {
+                self.chrome_clipped = true;
                 // The strip grows to cover the cards but is clipped to the bar and the cards, so
                 // the page underneath still shows and takes clicks everywhere else.
                 let scale = self.window.scale_factor();
@@ -978,6 +984,10 @@ impl BrowserApp {
     fn new(proxy: EventLoopProxy<BrowserEvent>, data_dir: PathBuf, engine_version: String) -> Self {
         let settings_path = data_dir.join("settings.json");
         let settings = Settings::load_from_path(&settings_path);
+        {
+            let (frame, page) = pages::browser_look(&settings).frame_and_page();
+            window::set_dark_colors(frame, page);
+        }
         webview::set_download_prefs(
             settings.downloads.ask_where_to_save,
             settings.downloads.default_folder.clone(),
@@ -1161,6 +1171,7 @@ impl BrowserApp {
                 fullscreen: false,
                 permission_open: false,
                 tray_rects: [None, None, None],
+                chrome_clipped: false,
                 ui_dirty: true,
                 sidebar_dirty: false,
                 last_ui_json: String::new(),
@@ -2884,9 +2895,22 @@ impl BrowserApp {
         self.save_settings();
         let s = &self.settings;
 
+        if s.appearance.browser_theme != before.appearance.browser_theme {
+            let look = pages::browser_look(s);
+            let (frame, page) = look.frame_and_page();
+            window::set_dark_colors(frame, page);
+            for win in self.windows.values_mut() {
+                window::apply_frame(
+                    &win.window,
+                    window::is_dark(&win.window, &s.appearance.theme),
+                );
+                win.sidebar_dirty = true;
+            }
+        }
         if s.accent() != before.accent()
             || s.appearance.theme != before.appearance.theme
             || s.fonts() != before.fonts()
+            || s.appearance.browser_theme != before.appearance.browser_theme
         {
             let js = pages::apply_theme_js(s);
             for win in self.windows.values() {
@@ -3198,6 +3222,9 @@ impl BrowserApp {
                     }
                     _ => s.appearance.dark_theme = theme,
                 });
+            }
+            M::SetBrowserTheme { theme } => {
+                self.update_settings(|s| s.appearance.browser_theme = theme);
             }
             M::ResetDarkSite { host } => {
                 let host = shoji_core::settings::extract_domain(&host);

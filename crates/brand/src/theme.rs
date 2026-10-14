@@ -257,3 +257,165 @@ pub fn accents_json() -> String {
         .collect();
     format!("[{}]", items.join(","))
 }
+
+/// How the browser's own dark mode is drawn: the base colours and the same four adjustments
+/// Dark Reader offers for websites.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DarkLook {
+    pub background: [u8; 3],
+    pub text: [u8; 3],
+    /// Percent: brightness and contrast 50..=150, sepia and grayscale 0..=100
+    pub brightness: i32,
+    pub contrast: i32,
+    pub sepia: i32,
+    pub grayscale: i32,
+}
+
+impl DarkLook {
+    /// The stock Sumi look: what the tokens in [`css`] already say.
+    pub const SUMI: DarkLook = DarkLook {
+        background: [0x1b, 0x1a, 0x18],
+        text: [0xeb, 0xe6, 0xdc],
+        brightness: 100,
+        contrast: 100,
+        sepia: 0,
+        grayscale: 0,
+    };
+
+    /// Parse `#rrggbb`.
+    pub fn parse_hex(s: &str) -> Option<[u8; 3]> {
+        let h = s.strip_prefix('#')?;
+        (h.len() == 6).then_some(())?;
+        let v = u32::from_str_radix(h, 16).ok()?;
+        Some([(v >> 16) as u8, (v >> 8) as u8, v as u8])
+    }
+
+    fn adjust(&self, c: [u8; 3]) -> [f32; 3] {
+        let mut v = c.map(f32::from);
+        let b = self.brightness as f32 / 100.0;
+        let k = self.contrast as f32 / 100.0;
+        v = v.map(|x| ((x * b - 128.0) * k + 128.0).clamp(0.0, 255.0));
+        let s = (self.sepia as f32 / 100.0).clamp(0.0, 1.0);
+        if s > 0.0 {
+            let [r, g, b] = v;
+            let sep = [
+                0.393 * r + 0.769 * g + 0.189 * b,
+                0.349 * r + 0.686 * g + 0.168 * b,
+                0.272 * r + 0.534 * g + 0.131 * b,
+            ];
+            for i in 0..3 {
+                v[i] = (v[i] + (sep[i].min(255.0) - v[i]) * s).clamp(0.0, 255.0);
+            }
+        }
+        let gr = (self.grayscale as f32 / 100.0).clamp(0.0, 1.0);
+        if gr > 0.0 {
+            let l = 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+            for x in &mut v {
+                *x += (l - *x) * gr;
+            }
+        }
+        v
+    }
+
+    fn hex(c: [f32; 3]) -> String {
+        format!(
+            "#{:02x}{:02x}{:02x}",
+            c[0].round() as u8,
+            c[1].round() as u8,
+            c[2].round() as u8
+        )
+    }
+
+    fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+        [
+            a[0] + (b[0] - a[0]) * t,
+            a[1] + (b[1] - a[1]) * t,
+            a[2] + (b[2] - a[2]) * t,
+        ]
+    }
+
+    /// The window frame and page-background colours as `0xRRGGBB`: `(frame, page)`.
+    pub fn frame_and_page(&self) -> (u32, u32) {
+        let bg = self.adjust(self.background);
+        let sunk = bg.map(|x| x * 0.78);
+        let pack = |c: [f32; 3]| {
+            (u32::from(c[0].round() as u8) << 16)
+                | (u32::from(c[1].round() as u8) << 8)
+                | u32::from(c[2].round() as u8)
+        };
+        (pack(sunk), pack(bg))
+    }
+
+    /// CSS that restyles every surface in dark mode (empty for the stock Sumi look). It uses the
+    /// same selectors as the built-in dark tokens, so it wins by coming later.
+    pub fn override_css(&self) -> String {
+        if *self == Self::SUMI {
+            String::new()
+        } else {
+            self.tokens_css()
+        }
+    }
+
+    /// The same rules, always written out (used to replace an earlier override live).
+    pub fn tokens_css(&self) -> String {
+        let bg = self.adjust(self.background);
+        let text = self.adjust(self.text);
+        let sunk = bg.map(|x| x * 0.78);
+        let surface = Self::mix(bg, text, 0.034);
+        let surface2 = Self::mix(bg, text, 0.072);
+        let ink2 = Self::mix(text, bg, 0.34);
+        let ink3 = Self::mix(text, bg, 0.55);
+        let rgba = |a: f32| {
+            format!(
+                "rgba({}, {}, {}, {a})",
+                text[0].round() as u8,
+                text[1].round() as u8,
+                text[2].round() as u8
+            )
+        };
+        let decls = format!(
+            "--bg: {}; --bg-sunk: {}; --surface: {}; --surface-2: {}; --line: {}; --line-strong: {}; \
+             --ink: {}; --ink-2: {}; --ink-3: {}; --hover: {}; --press: {};",
+            Self::hex(bg),
+            Self::hex(sunk),
+            Self::hex(surface),
+            Self::hex(surface2),
+            rgba(0.09),
+            rgba(0.17),
+            Self::hex(text),
+            Self::hex(ink2),
+            Self::hex(ink3),
+            rgba(0.06),
+            rgba(0.10),
+        );
+        format!(
+            "@media (prefers-color-scheme: dark) {{ :root:not([data-mode=\"light\"]) {{ {decls} }} }}\n\
+             :root[data-mode=\"dark\"] {{ {decls} }}\n"
+        )
+    }
+}
+
+#[cfg(test)]
+mod dark_look_tests {
+    use super::*;
+
+    #[test]
+    fn stock_look_adds_nothing_and_tweaks_change_the_tokens() {
+        assert_eq!(DarkLook::SUMI.override_css(), "");
+        let blue = DarkLook {
+            background: DarkLook::parse_hex("#0f1420").unwrap(),
+            ..DarkLook::SUMI
+        };
+        let css = blue.override_css();
+        assert!(css.contains("--bg: #0f1420"), "{css}");
+        assert!(css.contains("data-mode=\"dark\""));
+        let dim = DarkLook {
+            brightness: 50,
+            ..DarkLook::SUMI
+        };
+        assert!(dim.override_css().contains("--ink: #76736e"));
+        let (frame, page) = blue.frame_and_page();
+        assert!(frame < page);
+        assert_eq!(DarkLook::parse_hex("zzzzzz"), None);
+    }
+}

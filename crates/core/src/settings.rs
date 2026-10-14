@@ -81,6 +81,8 @@ pub struct AppearanceSettings {
     pub dark_site_themes: std::collections::BTreeMap<String, DarkTheme>,
     /// Only darken websites between two times of day
     pub dark_schedule: DarkSchedule,
+    /// How the browser's own dark mode looks (same controls as for websites)
+    pub browser_theme: DarkTheme,
     /// Seasonal and time-of-day decoration on the new tab page
     pub seasons: bool,
     /// Show only the site's domain in the address bar until it is clicked
@@ -328,6 +330,7 @@ impl Default for AppearanceSettings {
             dark_theme: DarkTheme::default(),
             dark_site_themes: std::collections::BTreeMap::new(),
             dark_schedule: DarkSchedule::default(),
+            browser_theme: DarkTheme::default(),
             seasons: true,
             compact_address: true,
             tint_toolbar: true,
@@ -510,6 +513,7 @@ impl Settings {
         self.appearance.default_zoom_level = self.appearance.default_zoom_level.clamp(0.25, 3.0);
         self.appearance.dark_theme.normalize();
         self.appearance.dark_schedule.normalize();
+        self.appearance.browser_theme.normalize();
         let mut sites = std::mem::take(&mut self.appearance.dark_site_themes);
         sites.retain(|host, _| !host.trim().is_empty() && host.len() < 254);
         if sites.len() > 500 {
