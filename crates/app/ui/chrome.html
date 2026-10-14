@@ -12,8 +12,13 @@
 
     /* Title bar: tabs share the top row with the window controls, like a shoji frame's top rail */
     .titlebar { position: relative; display: flex; align-items: flex-end; height: 38px; flex-shrink: 0; app-region: drag; }
-    .tab, .new-tab, .caption button, .resize-top { app-region: no-drag; }
+    .ws-pill, .tab, .new-tab, .caption button, .resize-top { app-region: no-drag; }
     .tab-strip { flex: 1; min-width: 0; display: flex; align-items: flex-end; height: 100%; padding-left: 8px; overflow: hidden; }
+    .ws-pill { align-self: center; display: flex; align-items: center; gap: 6px; height: 24px; max-width: 140px; margin: 0 4px 0 0; padding: 0 9px; border-radius: 7px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); font-size: 11.5px; font-weight: 600; flex-shrink: 0; transition: background .12s, border-color .12s; }
+    .ws-pill:hover { background: var(--hover); }
+    .ws-pill.drop-ws { border-color: var(--accent); box-shadow: 0 0 0 2px var(--tint-soft); }
+    .ws-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ws, var(--tone)); flex-shrink: 0; }
+    #wsName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #tabs { display: flex; align-items: flex-end; flex: 0 1 auto; min-width: 0; }
     .drag { flex: 1; min-width: 48px; height: 100%; }
     .caption { display: flex; flex-shrink: 0; height: 100%; align-self: flex-start; }
@@ -32,12 +37,17 @@
     .tab.active { background: var(--surface); color: var(--ink); }
     .tab.active::before { content: ""; position: absolute; left: 12px; right: 12px; top: 0; height: 2px; border-radius: 0 0 2px 2px; background: var(--tone); }
     .tab * { pointer-events: none; }
-    .tab .close { pointer-events: auto; }
+    .tab .close, .tab .audio { pointer-events: auto; }
     .tab.dragging { opacity: .45; }
     .tab.drop-left { box-shadow: inset 2px 0 0 var(--accent); }
     .tab.drop-right { box-shadow: inset -2px 0 0 var(--accent); }
     .favicon { width: 16px; height: 16px; border-radius: 3px; flex-shrink: 0; object-fit: contain; }
     .title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); }
+    .audio { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; color: var(--accent); flex-shrink: 0; }
+    .audio[hidden] { display: none; }
+    .audio.muted { color: var(--ink-3); }
+    .audio:hover { background: var(--press); color: var(--ink); }
+    .audio svg.i { width: 13px; height: 13px; }
     .close { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; color: var(--ink-3); opacity: 0; transition: opacity .12s, background .12s; }
     .tab:hover .close, .tab.active .close { opacity: 1; }
     .close:hover { background: var(--press); color: var(--ink); }
@@ -94,8 +104,15 @@
     .group-chip { align-self: center; flex: 0 0 auto; display: block; line-height: 22px; max-width: 120px; height: 22px; margin: 0 2px 0 6px; padding: 0 9px; border-radius: 11px; font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #26231f; background: var(--g, var(--tone)); app-region: no-drag; cursor: default; }
     .tab[data-group]::before { content: ""; position: absolute; left: 6px; right: 6px; bottom: 0; height: 3px; border-radius: 2px 2px 0 0; background: var(--g); }
     .tab.active[data-group]::before { top: auto; left: 6px; right: 6px; height: 3px; background: var(--g); }
-    .tab.split-pane { box-shadow: inset 0 -2px 0 var(--accent); }
-    .tab.split-pane .title::before { content: "\25EB  "; color: var(--accent); }
+    .tab.split-pane { box-shadow: inset 0 -2px 0 var(--line-strong); }
+    .tab.split-pane.active { box-shadow: inset 0 -2px 0 var(--accent); }
+    .tab.split-pane .title::before { content: "\25EB  "; color: var(--ink-3); }
+    .tab.split-pane.active .title::before { content: "\25E7  "; color: var(--accent); }
+    .split-ctl { display: flex; align-items: center; gap: 1px; height: 26px; padding: 0 3px; border-radius: 7px; background: var(--surface-2); border: 1px solid var(--line); flex-shrink: 0; }
+    .split-ctl[hidden] { display: none; }
+    .split-ctl button { height: 22px; padding: 0 6px; border-radius: 5px; font-size: 11px; color: var(--ink-2); display: flex; align-items: center; gap: 4px; }
+    .split-ctl button:hover { background: var(--hover); color: var(--ink); }
+    .split-ctl svg.i { width: 14px; height: 14px; }
 
     /* Favourite / reader / picture-in-picture buttons */
     #btnFav.on { color: var(--accent); }
@@ -130,6 +147,10 @@
   <div class="titlebar">
     <div class="resize-top" onmousedown="if (event.button === 0) post('StartWindowResize')"></div>
     <div class="tab-strip" id="tabStrip">
+      <button class="ws-pill" id="wsPill" onclick="post('ToggleWorkspacesSidebar')" oncontextmenu="event.preventDefault(); openWsMenu(event)" title="Spaces (Alt+W)" aria-label="Workspace">
+        <span class="ws-dot" id="wsDot"></span>
+        <span id="wsName">Main</span>
+      </button>
       <div id="tabs" role="tablist" aria-label="Tabs"></div>
       <button class="new-tab" onclick="post('CreateTab', { url: null })" title="New tab (Ctrl+T)" aria-label="New tab">
         <svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
@@ -166,6 +187,17 @@
         <button onclick="post('ZoomReset')" id="zoomReset" title="Reset zoom (Ctrl+0)">100%</button>
         <button class="step" onclick="post('ZoomIn')" title="Zoom in (Ctrl++)">+</button>
       </div>
+    </div>
+
+    <div class="split-ctl" id="splitCtl" hidden>
+      <button id="btnSplitOrient" onclick="post('ToggleSplitOrientation')" ondblclick="post('ResetSplitRatio')" title="Flip split orientation (Alt+Shift+S)" aria-label="Flip split orientation">
+        <svg class="i" viewBox="0 0 24 24" id="splitOrientIcon"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg>
+        <span id="splitRatioText">50/50</span>
+      </button>
+      <button onclick="post('ResetSplitRatio')" title="Reset split to 50/50" aria-label="Reset split to 50/50">=</button>
+      <button onclick="post('SplitWith', { tab_id: null })" title="Exit split view (Ctrl+Shift+S)" aria-label="Exit split view">
+        <svg class="i" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg>
+      </button>
     </div>
 
     <button class="btn" id="btnFav" onclick="post('ToggleFavourite')" title="Add to favourites (Ctrl+D)" aria-label="Favourite">
@@ -244,9 +276,34 @@
     const ACCENTS = {{ACCENTS_JSON}};
     const toneOf = id => (ACCENTS.find(a => a.id === id) || ACCENTS[0]).tone;
     const hostOf = url => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; } };
-    let state = { tabs: [], groups: [], split: null };
+    let state = { tabs: [], groups: [], split: null, split_state: null, workspaces: [], active_workspace_id: 1, inactive_tabs: [] };
     let data = { favs: [], recent: [] };
     let suggestions = [], sel = -1, suggestTimer = 0, suggestSeq = 0;
+
+    function openWsMenu(e) {
+      e.preventDefault();
+      const r = $('wsPill').getBoundingClientRect();
+      post('WorkspaceMenu', { workspace_id: state.active_workspace_id || 1, x: r.left, y: 36 });
+    }
+    const wsPill = $('wsPill');
+    wsPill.ondragover = e => {
+      if (!drag) return;
+      e.preventDefault();
+      wsPill.classList.add('drop-ws');
+    };
+    wsPill.ondragleave = () => wsPill.classList.remove('drop-ws');
+    wsPill.ondrop = e => {
+      e.preventDefault();
+      wsPill.classList.remove('drop-ws');
+      if (!drag) return;
+      drag.dropped = true;
+      const others = (state.workspaces || []).filter(w => w.id !== state.active_workspace_id);
+      if (others.length === 1) {
+        post('MoveTabToWorkspace', { tab_id: drag.id, workspace_id: others[0].id });
+      } else {
+        post('ToggleWorkspacesSidebar');
+      }
+    };
 
     /* Address bar: compact (domain only) until clicked, with suggestions while typing */
     function shownUrl(full, focused) {
@@ -371,6 +428,9 @@
       $('btnReader').title = d.reader ? 'Exit reader view (F9)' : 'Reader view (F9)';
     };
 
+    const SPEAKER_ON = '<svg class="i" viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
+    const SPEAKER_MUTED = '<svg class="i" viewBox="0 0 24 24"><path d="M11 5L6 9H3v6h3l5 4V5zM16 9l6 6M22 9l-6 6"/></svg>';
+
     /* Tabs: create each element once, then patch only what changed */
     function buildTab(id) {
       const el = document.createElement('div');
@@ -378,11 +438,13 @@
       el.id = 'tab-' + id;
       el.setAttribute('role', 'tab');
       el.innerHTML = '<img class="favicon" alt=""><span class="title"></span>' +
+        '<button class="audio" tabindex="-1" hidden aria-label="Mute tab"></button>' +
         '<button class="close" tabindex="-1" aria-label="Close tab"><svg class="i" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg></button>';
       el.querySelector('.favicon').onerror = function () { this.src = SHOJI_FAVICON; };
       el.onmousedown = e => { if (e.button === 1) { e.preventDefault(); post('CloseTab', { id }); } };
       el.onclick = () => post('SwitchTab', { id });
       el.oncontextmenu = e => { e.preventDefault(); post('TabMenu', { tab_id: id, x: e.clientX, y: 36 }); };
+      el.querySelector('.audio').onclick = e => { e.stopPropagation(); post('ToggleMuteTab', { tab_id: id }); };
       el.querySelector('.close').onclick = e => { e.stopPropagation(); post('CloseTab', { id }); };
       el.draggable = true;
       el.ondragstart = e => { drag = { id, index: +el.dataset.index, dropped: false }; el.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; };
@@ -425,8 +487,31 @@
     window.__shellUpdate = function (msg) {
       const incoming = msg && (msg.data || msg);
       if (!incoming || !incoming.tabs) return;
-      state = { tabs: incoming.tabs, groups: incoming.groups || [], split: incoming.split || null };
+      state = {
+        tabs: incoming.tabs,
+        groups: incoming.groups || [],
+        split: incoming.split || null,
+        split_state: incoming.split_state || null,
+        workspaces: incoming.workspaces || [],
+        active_workspace_id: incoming.active_workspace_id || 1,
+        inactive_tabs: incoming.inactive_tabs || []
+      };
       const state_ = incoming;
+      const ws = state.workspaces.find(w => w.id === state.active_workspace_id) || state.workspaces[0];
+      if (ws) {
+        setText($('wsName'), ws.name);
+        $('wsPill').style.setProperty('--ws', toneOf(ws.color));
+        $('wsPill').title = `${ws.name} \u2014 Spaces (Alt+W)`;
+      }
+      const sp = state.split_state;
+      $('splitCtl').hidden = !sp;
+      if (sp) {
+        const pct = Math.round((sp.ratio || 0.5) * 100);
+        setText($('splitRatioText'), `${pct}/${100 - pct}`);
+        const vert = sp.orientation !== 'horizontal';
+        $('splitOrientIcon').innerHTML = '<rect x="3" y="4" width="18" height="16" rx="2"/>' +
+          (vert ? '<path d="M12 4v16"/>' : '<path d="M3 12h18"/>');
+      }
       const container = $('tabs');
       const switched = activeTabId !== state_.active_tab_id;
       activeTabId = state_.active_tab_id;
@@ -480,6 +565,19 @@
         const icon = (!internal && tab.favicon_uri) || SHOJI_FAVICON;
         const img = el.querySelector('.favicon');
         if (img.dataset.src !== icon) { img.dataset.src = icon; img.src = icon; }
+
+        const audioBtn = el.querySelector('.audio');
+        const showAudio = !!(tab.is_audio_playing || tab.is_muted);
+        audioBtn.hidden = !showAudio;
+        if (showAudio) {
+          audioBtn.classList.toggle('muted', !!tab.is_muted);
+          const wantIcon = tab.is_muted ? SPEAKER_MUTED : SPEAKER_ON;
+          if (audioBtn.dataset.icon !== (tab.is_muted ? 'muted' : 'on')) {
+            audioBtn.dataset.icon = tab.is_muted ? 'muted' : 'on';
+            audioBtn.innerHTML = wantIcon;
+          }
+          audioBtn.title = tab.is_muted ? 'Unmute tab' : 'Mute tab';
+        }
 
         if (active) syncActive(tab, internal, switched);
       });

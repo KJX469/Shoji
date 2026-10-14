@@ -355,6 +355,7 @@ pub fn sidebar(s: &Settings) -> String {
             ("MODE", &s.appearance.theme),
             ("FONTS", s.fonts().id),
             ("CRANE", &theme::crane_svg("c", "")),
+            ("ACCENTS_JSON", &theme::accents_json()),
         ],
     )
 }

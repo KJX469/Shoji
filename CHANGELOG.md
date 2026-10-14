@@ -4,6 +4,11 @@ All notable changes to Shoji are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Workspaces and Split View.** Organize tabs into named, colored spaces and view any two tabs side by side with a vertical or horizontal divider.
+
 ## [0.1.2] - 2026-10-13
 
 ### Added
