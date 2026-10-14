@@ -133,7 +133,10 @@ pub fn read_profile(
                 progress("Reading favourites");
                 match std::fs::read_to_string(dir.join("Bookmarks")) {
                     Ok(json) => out.favourites = bookmarks::from_chromium_json(&json),
-                    Err(_) => out.report.notes.push(format!("{name} has no favourites file")),
+                    Err(_) => out
+                        .report
+                        .notes
+                        .push(format!("{name} has no favourites file")),
                 }
             }
             if kinds.history {
@@ -146,17 +149,17 @@ pub fn read_profile(
             let need_key = kinds.cookies || kinds.passwords;
             let have_key = need_key && decryptor.load_key(&profile.local_state);
             if need_key && !have_key {
-                out.report
-                    .notes
-                    .push(format!("Sign-ins and passwords in {name} are protected and can't be read"));
+                out.report.notes.push(format!(
+                    "Sign-ins and passwords in {name} are protected and can't be read"
+                ));
             }
             if kinds.cookies && have_key {
                 progress("Reading sign-ins");
                 let path = [dir.join("Network").join("Cookies"), dir.join("Cookies")]
                     .into_iter()
                     .find(|p| p.exists());
-                match path {
-                    Some(p) => match sqlite::chromium_cookies(&p, decryptor) {
+                if let Some(p) = path {
+                    match sqlite::chromium_cookies(&p, decryptor) {
                         Ok((c, skipped)) => {
                             out.cookies = c;
                             if skipped > 0 {
@@ -166,8 +169,7 @@ pub fn read_profile(
                             }
                         }
                         Err(e) => note(&mut out, "Sign-ins", e),
-                    },
-                    None => {}
+                    }
                 }
             }
             if kinds.passwords && have_key {
@@ -265,10 +267,21 @@ mod tests {
             local_state: dir.join("Local State"),
         };
         let mut steps = Vec::new();
-        let got = read_profile(source, &profile, Kinds::default(), &mut NoDecryptor, &mut |s| {
-            steps.push(s.to_string())
-        });
-        assert_eq!((got.report.favourites, got.report.history, got.report.cookies), (1, 1, 0));
+        let got = read_profile(
+            source,
+            &profile,
+            Kinds::default(),
+            &mut NoDecryptor,
+            &mut |s| steps.push(s.to_string()),
+        );
+        assert_eq!(
+            (
+                got.report.favourites,
+                got.report.history,
+                got.report.cookies
+            ),
+            (1, 1, 0)
+        );
         assert!(!got.report.locked);
         assert!(got.report.notes.iter().any(|n| n.contains("Sign-ins")));
         assert_eq!(steps, ["Reading favourites", "Reading history"]);

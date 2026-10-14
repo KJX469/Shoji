@@ -10,7 +10,9 @@ use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 use shoji_core::import::{catalog, Decryptor, Imported, Kinds};
 use std::path::{Path, PathBuf};
 use windows::Win32::Foundation::{LocalFree, HLOCAL};
-use windows::Win32::Security::Cryptography::{CryptProtectData, CryptUnprotectData, CRYPT_INTEGER_BLOB};
+use windows::Win32::Security::Cryptography::{
+    CryptProtectData, CryptUnprotectData, CRYPT_INTEGER_BLOB,
+};
 
 /// Reverse DPAPI protection made for the current Windows user.
 pub(crate) fn dpapi_unprotect(data: &[u8]) -> Option<Vec<u8>> {
@@ -70,12 +72,17 @@ impl Decryptor for WinDecryptor {
         let Some(key) = dpapi_unprotect(wrapped) else {
             return false;
         };
-        self.key = UnboundKey::new(&AES_256_GCM, &key).ok().map(LessSafeKey::new);
+        self.key = UnboundKey::new(&AES_256_GCM, &key)
+            .ok()
+            .map(LessSafeKey::new);
         self.key.is_some()
     }
 
     fn decrypt(&self, blob: &[u8]) -> Option<Vec<u8>> {
-        if let Some(rest) = blob.strip_prefix(b"v10").or_else(|| blob.strip_prefix(b"v11")) {
+        if let Some(rest) = blob
+            .strip_prefix(b"v10")
+            .or_else(|| blob.strip_prefix(b"v11"))
+        {
             // nonce (12) + ciphertext + tag (16)
             if rest.len() < 12 + 16 {
                 return None;
@@ -83,10 +90,15 @@ impl Decryptor for WinDecryptor {
             let (nonce, sealed) = rest.split_at(12);
             let nonce = Nonce::try_assume_unique_for_key(nonce).ok()?;
             let mut buf = sealed.to_vec();
-            let plain = self.key.as_ref()?.open_in_place(nonce, Aad::empty(), &mut buf).ok()?;
+            let plain = self
+                .key
+                .as_ref()?
+                .open_in_place(nonce, Aad::empty(), &mut buf)
+                .ok()?;
             return Some(plain.to_vec());
         }
-        if blob.len() > 3 && blob[0] == b'v' && blob[1].is_ascii_digit() && blob[2].is_ascii_digit() {
+        if blob.len() > 3 && blob[0] == b'v' && blob[1].is_ascii_digit() && blob[2].is_ascii_digit()
+        {
             // v20 and any later sealed format: not readable without the browser itself.
             return None;
         }
@@ -96,12 +108,18 @@ impl Decryptor for WinDecryptor {
 }
 
 fn env_dir(name: &str) -> PathBuf {
-    std::env::var_os(name).map(PathBuf::from).unwrap_or_default()
+    std::env::var_os(name)
+        .map(PathBuf::from)
+        .unwrap_or_default()
 }
 
 /// Every browser Shoji knows, with what was found on this PC.
 pub fn detect() -> Vec<catalog::Detected> {
-    catalog::detect(&env_dir("LOCALAPPDATA"), &env_dir("APPDATA"), &env_dir("USERPROFILE"))
+    catalog::detect(
+        &env_dir("LOCALAPPDATA"),
+        &env_dir("APPDATA"),
+        &env_dir("USERPROFILE"),
+    )
 }
 
 /// Where to start the folder picker for `source`.
@@ -139,5 +157,11 @@ pub fn read(
     kinds: Kinds,
     progress: &mut dyn FnMut(&str),
 ) -> Imported {
-    shoji_core::import::read_profile(source, profile, kinds, &mut WinDecryptor::default(), progress)
+    shoji_core::import::read_profile(
+        source,
+        profile,
+        kinds,
+        &mut WinDecryptor::default(),
+        progress,
+    )
 }

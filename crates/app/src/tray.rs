@@ -212,7 +212,7 @@ mod imp {
             if add {
                 let hinst = GetModuleHandleW(None).unwrap_or_default();
                 // The executable's icon resource has id 1 (see build.rs).
-                let icon = LoadIconW(Some(hinst.into()), PCWSTR(1usize as *const u16));
+                let icon = LoadIconW(Some(hinst.into()), PCWSTR(std::ptr::dangling::<u16>()));
                 data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
                 data.uCallbackMessage = WM_TRAY;
                 data.hIcon = icon.unwrap_or_default();

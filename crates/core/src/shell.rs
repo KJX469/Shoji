@@ -208,11 +208,7 @@ pub fn register_as_browser(exe: &Path) -> windows::core::Result<()> {
     for scheme in ["http", "https"] {
         set_value(&format!(r"{caps}\URLAssociations"), scheme, URL_PROG_ID)?;
     }
-    set_value(
-        REGISTERED_APPS_KEY,
-        REGISTERED_APP,
-        &caps,
-    )
+    set_value(REGISTERED_APPS_KEY, REGISTERED_APP, &caps)
 }
 
 /// Undo [`register_as_browser`] (uninstall).

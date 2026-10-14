@@ -98,7 +98,11 @@ impl Favourites {
             let title: String = f.title.trim().chars().take(120).collect();
             self.items.push(Favourite {
                 url: f.url.clone(),
-                title: if title.is_empty() { f.url.clone() } else { title },
+                title: if title.is_empty() {
+                    f.url.clone()
+                } else {
+                    title
+                },
             });
         }
         let added = self.items.len() - before;
@@ -241,7 +245,11 @@ impl History {
 
     /// Entries matching every word of `query` in title or address: most recent first.
     pub fn search(&self, query: &str, limit: usize) -> Vec<&HistoryEntry> {
-        let words: Vec<String> = query.to_lowercase().split_whitespace().map(String::from).collect();
+        let words: Vec<String> = query
+            .to_lowercase()
+            .split_whitespace()
+            .map(String::from)
+            .collect();
         let mut hits: Vec<&HistoryEntry> = self
             .items
             .iter()
@@ -250,7 +258,9 @@ impl History {
                 words.iter().all(|w| hay.contains(w))
             })
             .collect();
-        hits.sort_by(|a, b| (b.visits.min(20), b.last_visit).cmp(&(a.visits.min(20), a.last_visit)));
+        hits.sort_by(|a, b| {
+            (b.visits.min(20), b.last_visit).cmp(&(a.visits.min(20), a.last_visit))
+        });
         hits.truncate(limit);
         hits
     }
@@ -455,8 +465,18 @@ mod history_tests {
         assert_eq!(h.len(), 1);
         assert_eq!((h.items()[0].visits, h.items()[0].last_visit), (2, 20));
         let added = h.merge(vec![
-            HistoryEntry { url: "https://rust-lang.org/".into(), title: "x".into(), visits: 9, last_visit: 5 },
-            HistoryEntry { url: "https://example.com/".into(), title: "Example".into(), visits: 1, last_visit: 50 },
+            HistoryEntry {
+                url: "https://rust-lang.org/".into(),
+                title: "x".into(),
+                visits: 9,
+                last_visit: 5,
+            },
+            HistoryEntry {
+                url: "https://example.com/".into(),
+                title: "Example".into(),
+                visits: 1,
+                last_visit: 50,
+            },
         ]);
         assert_eq!(added, 1);
         assert_eq!(h.items()[0].visits, 9);
@@ -475,7 +495,12 @@ mod history_tests {
         let p = path("b");
         let mut h = History::load(p.clone());
         let list: Vec<_> = (0..MAX_HISTORY as u64 + 10)
-            .map(|i| HistoryEntry { url: format!("https://x.test/{i}"), title: String::new(), visits: 1, last_visit: i })
+            .map(|i| HistoryEntry {
+                url: format!("https://x.test/{i}"),
+                title: String::new(),
+                visits: 1,
+                last_visit: i,
+            })
             .collect();
         h.merge(list);
         assert_eq!(h.len(), MAX_HISTORY);
@@ -489,10 +514,22 @@ mod history_tests {
         let _ = std::fs::remove_file(&p);
         let mut f = Favourites::load(p.clone());
         let n = f.add_many(&[
-            Favourite { url: "https://a.com".into(), title: "A".into() },
-            Favourite { url: "https://a.com/".into(), title: "dup".into() },
-            Favourite { url: "ftp://x".into(), title: "no".into() },
-            Favourite { url: "http://b.com".into(), title: "".into() },
+            Favourite {
+                url: "https://a.com".into(),
+                title: "A".into(),
+            },
+            Favourite {
+                url: "https://a.com/".into(),
+                title: "dup".into(),
+            },
+            Favourite {
+                url: "ftp://x".into(),
+                title: "no".into(),
+            },
+            Favourite {
+                url: "http://b.com".into(),
+                title: "".into(),
+            },
         ]);
         assert_eq!(n, 2);
         assert_eq!(f.items()[1].title, "http://b.com");

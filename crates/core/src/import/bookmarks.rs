@@ -109,7 +109,10 @@ pub fn from_url_files(dir: &Path) -> Vec<Favourite> {
             let path = e.path();
             if path.is_dir() && depth < 6 {
                 walk(&path, out, depth + 1);
-            } else if path.extension().is_some_and(|x| x.eq_ignore_ascii_case("url")) {
+            } else if path
+                .extension()
+                .is_some_and(|x| x.eq_ignore_ascii_case("url"))
+            {
                 let text = std::fs::read(&path)
                     .map(|b| String::from_utf8_lossy(&b).into_owned())
                     .unwrap_or_default();
@@ -145,7 +148,10 @@ mod tests {
             {"type":"url","name":"Script","url":"javascript:alert(1)"},
             {"type":"url","name":"C","url":"http://c.com"}]},
           "synced":{"type":"folder","children":[]}}}"#;
-        let got: Vec<_> = from_chromium_json(json).into_iter().map(|f| f.title).collect();
+        let got: Vec<_> = from_chromium_json(json)
+            .into_iter()
+            .map(|f| f.title)
+            .collect();
         assert_eq!(got, ["A", "B", "C"]);
         assert!(from_chromium_json("not json").is_empty());
     }
@@ -169,8 +175,16 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("shoji_fav_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("News")).unwrap();
-        std::fs::write(dir.join("Home.url"), "[InternetShortcut]\r\nURL=https://home.example/\r\n").unwrap();
-        std::fs::write(dir.join("News").join("Paper.url"), "[InternetShortcut]\nURL=https://paper.example/\n").unwrap();
+        std::fs::write(
+            dir.join("Home.url"),
+            "[InternetShortcut]\r\nURL=https://home.example/\r\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("News").join("Paper.url"),
+            "[InternetShortcut]\nURL=https://paper.example/\n",
+        )
+        .unwrap();
         std::fs::write(dir.join("notes.txt"), "ignore").unwrap();
         let got: Vec<_> = from_url_files(&dir).into_iter().map(|f| f.title).collect();
         assert_eq!(got, ["Home", "Paper"]);

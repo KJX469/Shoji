@@ -134,7 +134,8 @@ fn seal(key: &[u8], plain: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
     let nonce_bytes = random(12);
     let nonce = Nonce::try_assume_unique_for_key(&nonce_bytes).ok()?;
     let mut buf = plain.to_vec();
-    key.seal_in_place_append_tag(nonce, Aad::from(AAD), &mut buf).ok()?;
+    key.seal_in_place_append_tag(nonce, Aad::from(AAD), &mut buf)
+        .ok()?;
     Some((nonce_bytes, buf))
 }
 
@@ -163,9 +164,15 @@ const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012
 fn b64(data: &[u8]) -> String {
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for c in data.chunks(3) {
-        let n = (u32::from(c[0]) << 16) | (u32::from(*c.get(1).unwrap_or(&0)) << 8) | u32::from(*c.get(2).unwrap_or(&0));
+        let n = (u32::from(c[0]) << 16)
+            | (u32::from(*c.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*c.get(2).unwrap_or(&0));
         for i in 0..4 {
-            out.push(if i <= c.len() { B64[((n >> (18 - 6 * i)) & 63) as usize] as char } else { '=' });
+            out.push(if i <= c.len() {
+                B64[((n >> (18 - 6 * i)) & 63) as usize] as char
+            } else {
+                '='
+            });
         }
     }
     out
@@ -204,8 +211,7 @@ pub fn host_matches(saved: &str, page: &str) -> bool {
     if saved.is_empty() || page.is_empty() {
         return false;
     }
-    saved == page
-        || (saved.contains('.') && page.ends_with(&format!(".{saved}")))
+    saved == page || (saved.contains('.') && page.ends_with(&format!(".{saved}")))
 }
 
 fn new_id() -> String {
@@ -420,12 +426,20 @@ impl Vault {
             .iter()
             .filter(|l| host_matches(&l.host(), host))
             .collect();
-        v.sort_by(|a, b| b.last_used.max(b.modified).cmp(&a.last_used.max(a.modified)));
+        v.sort_by(|a, b| {
+            b.last_used
+                .max(b.modified)
+                .cmp(&a.last_used.max(a.modified))
+        });
         v
     }
 
     pub fn search(&self, query: &str) -> Vec<&Login> {
-        let words: Vec<String> = query.to_lowercase().split_whitespace().map(String::from).collect();
+        let words: Vec<String> = query
+            .to_lowercase()
+            .split_whitespace()
+            .map(String::from)
+            .collect();
         let mut v: Vec<&Login> = self
             .data
             .logins
@@ -479,7 +493,11 @@ impl Vault {
             self.data.logins.push(Login {
                 id: id.clone(),
                 url: d.url.trim().to_string(),
-                title: if d.title.trim().is_empty() { host.clone() } else { d.title.trim().to_string() },
+                title: if d.title.trim().is_empty() {
+                    host.clone()
+                } else {
+                    d.title.trim().to_string()
+                },
                 username: d.username.clone(),
                 password: d.password.clone(),
                 note: d.note.clone(),
@@ -502,7 +520,11 @@ impl Vault {
             return false;
         };
         l.url = d.url.trim().to_string();
-        l.title = if d.title.trim().is_empty() { host_of(&d.url) } else { d.title.trim().to_string() };
+        l.title = if d.title.trim().is_empty() {
+            host_of(&d.url)
+        } else {
+            d.title.trim().to_string()
+        };
         l.username = d.username.clone();
         l.password = d.password.clone();
         l.note = d.note.clone();
@@ -537,11 +559,9 @@ impl Vault {
     pub fn import(&mut self, drafts: &[Draft], now: u64) -> (usize, usize, usize) {
         let (mut added, mut updated, mut skipped) = (0, 0, 0);
         for d in drafts {
-            let same = self
-                .data
-                .logins
-                .iter()
-                .any(|l| l.host() == host_of(&d.url) && l.username == d.username && l.password == d.password);
+            let same = self.data.logins.iter().any(|l| {
+                l.host() == host_of(&d.url) && l.username == d.username && l.password == d.password
+            });
             if same || !self.is_unlocked() {
                 skipped += 1;
                 continue;
@@ -587,7 +607,10 @@ impl Vault {
             .collect();
         let mut by_pw: BTreeMap<&str, Vec<String>> = BTreeMap::new();
         for l in &self.data.logins {
-            by_pw.entry(l.password.as_str()).or_default().push(l.id.clone());
+            by_pw
+                .entry(l.password.as_str())
+                .or_default()
+                .push(l.id.clone());
         }
         let reused = by_pw.into_values().filter(|g| g.len() > 1).collect();
         Audit { weak, reused }
@@ -603,9 +626,32 @@ pub struct Audit {
 /* ------------------------------------------------------- strength, generator */
 
 const COMMON: &[&str] = &[
-    "password", "123456", "12345678", "123456789", "qwerty", "abc123", "letmein", "111111", "iloveyou",
-    "admin", "welcome", "monkey", "dragon", "football", "baseball", "master", "sunshine", "princess",
-    "passw0rd", "trustno1", "000000", "1234567", "qwertyuiop", "654321", "superman", "michael",
+    "password",
+    "123456",
+    "12345678",
+    "123456789",
+    "qwerty",
+    "abc123",
+    "letmein",
+    "111111",
+    "iloveyou",
+    "admin",
+    "welcome",
+    "monkey",
+    "dragon",
+    "football",
+    "baseball",
+    "master",
+    "sunshine",
+    "princess",
+    "passw0rd",
+    "trustno1",
+    "000000",
+    "1234567",
+    "qwertyuiop",
+    "654321",
+    "superman",
+    "michael",
 ];
 
 /// A rough 0 (very weak) to 4 (strong) score from length, variety and obvious patterns.
@@ -651,7 +697,13 @@ pub struct GenOptions {
 
 impl Default for GenOptions {
     fn default() -> Self {
-        Self { length: 20, lower: true, upper: true, digits: true, symbols: true }
+        Self {
+            length: 20,
+            lower: true,
+            upper: true,
+            digits: true,
+            symbols: true,
+        }
     }
 }
 
@@ -668,7 +720,11 @@ pub fn generate(o: GenOptions) -> String {
     .filter(|(on, _)| *on)
     .map(|(_, s)| s)
     .collect();
-    let sets = if sets.is_empty() { vec![&b"abcdefghijkmnpqrstuvwxyz"[..]] } else { sets };
+    let sets = if sets.is_empty() {
+        vec![&b"abcdefghijkmnpqrstuvwxyz"[..]]
+    } else {
+        sets
+    };
     let len = o.length.clamp(8, 128).max(sets.len());
     let all: Vec<u8> = sets.iter().flat_map(|s| s.iter().copied()).collect();
     // Unbiased pick from `n` options by rejection sampling.
@@ -695,7 +751,10 @@ pub fn generate(o: GenOptions) -> String {
 
 fn parse_csv(text: &str) -> Vec<Vec<String>> {
     let (mut rows, mut row, mut field) = (Vec::new(), Vec::new(), String::new());
-    let (mut quoted, mut chars) = (false, text.trim_start_matches('\u{feff}').chars().peekable());
+    let (mut quoted, mut chars) = (
+        false,
+        text.trim_start_matches('\u{feff}').chars().peekable(),
+    );
     while let Some(c) = chars.next() {
         match (c, quoted) {
             ('"', true) if chars.peek() == Some(&'"') => {
@@ -726,9 +785,19 @@ pub fn drafts_from_csv(text: &str) -> Vec<Draft> {
     let Some((head, body)) = rows.split_first() else {
         return Vec::new();
     };
-    let find = |names: &[&str]| head.iter().position(|h| names.contains(&h.trim().to_lowercase().as_str()));
+    let find = |names: &[&str]| {
+        head.iter()
+            .position(|h| names.contains(&h.trim().to_lowercase().as_str()))
+    };
     let (Some(url), Some(pass)) = (
-        find(&["url", "login_uri", "website", "origin url", "web site", "address"]),
+        find(&[
+            "url",
+            "login_uri",
+            "website",
+            "origin url",
+            "web site",
+            "address",
+        ]),
         find(&["password", "login_password"]),
     ) else {
         return Vec::new();
@@ -746,7 +815,8 @@ pub fn drafts_from_csv(text: &str) -> Vec<Draft> {
                 password: get(Some(pass)),
                 note: get(note),
             };
-            (host_of(&d.url) != "" && !d.password.is_empty() && d.url != "android://").then_some(d)
+            (!host_of(&d.url).is_empty() && !d.password.is_empty() && d.url != "android://")
+                .then_some(d)
         })
         .collect()
 }
@@ -757,7 +827,14 @@ impl Vault {
         let q = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
         let mut out = String::from("name,url,username,password,note\n");
         for l in &self.data.logins {
-            out.push_str(&format!("{},{},{},{},{}\n", q(&l.title), q(&l.url), q(&l.username), q(&l.password), q(&l.note)));
+            out.push_str(&format!(
+                "{},{},{},{},{}\n",
+                q(&l.title),
+                q(&l.url),
+                q(&l.username),
+                q(&l.password),
+                q(&l.note)
+            ));
         }
         out
     }
@@ -794,12 +871,24 @@ mod tests {
     }
 
     fn draft(url: &str, user: &str, pw: &str) -> Draft {
-        Draft { url: url.into(), username: user.into(), password: pw.into(), ..Draft::default() }
+        Draft {
+            url: url.into(),
+            username: user.into(),
+            password: pw.into(),
+            ..Draft::default()
+        }
     }
 
     #[test]
     fn base64_round_trips() {
-        for data in [&b""[..], b"a", b"ab", b"abc", b"abcd", &[0u8, 255, 128, 7, 9]] {
+        for data in [
+            &b""[..],
+            b"a",
+            b"ab",
+            b"abc",
+            b"abcd",
+            &[0u8, 255, 128, 7, 9],
+        ] {
             assert_eq!(unb64(&b64(data)).unwrap(), data);
         }
     }
@@ -811,7 +900,12 @@ mod tests {
         assert_eq!(v.state(), State::Empty);
         assert!(!v.create(&Broken));
         assert!(v.create(&Fake));
-        let (id, new) = v.upsert(&draft("https://example.com/login", "me", "hunter2-hunter2"), 5).unwrap();
+        let (id, new) = v
+            .upsert(
+                &draft("https://example.com/login", "me", "hunter2-hunter2"),
+                5,
+            )
+            .unwrap();
         assert!(new);
         let raw = std::fs::read_to_string(&p).unwrap();
         assert!(!raw.contains("hunter2") && !raw.contains("example.com"));
@@ -833,11 +927,22 @@ mod tests {
         let p = path("dup");
         let mut v = Vault::load(p.clone());
         v.create(&Fake);
-        let (a, _) = v.upsert(&draft("https://a.com", "me", "one-one-one"), 1).unwrap();
-        let (b, new) = v.upsert(&draft("https://www.a.com/x", "me", "two-two-two"), 2).unwrap();
+        let (a, _) = v
+            .upsert(&draft("https://a.com", "me", "one-one-one"), 1)
+            .unwrap();
+        let (b, new) = v
+            .upsert(&draft("https://www.a.com/x", "me", "two-two-two"), 2)
+            .unwrap();
         assert_eq!((a.clone(), new), (b, false));
-        assert_eq!((v.len(), v.get(&a).unwrap().password.as_str()), (1, "two-two-two"));
-        assert!(v.upsert(&draft("https://a.com", "you", "x-x-x-x"), 3).unwrap().1);
+        assert_eq!(
+            (v.len(), v.get(&a).unwrap().password.as_str()),
+            (1, "two-two-two")
+        );
+        assert!(
+            v.upsert(&draft("https://a.com", "you", "x-x-x-x"), 3)
+                .unwrap()
+                .1
+        );
         assert!(v.upsert(&draft("https://a.com", "z", ""), 3).is_none());
         assert!(v.upsert(&draft("", "z", "pw"), 3).is_none());
         let _ = std::fs::remove_file(&p);
@@ -892,8 +997,13 @@ mod tests {
     #[test]
     fn closed_vault_refuses_changes() {
         let mut v = Vault::load(path("closed"));
-        assert!(v.upsert(&draft("https://a.com", "me", "pw-pw-pw-pw"), 1).is_none());
-        assert_eq!(v.import(&[draft("https://a.com", "me", "pw")], 1), (0, 0, 1));
+        assert!(v
+            .upsert(&draft("https://a.com", "me", "pw-pw-pw-pw"), 1)
+            .is_none());
+        assert_eq!(
+            v.import(&[draft("https://a.com", "me", "pw")], 1),
+            (0, 0, 1)
+        );
     }
 
     #[test]
@@ -901,9 +1011,27 @@ mod tests {
         let p = path("edit");
         let mut v = Vault::load(p.clone());
         v.create(&Fake);
-        let (id, _) = v.upsert(&draft("https://a.com", "me", "pw-pw-pw-pw"), 1).unwrap();
-        assert!(v.edit(&id, &Draft { url: "https://b.com".into(), username: "you".into(), password: "new-new-new".into(), title: "B".into(), note: "n".into() }, 9));
-        assert_eq!((v.get(&id).unwrap().title.as_str(), v.get(&id).unwrap().modified), ("B", 9));
+        let (id, _) = v
+            .upsert(&draft("https://a.com", "me", "pw-pw-pw-pw"), 1)
+            .unwrap();
+        assert!(v.edit(
+            &id,
+            &Draft {
+                url: "https://b.com".into(),
+                username: "you".into(),
+                password: "new-new-new".into(),
+                title: "B".into(),
+                note: "n".into()
+            },
+            9
+        ));
+        assert_eq!(
+            (
+                v.get(&id).unwrap().title.as_str(),
+                v.get(&id).unwrap().modified
+            ),
+            ("B", 9)
+        );
         assert!(!v.edit("nope", &draft("https://x.com", "", "p"), 1));
         v.never_save("spam.com");
         assert!(v.is_never("spam.com"));
@@ -937,13 +1065,25 @@ mod tests {
         assert!(strength("abc123") <= 1);
         assert!(strength("Tr0ub4dor&3") >= 2);
         assert!(strength("correct horse battery staple") >= 3);
-        assert_eq!(strength(&generate(GenOptions { length: 24, ..GenOptions::default() })), 4);
+        assert_eq!(
+            strength(&generate(GenOptions {
+                length: 24,
+                ..GenOptions::default()
+            })),
+            4
+        );
     }
 
     #[test]
     fn generator_honours_its_options() {
         for _ in 0..50 {
-            let pw = generate(GenOptions { length: 12, lower: true, upper: true, digits: true, symbols: true });
+            let pw = generate(GenOptions {
+                length: 12,
+                lower: true,
+                upper: true,
+                digits: true,
+                symbols: true,
+            });
             assert_eq!(pw.chars().count(), 12);
             assert!(pw.chars().any(|c| c.is_ascii_lowercase()));
             assert!(pw.chars().any(|c| c.is_ascii_uppercase()));
@@ -951,22 +1091,44 @@ mod tests {
             assert!(pw.chars().any(|c| !c.is_alphanumeric()));
             assert!(!pw.contains(['0', 'O', 'o', '1', 'l', 'I']));
         }
-        let digits = generate(GenOptions { length: 16, lower: false, upper: false, digits: true, symbols: false });
+        let digits = generate(GenOptions {
+            length: 16,
+            lower: false,
+            upper: false,
+            digits: true,
+            symbols: false,
+        });
         assert!(digits.chars().all(|c| c.is_ascii_digit()));
-        assert_ne!(generate(GenOptions::default()), generate(GenOptions::default()));
-        assert_eq!(generate(GenOptions { length: 1000, ..GenOptions::default() }).len(), 128);
+        assert_ne!(
+            generate(GenOptions::default()),
+            generate(GenOptions::default())
+        );
+        assert_eq!(
+            generate(GenOptions {
+                length: 1000,
+                ..GenOptions::default()
+            })
+            .len(),
+            128
+        );
     }
 
     #[test]
     fn csv_from_several_managers() {
         let chrome = "name,url,username,password,note\n\"A\",https://a.com/,me,\"p,\"\"1\"\"\",\n";
         let d = drafts_from_csv(chrome);
-        assert_eq!((d.len(), d[0].password.as_str(), d[0].title.as_str()), (1, "p,\"1\"", "A"));
+        assert_eq!(
+            (d.len(), d[0].password.as_str(), d[0].title.as_str()),
+            (1, "p,\"1\"", "A")
+        );
         let firefox = "\"url\",\"username\",\"password\",\"httpRealm\",\"formActionOrigin\",\"guid\"\n\"https://b.com\",\"you\",\"pw2\",\"\",\"https://b.com\",\"{x}\"\n";
         assert_eq!(drafts_from_csv(firefox)[0].username, "you");
         let bitwarden = "folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp\n,,login,Site,note,,0,https://c.com,u,pw3,\n";
         let d = drafts_from_csv(bitwarden);
-        assert_eq!((d[0].url.as_str(), d[0].note.as_str()), ("https://c.com", "note"));
+        assert_eq!(
+            (d[0].url.as_str(), d[0].note.as_str()),
+            ("https://c.com", "note")
+        );
         assert!(drafts_from_csv("a,b\n1,2\n").is_empty());
         assert!(drafts_from_csv("").is_empty());
         let multiline = "url,username,password,note\r\nhttps://d.com,u,pw,\"line1\nline2\"\r\n";
@@ -978,7 +1140,16 @@ mod tests {
         let (p1, p2) = (path("e1"), path("e2"));
         let mut a = Vault::load(p1.clone());
         a.create(&Fake);
-        a.upsert(&Draft { url: "https://a.com".into(), title: "A \"quoted\"".into(), username: "me".into(), password: "pw,with,commas".into(), note: "x\ny".into() }, 1);
+        a.upsert(
+            &Draft {
+                url: "https://a.com".into(),
+                title: "A \"quoted\"".into(),
+                username: "me".into(),
+                password: "pw,with,commas".into(),
+                note: "x\ny".into(),
+            },
+            1,
+        );
         let csv = a.to_csv();
         let mut b = Vault::load(p2.clone());
         b.create(&Fake);
@@ -992,7 +1163,10 @@ mod tests {
 
     #[test]
     fn hosts_are_compared_by_site() {
-        assert_eq!(host_of("https://User:x@WWW.Example.com:8443/a?b#c"), "example.com");
+        assert_eq!(
+            host_of("https://User:x@WWW.Example.com:8443/a?b#c"),
+            "example.com"
+        );
         assert_eq!(host_of("example.com"), "example.com");
         assert!(host_matches("example.com", "accounts.example.com"));
         assert!(!host_matches("example.com", "notexample.com"));
@@ -1002,7 +1176,10 @@ mod tests {
 
     #[test]
     fn debug_never_prints_the_password() {
-        let l = Login { password: "hunter2".into(), ..Login::default() };
+        let l = Login {
+            password: "hunter2".into(),
+            ..Login::default()
+        };
         assert!(!format!("{l:?}").contains("hunter2"));
     }
 }

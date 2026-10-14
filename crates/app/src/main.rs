@@ -3,8 +3,8 @@
 
 mod cert;
 mod default_browser;
-mod import_win;
 mod icons;
+mod import_win;
 mod keys;
 mod pages;
 mod shield;
@@ -327,7 +327,7 @@ fn gather_group(win: &mut BrowserWindow, tab: TabId, gid: u32) {
         .enumerate()
         .filter(|(_, t)| t.group == Some(gid) && t.id != tab)
         .map(|(i, _)| i)
-        .last()
+        .next_back()
     else {
         return;
     };
@@ -1120,7 +1120,10 @@ impl BrowserApp {
     }
 
     fn push_vault(&mut self) {
-        let js = format!("window.__vaultState && window.__vaultState({})", self.vault_state_json());
+        let js = format!(
+            "window.__vaultState && window.__vaultState({})",
+            self.vault_state_json()
+        );
         self.eval_all_internal(&js);
     }
 
@@ -1153,7 +1156,9 @@ impl BrowserApp {
         let payload = serde_json::json!({
             "items": items, "weak": audit.weak.len(), "reused": audit.reused.iter().map(Vec::len).sum::<usize>(),
         });
-        self.eval_all_internal(&format!("window.__vaultList && window.__vaultList({payload})"));
+        self.eval_all_internal(&format!(
+            "window.__vaultList && window.__vaultList({payload})"
+        ));
     }
 
     fn vault_changed(&mut self) {
@@ -1186,7 +1191,11 @@ impl BrowserApp {
             return;
         };
         let host = shoji_core::vault::host_of(&p.url);
-        let who = if p.username.is_empty() { String::new() } else { format!(" for {}", p.username) };
+        let who = if p.username.is_empty() {
+            String::new()
+        } else {
+            format!(" for {}", p.username)
+        };
         let (label, value) = if p.existing.is_some() {
             (format!("Update the saved password{who}"), "save")
         } else {
@@ -1201,14 +1210,24 @@ impl BrowserApp {
         };
         let items = vec![
             item("login-save", value, label, host.clone()),
-            item("login-save", "never", format!("Never for {host}"), String::new()),
+            item(
+                "login-save",
+                "never",
+                format!("Never for {host}"),
+                String::new(),
+            ),
             item("login-save", "dismiss", "Not now".into(), String::new()),
         ];
         let Some(win) = self.windows.get(&win_id) else {
             return;
         };
         let w = 320.0f64.min(win.width - 16.0);
-        let frame = [win.width - w - 12.0, win.chrome_height(), w, 46.0 + 2.0 * 34.0 + 12.0];
+        let frame = [
+            win.width - w - 12.0,
+            win.chrome_height(),
+            w,
+            46.0 + 2.0 * 34.0 + 12.0,
+        ];
         self.show_overlay(win_id, "menu", items, frame, "", "", "");
     }
 
@@ -1234,10 +1253,8 @@ impl BrowserApp {
                     self.vault_changed();
                 }
             }
-            "never" => {
-                if self.vault_open(true) {
-                    self.vault.never_save(&host);
-                }
+            "never" if self.vault_open(true) => {
+                self.vault.never_save(&host);
             }
             _ => {}
         }
@@ -2115,10 +2132,11 @@ impl BrowserApp {
         ] {
             out.push(item("action", name.to_string(), label, sub.to_string()));
         }
-        for (page, label) in [(
-            "shoji://settings",
-            "Settings: appearance, privacy, passwords",
-        )] {
+        {
+            let (page, label) = (
+                "shoji://settings",
+                "Settings: appearance, privacy, passwords",
+            );
             out.push(item("url", page.to_string(), label, page.to_string()));
         }
         if win.split.is_some() {
@@ -2958,7 +2976,8 @@ impl BrowserApp {
                 }
             }
             M::ListImportSources => {
-                let json = serde_json::to_string(&import_win::detect()).unwrap_or_else(|_| "[]".into());
+                let json =
+                    serde_json::to_string(&import_win::detect()).unwrap_or_else(|_| "[]".into());
                 self.eval_welcome_and_settings(
                     win_id,
                     &format!("window.__importSources && window.__importSources({json})"),
@@ -3073,7 +3092,11 @@ impl BrowserApp {
                 if self.vault_open(false) {
                     self.vault.touch();
                     let text = self.vault.get(&id).map(|l| {
-                        if field == "username" { l.username.clone() } else { l.password.clone() }
+                        if field == "username" {
+                            l.username.clone()
+                        } else {
+                            l.password.clone()
+                        }
                     });
                     if let Some(text) = text {
                         if vault_win::copy_secret(&text) {
@@ -3087,14 +3110,31 @@ impl BrowserApp {
                     }
                 }
             }
-            M::VaultSave { id, url, title, username, password, note } => {
+            M::VaultSave {
+                id,
+                url,
+                title,
+                username,
+                password,
+                note,
+            } => {
                 if self.vault_open(true) {
-                    let draft = shoji_core::vault::Draft { url, title, username, password, note };
+                    let draft = shoji_core::vault::Draft {
+                        url,
+                        title,
+                        username,
+                        password,
+                        note,
+                    };
                     let ok = match id {
                         Some(id) => self.vault.edit(&id, &draft, now_ms()),
                         None => self.vault.upsert(&draft, now_ms()).is_some(),
                     };
-                    self.vault_toast(if ok { "Saved" } else { "Couldn't save that login" });
+                    self.vault_toast(if ok {
+                        "Saved"
+                    } else {
+                        "Couldn't save that login"
+                    });
                     self.vault_changed();
                 }
             }
@@ -3117,7 +3157,9 @@ impl BrowserApp {
                 } else {
                     let mut s = self.vault_state_json();
                     s["error"] = "That isn't the master password.".into();
-                    self.eval_all_internal(&format!("window.__vaultState && window.__vaultState({s})"));
+                    self.eval_all_internal(&format!(
+                        "window.__vaultState && window.__vaultState({s})"
+                    ));
                 }
             }
             M::VaultLock => {
@@ -3138,7 +3180,13 @@ impl BrowserApp {
                 }
                 self.vault_changed();
             }
-            M::VaultGenerate { length, lower, upper, digits, symbols } => {
+            M::VaultGenerate {
+                length,
+                lower,
+                upper,
+                digits,
+                symbols,
+            } => {
                 let pw = shoji_core::vault::generate(shoji_core::vault::GenOptions {
                     length,
                     lower,
@@ -3152,7 +3200,9 @@ impl BrowserApp {
                 ));
             }
             M::VaultImportCsv => {
-                let Some(path) = webview::pick_file("Choose a passwords CSV file", "CSV files (*.csv)", "*.csv") else {
+                let Some(path) =
+                    webview::pick_file("Choose a passwords CSV file", "CSV files (*.csv)", "*.csv")
+                else {
                     return;
                 };
                 let text = std::fs::read(&path)
@@ -3175,7 +3225,11 @@ impl BrowserApp {
                 if self.vault_open(false) {
                     if let Some(path) = webview::pick_save_csv("shoji-passwords.csv") {
                         let ok = std::fs::write(&path, self.vault.to_csv()).is_ok();
-                        self.vault_toast(if ok { "Exported. Keep that file safe" } else { "Couldn't write the file" });
+                        self.vault_toast(if ok {
+                            "Exported. Keep that file safe"
+                        } else {
+                            "Couldn't write the file"
+                        });
                     }
                 }
             }
@@ -3190,7 +3244,8 @@ impl BrowserApp {
                     return;
                 };
                 let host = shoji_core::vault::host_of(&url);
-                if self.vault.state() != shoji_core::vault::State::Empty && !self.vault_open(false) {
+                if self.vault.state() != shoji_core::vault::State::Empty && !self.vault_open(false)
+                {
                     return; // locked behind a master password: stay quiet
                 }
                 if self.vault.is_never(&host) {
@@ -3234,7 +3289,8 @@ impl BrowserApp {
                 if win.tabs.active_tab_id() != Some(tab) || win.split_showing().is_some() {
                     return;
                 }
-                if self.vault.state() == shoji_core::vault::State::Empty || !self.vault_open(false) {
+                if self.vault.state() == shoji_core::vault::State::Empty || !self.vault_open(false)
+                {
                     return;
                 }
                 use shoji_core::ipc::OverlayItem;
@@ -3246,7 +3302,11 @@ impl BrowserApp {
                     .map(|l| OverlayItem {
                         kind: "login".into(),
                         value: l.id.clone(),
-                        label: if l.username.is_empty() { "Saved login".into() } else { l.username.clone() },
+                        label: if l.username.is_empty() {
+                            "Saved login".into()
+                        } else {
+                            l.username.clone()
+                        },
                         sub: format!("Fill with Shoji · {}", l.host()),
                         color: None,
                     })
@@ -3950,7 +4010,8 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                             }
                             win.reader.remove(&tab_id);
                             state.url = url.into_owned();
-                            if !self.settings.privacy.ephemeral_default && !is_internal(&state.url) {
+                            if !self.settings.privacy.ephemeral_default && !is_internal(&state.url)
+                            {
                                 let now = std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .map_or(0, |d| d.as_millis() as u64);

@@ -202,8 +202,16 @@ fn import_and_default_browser_messages_stay_off_web_content() {
     )
     .unwrap();
     match &start {
-        M::StartImport { source, profile, path, kinds } => {
-            assert_eq!((source.as_str(), *profile, path.is_none()), ("chrome", 0, true));
+        M::StartImport {
+            source,
+            profile,
+            path,
+            kinds,
+        } => {
+            assert_eq!(
+                (source.as_str(), *profile, path.is_none()),
+                ("chrome", 0, true)
+            );
             assert!(kinds.favourites && !kinds.history && !kinds.cookies);
         }
         other => panic!("{other:?}"),
@@ -211,10 +219,15 @@ fn import_and_default_browser_messages_stay_off_web_content() {
     for m in [
         start,
         M::ListImportSources,
-        M::PickImportSource { source: "safari".into() },
+        M::PickImportSource {
+            source: "safari".into(),
+        },
         M::CheckDefaultBrowser,
         M::SetDefaultBrowser,
-        M::SearchHistory { query: "x".into(), seq: 1 },
+        M::SearchHistory {
+            query: "x".into(),
+            seq: 1,
+        },
         M::ClearHistory,
     ] {
         assert!(!m.allowed_from_web_content(), "{m:?}");
@@ -228,25 +241,51 @@ fn password_manager_messages_are_page_reports_or_internal_only() {
     use shoji_core::ipc::UiToHostMessage as M;
     // Web pages may only report what is on their own login form.
     for m in [
-        M::LoginSubmitted { username: "me".into(), password: "pw".into() },
-        M::LoginFieldFocused { x: 1.0, y: 2.0, w: 3.0, h: 4.0 },
+        M::LoginSubmitted {
+            username: "me".into(),
+            password: "pw".into(),
+        },
+        M::LoginFieldFocused {
+            x: 1.0,
+            y: 2.0,
+            w: 3.0,
+            h: 4.0,
+        },
     ] {
         assert!(m.allowed_from_web_content(), "{m:?}");
     }
     // Everything that reads or changes the vault stays with Shoji's own pages.
     let internal = [
         M::VaultStatus,
-        M::VaultList { query: String::new() },
+        M::VaultList {
+            query: String::new(),
+        },
         M::VaultReveal { id: "x".into() },
-        M::VaultCopy { id: "x".into(), field: "password".into() },
-        M::VaultSave { id: None, url: "https://a.com".into(), title: String::new(), username: String::new(), password: "p".into(), note: String::new() },
+        M::VaultCopy {
+            id: "x".into(),
+            field: "password".into(),
+        },
+        M::VaultSave {
+            id: None,
+            url: "https://a.com".into(),
+            title: String::new(),
+            username: String::new(),
+            password: "p".into(),
+            note: String::new(),
+        },
         M::VaultDelete { id: "x".into() },
         M::VaultDeleteAll,
         M::VaultUnlock { master: "m".into() },
         M::VaultLock,
         M::VaultSetMaster { master: "m".into() },
         M::VaultRemoveMaster,
-        M::VaultGenerate { length: 20, lower: true, upper: true, digits: true, symbols: true },
+        M::VaultGenerate {
+            length: 20,
+            lower: true,
+            upper: true,
+            digits: true,
+            symbols: true,
+        },
         M::VaultImportCsv,
         M::VaultExportCsv,
     ];
@@ -257,5 +296,14 @@ fn password_manager_messages_are_page_reports_or_internal_only() {
     }
     // Defaults let the page omit options.
     let g: M = serde_json::from_str(r#"{"action":"VaultGenerate","payload":{}}"#).unwrap();
-    assert_eq!(g, M::VaultGenerate { length: 20, lower: true, upper: true, digits: true, symbols: true });
+    assert_eq!(
+        g,
+        M::VaultGenerate {
+            length: 20,
+            lower: true,
+            upper: true,
+            digits: true,
+            symbols: true
+        }
+    );
 }

@@ -80,55 +80,448 @@ use Root::*;
 
 pub static SOURCES: &[Source] = &[
     // The ones almost everybody is coming from
-    s("chrome", "Google Chrome", Chromium, true, "#4285f4", Local, r"Google\Chrome\User Data", false),
-    s("edge", "Microsoft Edge", Chromium, true, "#0f9d9a", Local, r"Microsoft\Edge\User Data", false),
-    s("brave", "Brave", Chromium, true, "#fb542b", Local, r"BraveSoftware\Brave-Browser\User Data", false),
-    s("firefox", "Firefox", Firefox, true, "#ff7139", Roaming, r"Mozilla\Firefox", false),
+    s(
+        "chrome",
+        "Google Chrome",
+        Chromium,
+        true,
+        "#4285f4",
+        Local,
+        r"Google\Chrome\User Data",
+        false,
+    ),
+    s(
+        "edge",
+        "Microsoft Edge",
+        Chromium,
+        true,
+        "#0f9d9a",
+        Local,
+        r"Microsoft\Edge\User Data",
+        false,
+    ),
+    s(
+        "brave",
+        "Brave",
+        Chromium,
+        true,
+        "#fb542b",
+        Local,
+        r"BraveSoftware\Brave-Browser\User Data",
+        false,
+    ),
+    s(
+        "firefox",
+        "Firefox",
+        Firefox,
+        true,
+        "#ff7139",
+        Roaming,
+        r"Mozilla\Firefox",
+        false,
+    ),
     // More Chromium browsers
-    s("opera", "Opera", Chromium, false, "#ff1b2d", Roaming, r"Opera Software\Opera Stable", true),
-    s("opera-gx", "Opera GX", Chromium, false, "#fa1e4e", Roaming, r"Opera Software\Opera GX Stable", true),
-    s("vivaldi", "Vivaldi", Chromium, false, "#ef3939", Local, r"Vivaldi\User Data", false),
-    s("arc", "Arc", Chromium, false, "#5c6cff", Local, r"Packages\TheBrowserCompany.Arc_ttt1ap7aakyb4\LocalCache\Local\Arc\User Data", false),
-    s("comet", "Comet", Chromium, false, "#20808d", Local, r"Perplexity\Comet\User Data", false),
-    s("chromium", "Chromium", Chromium, false, "#3f7de0", Local, r"Chromium\User Data", false),
-    s("chrome-beta", "Chrome Beta", Chromium, false, "#e8710a", Local, r"Google\Chrome Beta\User Data", false),
-    s("chrome-dev", "Chrome Dev", Chromium, false, "#188038", Local, r"Google\Chrome Dev\User Data", false),
-    s("chrome-canary", "Chrome Canary", Chromium, false, "#f9ab00", Local, r"Google\Chrome SxS\User Data", false),
-    s("edge-beta", "Edge Beta", Chromium, false, "#1f8a70", Local, r"Microsoft\Edge Beta\User Data", false),
-    s("edge-dev", "Edge Dev", Chromium, false, "#3a7bd5", Local, r"Microsoft\Edge Dev\User Data", false),
-    s("brave-beta", "Brave Beta", Chromium, false, "#fb542b", Local, r"BraveSoftware\Brave-Browser-Beta\User Data", false),
-    s("brave-nightly", "Brave Nightly", Chromium, false, "#fb542b", Local, r"BraveSoftware\Brave-Browser-Nightly\User Data", false),
-    s("yandex", "Yandex Browser", Chromium, false, "#fc3f1d", Local, r"Yandex\YandexBrowser\User Data", false),
-    s("whale", "Naver Whale", Chromium, false, "#03c75a", Local, r"Naver\Naver Whale\User Data", false),
-    s("thorium", "Thorium", Chromium, false, "#e04f5f", Local, r"Thorium\User Data", false),
-    s("iridium", "Iridium", Chromium, false, "#3b6ea5", Local, r"Iridium\User Data", false),
-    s("epic", "Epic Privacy Browser", Chromium, false, "#6b3fa0", Local, r"Epic Privacy Browser\User Data", false),
-    s("slimjet", "Slimjet", Chromium, false, "#2aa4dd", Local, r"Slimjet\User Data", false),
-    s("maxthon", "Maxthon", Chromium, false, "#2b7de9", Local, r"Maxthon\User Data", false),
-    s("avast", "Avast Secure Browser", Chromium, false, "#ff7800", Local, r"AVAST Software\Browser\User Data", false),
-    s("avg", "AVG Secure Browser", Chromium, false, "#1a73c9", Local, r"AVG\Browser\User Data", false),
-    s("ccleaner", "CCleaner Browser", Chromium, false, "#e3392b", Local, r"CCleaner Browser\User Data", false),
-    s("coccoc", "Cốc Cốc", Chromium, false, "#2f9e44", Local, r"CocCoc\Browser\User Data", false),
-    s("qq", "QQ Browser", Chromium, false, "#12b7f5", Local, r"Tencent\QQBrowser\User Data", false),
-    s("360", "360 Browser", Chromium, false, "#19b955", Local, r"360Chrome\Chrome\User Data", false),
-    s("cent", "Cent Browser", Chromium, false, "#2d89ef", Local, r"CentBrowser\User Data", false),
-    s("citrio", "Citrio", Chromium, false, "#e8590c", Local, r"CatalinaGroup\Citrio\User Data", false),
-    s("torch", "Torch", Chromium, false, "#f08c00", Local, r"Torch\User Data", false),
-    s("dragon", "Comodo Dragon", Chromium, false, "#c92a2a", Local, r"Comodo\Dragon\User Data", false),
-    s("sidekick", "Sidekick", Chromium, false, "#7048e8", Local, r"Sidekick\User Data", false),
+    s(
+        "opera",
+        "Opera",
+        Chromium,
+        false,
+        "#ff1b2d",
+        Roaming,
+        r"Opera Software\Opera Stable",
+        true,
+    ),
+    s(
+        "opera-gx",
+        "Opera GX",
+        Chromium,
+        false,
+        "#fa1e4e",
+        Roaming,
+        r"Opera Software\Opera GX Stable",
+        true,
+    ),
+    s(
+        "vivaldi",
+        "Vivaldi",
+        Chromium,
+        false,
+        "#ef3939",
+        Local,
+        r"Vivaldi\User Data",
+        false,
+    ),
+    s(
+        "arc",
+        "Arc",
+        Chromium,
+        false,
+        "#5c6cff",
+        Local,
+        r"Packages\TheBrowserCompany.Arc_ttt1ap7aakyb4\LocalCache\Local\Arc\User Data",
+        false,
+    ),
+    s(
+        "comet",
+        "Comet",
+        Chromium,
+        false,
+        "#20808d",
+        Local,
+        r"Perplexity\Comet\User Data",
+        false,
+    ),
+    s(
+        "chromium",
+        "Chromium",
+        Chromium,
+        false,
+        "#3f7de0",
+        Local,
+        r"Chromium\User Data",
+        false,
+    ),
+    s(
+        "chrome-beta",
+        "Chrome Beta",
+        Chromium,
+        false,
+        "#e8710a",
+        Local,
+        r"Google\Chrome Beta\User Data",
+        false,
+    ),
+    s(
+        "chrome-dev",
+        "Chrome Dev",
+        Chromium,
+        false,
+        "#188038",
+        Local,
+        r"Google\Chrome Dev\User Data",
+        false,
+    ),
+    s(
+        "chrome-canary",
+        "Chrome Canary",
+        Chromium,
+        false,
+        "#f9ab00",
+        Local,
+        r"Google\Chrome SxS\User Data",
+        false,
+    ),
+    s(
+        "edge-beta",
+        "Edge Beta",
+        Chromium,
+        false,
+        "#1f8a70",
+        Local,
+        r"Microsoft\Edge Beta\User Data",
+        false,
+    ),
+    s(
+        "edge-dev",
+        "Edge Dev",
+        Chromium,
+        false,
+        "#3a7bd5",
+        Local,
+        r"Microsoft\Edge Dev\User Data",
+        false,
+    ),
+    s(
+        "brave-beta",
+        "Brave Beta",
+        Chromium,
+        false,
+        "#fb542b",
+        Local,
+        r"BraveSoftware\Brave-Browser-Beta\User Data",
+        false,
+    ),
+    s(
+        "brave-nightly",
+        "Brave Nightly",
+        Chromium,
+        false,
+        "#fb542b",
+        Local,
+        r"BraveSoftware\Brave-Browser-Nightly\User Data",
+        false,
+    ),
+    s(
+        "yandex",
+        "Yandex Browser",
+        Chromium,
+        false,
+        "#fc3f1d",
+        Local,
+        r"Yandex\YandexBrowser\User Data",
+        false,
+    ),
+    s(
+        "whale",
+        "Naver Whale",
+        Chromium,
+        false,
+        "#03c75a",
+        Local,
+        r"Naver\Naver Whale\User Data",
+        false,
+    ),
+    s(
+        "thorium",
+        "Thorium",
+        Chromium,
+        false,
+        "#e04f5f",
+        Local,
+        r"Thorium\User Data",
+        false,
+    ),
+    s(
+        "iridium",
+        "Iridium",
+        Chromium,
+        false,
+        "#3b6ea5",
+        Local,
+        r"Iridium\User Data",
+        false,
+    ),
+    s(
+        "epic",
+        "Epic Privacy Browser",
+        Chromium,
+        false,
+        "#6b3fa0",
+        Local,
+        r"Epic Privacy Browser\User Data",
+        false,
+    ),
+    s(
+        "slimjet",
+        "Slimjet",
+        Chromium,
+        false,
+        "#2aa4dd",
+        Local,
+        r"Slimjet\User Data",
+        false,
+    ),
+    s(
+        "maxthon",
+        "Maxthon",
+        Chromium,
+        false,
+        "#2b7de9",
+        Local,
+        r"Maxthon\User Data",
+        false,
+    ),
+    s(
+        "avast",
+        "Avast Secure Browser",
+        Chromium,
+        false,
+        "#ff7800",
+        Local,
+        r"AVAST Software\Browser\User Data",
+        false,
+    ),
+    s(
+        "avg",
+        "AVG Secure Browser",
+        Chromium,
+        false,
+        "#1a73c9",
+        Local,
+        r"AVG\Browser\User Data",
+        false,
+    ),
+    s(
+        "ccleaner",
+        "CCleaner Browser",
+        Chromium,
+        false,
+        "#e3392b",
+        Local,
+        r"CCleaner Browser\User Data",
+        false,
+    ),
+    s(
+        "coccoc",
+        "Cốc Cốc",
+        Chromium,
+        false,
+        "#2f9e44",
+        Local,
+        r"CocCoc\Browser\User Data",
+        false,
+    ),
+    s(
+        "qq",
+        "QQ Browser",
+        Chromium,
+        false,
+        "#12b7f5",
+        Local,
+        r"Tencent\QQBrowser\User Data",
+        false,
+    ),
+    s(
+        "360",
+        "360 Browser",
+        Chromium,
+        false,
+        "#19b955",
+        Local,
+        r"360Chrome\Chrome\User Data",
+        false,
+    ),
+    s(
+        "cent",
+        "Cent Browser",
+        Chromium,
+        false,
+        "#2d89ef",
+        Local,
+        r"CentBrowser\User Data",
+        false,
+    ),
+    s(
+        "citrio",
+        "Citrio",
+        Chromium,
+        false,
+        "#e8590c",
+        Local,
+        r"CatalinaGroup\Citrio\User Data",
+        false,
+    ),
+    s(
+        "torch",
+        "Torch",
+        Chromium,
+        false,
+        "#f08c00",
+        Local,
+        r"Torch\User Data",
+        false,
+    ),
+    s(
+        "dragon",
+        "Comodo Dragon",
+        Chromium,
+        false,
+        "#c92a2a",
+        Local,
+        r"Comodo\Dragon\User Data",
+        false,
+    ),
+    s(
+        "sidekick",
+        "Sidekick",
+        Chromium,
+        false,
+        "#7048e8",
+        Local,
+        r"Sidekick\User Data",
+        false,
+    ),
     // Firefox family
-    s("librewolf", "LibreWolf", Firefox, false, "#00acff", Roaming, "librewolf", false),
-    s("waterfox", "Waterfox", Firefox, false, "#0aa5ff", Roaming, "Waterfox", false),
-    s("floorp", "Floorp", Firefox, false, "#2b8bf0", Roaming, "Floorp", false),
-    s("zen", "Zen Browser", Firefox, false, "#f76f53", Roaming, "zen", false),
-    s("palemoon", "Pale Moon", Firefox, false, "#4c6ef5", Roaming, r"Moonchild Productions\Pale Moon", false),
-    s("seamonkey", "SeaMonkey", Firefox, false, "#1c7ed6", Roaming, r"Mozilla\SeaMonkey", false),
-    s("tor", "Tor Browser", Firefox, false, "#7d4698", Pick, "", false),
-    s("mullvad", "Mullvad Browser", Firefox, false, "#294d73", Pick, "", false),
+    s(
+        "librewolf",
+        "LibreWolf",
+        Firefox,
+        false,
+        "#00acff",
+        Roaming,
+        "librewolf",
+        false,
+    ),
+    s(
+        "waterfox", "Waterfox", Firefox, false, "#0aa5ff", Roaming, "Waterfox", false,
+    ),
+    s(
+        "floorp", "Floorp", Firefox, false, "#2b8bf0", Roaming, "Floorp", false,
+    ),
+    s(
+        "zen",
+        "Zen Browser",
+        Firefox,
+        false,
+        "#f76f53",
+        Roaming,
+        "zen",
+        false,
+    ),
+    s(
+        "palemoon",
+        "Pale Moon",
+        Firefox,
+        false,
+        "#4c6ef5",
+        Roaming,
+        r"Moonchild Productions\Pale Moon",
+        false,
+    ),
+    s(
+        "seamonkey",
+        "SeaMonkey",
+        Firefox,
+        false,
+        "#1c7ed6",
+        Roaming,
+        r"Mozilla\SeaMonkey",
+        false,
+    ),
+    s(
+        "tor",
+        "Tor Browser",
+        Firefox,
+        false,
+        "#7d4698",
+        Pick,
+        "",
+        false,
+    ),
+    s(
+        "mullvad",
+        "Mullvad Browser",
+        Firefox,
+        false,
+        "#294d73",
+        Pick,
+        "",
+        false,
+    ),
     // Everything else
-    s("ie", "Internet Explorer", Favorites, false, "#1ebbee", Home, "Favorites", false),
-    s("safari", "Safari", HtmlFile, false, "#1c9bef", Pick, "", false),
-    s("file", "Bookmarks file (HTML)", HtmlFile, false, "#868e96", Pick, "", false),
+    s(
+        "ie",
+        "Internet Explorer",
+        Favorites,
+        false,
+        "#1ebbee",
+        Home,
+        "Favorites",
+        false,
+    ),
+    s(
+        "safari", "Safari", HtmlFile, false, "#1c9bef", Pick, "", false,
+    ),
+    s(
+        "file",
+        "Bookmarks file (HTML)",
+        HtmlFile,
+        false,
+        "#868e96",
+        Pick,
+        "",
+        false,
+    ),
 ];
 
 pub fn find(id: &str) -> Option<&'static Source> {
@@ -221,8 +614,13 @@ pub fn detect(local: &Path, roaming: &Path, home: &Path) -> Vec<Detected> {
 /// The profiles at a location the user picked (a browser's data folder, one profile folder, or a
 /// bookmarks file).
 pub fn profiles_at(source: &Source, path: &Path) -> Vec<Profile> {
-    if source.family == Chromium && (path.join("Bookmarks").exists() || path.join("History").exists()) {
-        let sibling = path.parent().map(|p| p.join("Local State")).unwrap_or_default();
+    if source.family == Chromium
+        && (path.join("Bookmarks").exists() || path.join("History").exists())
+    {
+        let sibling = path
+            .parent()
+            .map(|p| p.join("Local State"))
+            .unwrap_or_default();
         let own = path.join("Local State");
         return vec![Profile {
             name: file_name(path),
@@ -249,7 +647,9 @@ fn chromium_profiles(dir: &Path, flat: bool) -> Vec<Profile> {
                 local_state: if local_state.exists() {
                     local_state
                 } else {
-                    dir.parent().map(|p| p.join("Local State")).unwrap_or_default()
+                    dir.parent()
+                        .map(|p| p.join("Local State"))
+                        .unwrap_or_default()
                 },
             }]
         } else {
@@ -312,7 +712,11 @@ fn firefox_profiles(dir: &Path) -> Vec<Profile> {
             };
             if p.is_dir() && !out.iter().any(|o| o.dir == p) {
                 out.push(Profile {
-                    name: if name.is_empty() { file_name(&p) } else { name.clone() },
+                    name: if name.is_empty() {
+                        file_name(&p)
+                    } else {
+                        name.clone()
+                    },
                     dir: p,
                     local_state: PathBuf::new(),
                 });
@@ -350,7 +754,9 @@ mod tests {
         let popular: Vec<_> = SOURCES.iter().filter(|s| s.popular).map(|s| s.id).collect();
         assert_eq!(popular, ["chrome", "edge", "brave", "firefox"]);
         assert!(SOURCES.len() >= 40);
-        assert!(SOURCES.iter().all(|s| s.color.starts_with('#') && s.color.len() == 7));
+        assert!(SOURCES
+            .iter()
+            .all(|s| s.color.starts_with('#') && s.color.len() == 7));
     }
 
     #[test]
@@ -360,9 +766,16 @@ mod tests {
         let vivaldi = base.join("local/Vivaldi/User Data/Default");
         std::fs::create_dir_all(&vivaldi).unwrap();
         std::fs::write(vivaldi.join("Preferences"), "{}").unwrap();
-        let found = detect(&base.join("local"), &base.join("roaming"), &base.join("home"));
+        let found = detect(
+            &base.join("local"),
+            &base.join("roaming"),
+            &base.join("home"),
+        );
         let order: Vec<_> = found.iter().take(6).map(|d| d.id).collect();
-        assert_eq!(order, ["chrome", "edge", "brave", "firefox", "vivaldi", "opera"]);
+        assert_eq!(
+            order,
+            ["chrome", "edge", "brave", "firefox", "vivaldi", "opera"]
+        );
         assert!(found.iter().find(|d| d.id == "vivaldi").unwrap().installed);
         assert!(!found.iter().find(|d| d.id == "chrome").unwrap().installed);
         assert!(found.iter().find(|d| d.id == "safari").unwrap().pick);

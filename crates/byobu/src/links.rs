@@ -6,11 +6,42 @@ use url::Url;
 
 /// Query parameters that exist only to identify a click or a person. Exact names.
 const TRACKING_PARAMS: &[&str] = &[
-    "fbclid", "gclid", "gclsrc", "dclid", "gbraid", "wbraid", "msclkid", "twclid", "ttclid",
-    "li_fat_id", "yclid", "igshid", "mc_eid", "mc_cid", "_hsenc", "_hsmi", "__hssc", "__hstc",
-    "__hsfp", "hsctatracking", "oly_anon_id", "oly_enc_id", "vero_id", "vero_conv", "_openstat",
-    "wickedid", "rb_clickid", "s_cid", "ml_subscriber", "ml_subscriber_hash", "mkt_tok",
-    "ck_subscriber_id", "irclickid", "spm", "_ga", "_gl",
+    "fbclid",
+    "gclid",
+    "gclsrc",
+    "dclid",
+    "gbraid",
+    "wbraid",
+    "msclkid",
+    "twclid",
+    "ttclid",
+    "li_fat_id",
+    "yclid",
+    "igshid",
+    "mc_eid",
+    "mc_cid",
+    "_hsenc",
+    "_hsmi",
+    "__hssc",
+    "__hstc",
+    "__hsfp",
+    "hsctatracking",
+    "oly_anon_id",
+    "oly_enc_id",
+    "vero_id",
+    "vero_conv",
+    "_openstat",
+    "wickedid",
+    "rb_clickid",
+    "s_cid",
+    "ml_subscriber",
+    "ml_subscriber_hash",
+    "mkt_tok",
+    "ck_subscriber_id",
+    "irclickid",
+    "spm",
+    "_ga",
+    "_gl",
 ];
 
 /// Parameters matched by prefix (`utm_source`, `pk_campaign`, ...).
@@ -71,8 +102,10 @@ pub fn strip_tracking(url: &str) -> Option<String> {
         return None;
     }
     u.query()?;
-    let all: Vec<(String, String)> =
-        u.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect();
+    let all: Vec<(String, String)> = u
+        .query_pairs()
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
     let kept: Vec<&(String, String)> = all.iter().filter(|(k, _)| !is_tracking(k)).collect();
     if kept.len() == all.len() {
         return None;
@@ -80,7 +113,9 @@ pub fn strip_tracking(url: &str) -> Option<String> {
     if kept.is_empty() {
         u.set_query(None);
     } else {
-        u.query_pairs_mut().clear().extend_pairs(kept.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+        u.query_pairs_mut()
+            .clear()
+            .extend_pairs(kept.iter().map(|(k, v)| (k.as_str(), v.as_str())));
     }
     Some(u.to_string())
 }
@@ -111,7 +146,10 @@ mod tests {
             strip_tracking("https://a.com/p?id=3&utm_source=x&fbclid=abc&q=hi").as_deref(),
             Some("https://a.com/p?id=3&q=hi")
         );
-        assert_eq!(strip_tracking("https://a.com/p?utm_medium=x").as_deref(), Some("https://a.com/p"));
+        assert_eq!(
+            strip_tracking("https://a.com/p?utm_medium=x").as_deref(),
+            Some("https://a.com/p")
+        );
         assert_eq!(strip_tracking("https://a.com/p?id=3"), None);
         assert_eq!(strip_tracking("https://a.com/p"), None);
         assert_eq!(strip_tracking("shoji://settings?utm_x=1"), None);
@@ -129,18 +167,31 @@ mod tests {
     #[test]
     fn debounces_known_redirectors() {
         assert_eq!(
-            debounce("https://www.google.com/url?sa=t&q=https%3A%2F%2Fexample.org%2Fx%3Fa%3D1&ved=0").as_deref(),
+            debounce(
+                "https://www.google.com/url?sa=t&q=https%3A%2F%2Fexample.org%2Fx%3Fa%3D1&ved=0"
+            )
+            .as_deref(),
             Some("https://example.org/x?a=1")
         );
         assert_eq!(
-            debounce("https://l.facebook.com/l.php?u=https%3A%2F%2Fexample.org%2F&h=AT0").as_deref(),
+            debounce("https://l.facebook.com/l.php?u=https%3A%2F%2Fexample.org%2F&h=AT0")
+                .as_deref(),
             Some("https://example.org/")
         );
-        assert_eq!(debounce("https://www.google.com/search?q=https%3A%2F%2Fexample.org"), None);
+        assert_eq!(
+            debounce("https://www.google.com/search?q=https%3A%2F%2Fexample.org"),
+            None
+        );
         // Redirect back to the same host is not a tracker hop.
-        assert_eq!(debounce("https://www.google.com/url?q=https%3A%2F%2Fwww.google.com%2Fx"), None);
+        assert_eq!(
+            debounce("https://www.google.com/url?q=https%3A%2F%2Fwww.google.com%2Fx"),
+            None
+        );
         // Destinations must be web URLs.
-        assert_eq!(debounce("https://www.google.com/url?q=javascript%3Aalert(1)"), None);
+        assert_eq!(
+            debounce("https://www.google.com/url?q=javascript%3Aalert(1)"),
+            None
+        );
     }
 
     #[test]

@@ -585,20 +585,34 @@ pub fn pick_file(title: &str, filter_name: &str, spec: &str) -> Option<PathBuf> 
         let all = HSTRING::from("All files");
         let star = HSTRING::from("*.*");
         let filters = [
-            COMDLG_FILTERSPEC { pszName: windows::core::PCWSTR(name.as_ptr()), pszSpec: windows::core::PCWSTR(spec.as_ptr()) },
-            COMDLG_FILTERSPEC { pszName: windows::core::PCWSTR(all.as_ptr()), pszSpec: windows::core::PCWSTR(star.as_ptr()) },
+            COMDLG_FILTERSPEC {
+                pszName: windows::core::PCWSTR(name.as_ptr()),
+                pszSpec: windows::core::PCWSTR(spec.as_ptr()),
+            },
+            COMDLG_FILTERSPEC {
+                pszName: windows::core::PCWSTR(all.as_ptr()),
+                pszSpec: windows::core::PCWSTR(star.as_ptr()),
+            },
         ];
         let _ = dialog.SetFileTypes(&filters);
         let _ = dialog.SetTitle(&HSTRING::from(title));
         dialog.Show(None).ok()?;
-        let path = dialog.GetResult().ok()?.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let path = dialog
+            .GetResult()
+            .ok()?
+            .GetDisplayName(SIGDN_FILESYSPATH)
+            .ok()?;
         Some(PathBuf::from(take(path)))
     }
 }
 
 /// Bookmarks export (`.html`).
 pub fn pick_html_file() -> Option<PathBuf> {
-    pick_file("Choose a bookmarks file", "Bookmarks (*.html;*.htm)", "*.html;*.htm")
+    pick_file(
+        "Choose a bookmarks file",
+        "Bookmarks (*.html;*.htm)",
+        "*.html;*.htm",
+    )
 }
 
 /// Save-as dialog for a CSV file named `default_name`.
@@ -609,13 +623,20 @@ pub fn pick_save_csv(default_name: &str) -> Option<PathBuf> {
     use windows::Win32::UI::Shell::{FileSaveDialog, IFileSaveDialog, SIGDN_FILESYSPATH};
     unsafe {
         let dialog: IFileSaveDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_ALL).ok()?;
-        let filters = [COMDLG_FILTERSPEC { pszName: w!("CSV file (*.csv)"), pszSpec: w!("*.csv") }];
+        let filters = [COMDLG_FILTERSPEC {
+            pszName: w!("CSV file (*.csv)"),
+            pszSpec: w!("*.csv"),
+        }];
         let _ = dialog.SetFileTypes(&filters);
         let _ = dialog.SetDefaultExtension(w!("csv"));
         let _ = dialog.SetFileName(&HSTRING::from(default_name));
         let _ = dialog.SetTitle(&HSTRING::from("Save passwords as CSV"));
         dialog.Show(None).ok()?;
-        let path = dialog.GetResult().ok()?.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let path = dialog
+            .GetResult()
+            .ok()?
+            .GetDisplayName(SIGDN_FILESYSPATH)
+            .ok()?;
         Some(PathBuf::from(take(path)))
     }
 }
