@@ -20,6 +20,15 @@ pub struct Settings {
     pub tabs: TabSettings,
     pub permissions: PermissionSettings,
     pub shield: ShieldSettings,
+    pub extensions: ExtensionSettings,
+}
+
+/// Browser extensions (unpacked Chromium extensions loaded through the engine). Read when the
+/// engine starts, because it changes how the engine is created.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExtensionSettings {
+    pub enabled: bool,
 }
 
 /// Byobu, the ad and tracker shield.
@@ -314,6 +323,7 @@ impl Default for Settings {
             tabs: TabSettings::default(),
             permissions: PermissionSettings::default(),
             shield: ShieldSettings::default(),
+            extensions: ExtensionSettings::default(),
         }
     }
 }

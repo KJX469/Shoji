@@ -430,6 +430,9 @@ fn test_security_v10_web_content_ipc_allowlist() {
         },
         UiToHostMessage::ExportFavourites,
         UiToHostMessage::SiteChoicesQuery,
+        UiToHostMessage::ExtensionsQuery,
+        UiToHostMessage::AddExtension,
+        UiToHostMessage::RemoveExtension { id: "x".into() },
         UiToHostMessage::ForgetSiteChoice {
             host: "a.com".into(),
             kind: None,

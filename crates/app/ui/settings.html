@@ -339,6 +339,22 @@
     </section>
 
     <section>
+      <span class="label">Extensions</span>
+      <div class="card">
+        <div class="row">
+          <div class="what"><b>Browser extensions</b><small>Experimental. Unpacked Chromium extensions, loaded by the engine; there is no extension store and no toolbar button. Applies after a restart</small></div>
+          <label class="switch"><input type="checkbox" data-path="extensions.enabled"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="what"><b>Installed</b><small id="extNote">Open a website, then choose Add to install one from an unzipped folder</small></div>
+          <button class="btn" onclick="post('AddExtension')">Add…</button>
+          <button class="btn" onclick="post('ExtensionsQuery')">Refresh</button>
+        </div>
+        <div class="sitelist" id="extList"></div>
+      </div>
+    </section>
+
+    <section>
       <span class="label">About</span>
       <div class="card">
         <div class="row"><div class="what"><b>Shoji</b><small>Version {{APP_VERSION}}</small></div></div>
@@ -460,6 +476,19 @@
       box.hidden = !box.hidden;
       if (!box.hidden) post('SiteChoicesQuery');
     }
+    window.__extensions = d => {
+      const box = $('extList');
+      box.textContent = '';
+      $('extNote').textContent = d.active ? (d.items.length ? d.items.length + ' installed' : 'None installed yet') : 'Off. Turn extensions on above and restart Shoji';
+      d.items.forEach(x => {
+        const row = document.createElement('div');
+        row.className = 'siterow';
+        row.innerHTML = '<b>' + esc(x.name || x.id) + '</b><span class="chips"></span><button class="btn small">Remove</button>';
+        row.querySelector('button').onclick = () => post('RemoveExtension', { id: x.id });
+        box.appendChild(row);
+      });
+    };
+    post('ExtensionsQuery');
     window.__siteChoices = list => {
       const box = $('siteList');
       box.textContent = '';

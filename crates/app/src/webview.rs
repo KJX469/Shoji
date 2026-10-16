@@ -588,6 +588,122 @@ pub fn set_muted(webview: &WebView, muted: bool) {
     }
 }
 
+/* ---------- Extensions ---------- */
+
+fn extension_profile(webview: &WebView) -> Option<ICoreWebView2Profile7> {
+    let core = unsafe { webview.controller().CoreWebView2() }.ok()?;
+    unsafe { core.cast::<ICoreWebView2_13>().ok()?.Profile().ok()? }
+        .cast::<ICoreWebView2Profile7>()
+        .ok()
+}
+
+/// Install an unpacked extension from `folder` into the profile `webview` uses. Asks the host
+/// to re-list when the engine answers.
+pub fn add_extension(
+    webview: &WebView,
+    folder: &std::path::Path,
+    proxy: EventLoopProxy<BrowserEvent>,
+) {
+    use windows::core::HSTRING;
+    let Some(profile) = extension_profile(webview) else {
+        let _ = proxy.send_event(BrowserEvent::ExtensionsChanged(Some(
+            "The engine can't load extensions here".into(),
+        )));
+        return;
+    };
+    let handler = ProfileAddBrowserExtensionCompletedHandler::create(Box::new(move |result, _| {
+        let _ = proxy.send_event(BrowserEvent::ExtensionsChanged(
+            result.err().map(|e| e.message().to_string()),
+        ));
+        Ok(())
+    }));
+    let _ = unsafe { profile.AddBrowserExtension(&HSTRING::from(folder.as_os_str()), &handler) };
+}
+
+fn each_extension(
+    list: &ICoreWebView2BrowserExtensionList,
+    mut f: impl FnMut(&ICoreWebView2BrowserExtension, String, String, bool),
+) {
+    let mut count = 0u32;
+    if unsafe { list.Count(&mut count) }.is_err() {
+        return;
+    }
+    for i in 0..count {
+        let Ok(ext) = (unsafe { list.GetValueAtIndex(i) }) else {
+            continue;
+        };
+        let (mut id, mut name, mut enabled) = (PWSTR::null(), PWSTR::null(), BOOL(0));
+        unsafe {
+            let _ = ext.Id(&mut id);
+            let _ = ext.Name(&mut name);
+            let _ = ext.IsEnabled(&mut enabled);
+        }
+        f(&ext, take(id), take(name), enabled.as_bool());
+    }
+}
+
+/// Ask the engine which extensions are installed; the host gets them as JSON.
+pub fn list_extensions(webview: &WebView, proxy: EventLoopProxy<BrowserEvent>) {
+    let Some(profile) = extension_profile(webview) else {
+        let _ = proxy.send_event(BrowserEvent::ExtensionsListed("[]".into()));
+        return;
+    };
+    let handler =
+        ProfileGetBrowserExtensionsCompletedHandler::create(Box::new(move |result, list| {
+            let mut out = Vec::new();
+            if result.is_ok() {
+                if let Some(list) = list {
+                    each_extension(&list, |_, id, name, enabled| {
+                        out.push(serde_json::json!({ "id": id, "name": name, "enabled": enabled }));
+                    });
+                }
+            }
+            let _ = proxy.send_event(BrowserEvent::ExtensionsListed(
+                serde_json::Value::Array(out).to_string(),
+            ));
+            Ok(())
+        }));
+    let _ = unsafe { profile.GetBrowserExtensions(&handler) };
+}
+
+/// Remove the extension with `id`.
+pub fn remove_extension(webview: &WebView, id: String, proxy: EventLoopProxy<BrowserEvent>) {
+    let Some(profile) = extension_profile(webview) else {
+        return;
+    };
+    let handler =
+        ProfileGetBrowserExtensionsCompletedHandler::create(Box::new(move |result, list| {
+            let mut found = None;
+            if result.is_ok() {
+                if let Some(list) = list {
+                    each_extension(&list, |ext, ext_id, _, _| {
+                        if ext_id == id {
+                            found = Some(ext.clone());
+                        }
+                    });
+                }
+            }
+            match found {
+                Some(ext) => {
+                    let proxy = proxy.clone();
+                    let done =
+                        BrowserExtensionRemoveCompletedHandler::create(Box::new(move |result| {
+                            let _ = proxy.send_event(BrowserEvent::ExtensionsChanged(
+                                result.err().map(|e| e.message().to_string()),
+                            ));
+                            Ok(())
+                        }));
+                    let _ = unsafe { ext.Remove(&done) };
+                }
+                None => {
+                    let _ = proxy.send_event(BrowserEvent::ExtensionsChanged(None));
+                }
+            }
+            Ok(())
+        }));
+    let _ = unsafe { profile.GetBrowserExtensions(&handler) };
+}
+
 /* ---------- Native dialogs ---------- */
 
 fn show_save_dialog(default_name: &str) -> Option<PathBuf> {

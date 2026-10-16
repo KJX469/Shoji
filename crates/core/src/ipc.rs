@@ -393,6 +393,13 @@ pub enum UiToHostMessage {
     DismissSession,
     /// Forget remembered per-site choices (permissions and zoom)
     ClearSiteData,
+    /// Settings asks for the installed extensions
+    ExtensionsQuery,
+    /// Choose an unpacked extension folder and install it
+    AddExtension,
+    RemoveExtension {
+        id: String,
+    },
     /// Settings asks for the list of remembered site choices
     SiteChoicesQuery,
     /// Forget one remembered choice: a permission name, "zoom", or `None` for the whole site

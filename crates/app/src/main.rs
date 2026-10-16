@@ -35,6 +35,15 @@ use winit::keyboard::ModifiersState;
 use winit::window::{Window, WindowId};
 use wry::{Rect, WebView, WebViewBuilder, WebViewBuilderExtWindows, WebViewExtWindows};
 
+/// Whether the engine was created with browser extensions on. Every webview must agree, because
+/// they share one engine; it is read once at startup.
+static EXTENSIONS_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn new_builder<'a>() -> WebViewBuilder<'a> {
+    WebViewBuilder::new()
+        .with_browser_extensions_enabled(EXTENSIONS_ON.load(std::sync::atomic::Ordering::Relaxed))
+}
+
 const CHROME_HEIGHT: f64 = 76.0;
 /// Width of the side panel while it is pinned open
 const SIDEBAR_WIDTH: f64 = 320.0;
@@ -191,6 +200,10 @@ pub(crate) enum BrowserEvent {
         tab_id: TabId,
         loading: bool,
     },
+    /// The engine's list of installed extensions (JSON)
+    ExtensionsListed(String),
+    /// An extension was added or removed (`Some` is why it failed); the list needs a refresh
+    ExtensionsChanged(Option<String>),
     /// The page started or stopped making sound
     TabAudio {
         tab_id: TabId,
@@ -1124,7 +1137,7 @@ impl BrowserApp {
         let frosted = self.settings.appearance.frosted_toolbar;
         window::apply_backdrop(&window, frosted, dark);
         let proxy = self.proxy.clone();
-        let chrome = WebViewBuilder::new()
+        let chrome = new_builder()
             .with_bounds(bounds(0.0, 0.0, size.width, CHROME_HEIGHT))
             .with_html(pages::chrome(&self.settings))
             .with_custom_protocol("shoji".into(), |_, request| font_response(&request))
@@ -1501,6 +1514,89 @@ impl BrowserApp {
     }
 
     /// Run a script in the welcome and settings pages of a window.
+    /// A webview that uses the real profile, which is where extensions live.
+    fn persistent_view(&self) -> Option<&wry::WebView> {
+        self.windows
+            .values()
+            .flat_map(|w| w.views.values())
+            .find(|t| t.persistent)
+            .map(|t| &t.view)
+    }
+
+    fn request_extension_list(&self) {
+        if !EXTENSIONS_ON.load(std::sync::atomic::Ordering::Relaxed) {
+            let _ = self
+                .proxy
+                .send_event(BrowserEvent::ExtensionsListed("[]".into()));
+        } else if let Some(view) = self.persistent_view() {
+            webview::list_extensions(view, self.proxy.clone());
+        } else {
+            let _ = self
+                .proxy
+                .send_event(BrowserEvent::ExtensionsListed("[]".into()));
+        }
+    }
+
+    /// Pick an unpacked extension, copy it into the data folder (so moving the original can't
+    /// break it) and hand it to the engine.
+    fn add_extension_from_folder(&mut self, win_id: WindowId) {
+        let say = |app: &Self, title: &str, text: &str| {
+            app.toast(&serde_json::json!({ "title": title, "text": text, "pose": "unfold" }));
+        };
+        if !EXTENSIONS_ON.load(std::sync::atomic::Ordering::Relaxed) {
+            say(
+                self,
+                "Turn extensions on first.",
+                "Switch them on in Settings and restart Shoji.",
+            );
+            return;
+        }
+        let Some(view) = self.persistent_view() else {
+            say(
+                self,
+                "Open a website first.",
+                "Extensions are added to the browsing profile.",
+            );
+            return;
+        };
+        let start = dirs_documents().unwrap_or_else(|| self.data_dir.clone());
+        let Some(picked) = webview::pick_folder(&start) else {
+            return;
+        };
+        if !picked.join("manifest.json").is_file() {
+            say(
+                self,
+                "Not an extension folder.",
+                "It needs a manifest.json at the top. Unzip the extension first.",
+            );
+            return;
+        }
+        let name: String = picked
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "extension".into())
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        let dest = self.data_dir.join("Extensions").join(name);
+        if copy_dir_all(&picked, &dest, 0).is_err() {
+            say(
+                self,
+                "Couldn't copy the extension.",
+                "Check that the folder can be read.",
+            );
+            return;
+        }
+        let _ = win_id;
+        webview::add_extension(view, &dest, self.proxy.clone());
+    }
+
     fn eval_welcome_and_settings(&self, win_id: WindowId, js: &str) {
         if let Some(win) = self.windows.get(&win_id) {
             win.eval_internal_tabs(js);
@@ -1543,7 +1639,7 @@ impl BrowserApp {
         let nav_insecure = self.insecure_hosts.clone();
         let proxy_nav = self.proxy.clone();
         let proxy_ipc = self.proxy.clone();
-        let mut builder = WebViewBuilder::new()
+        let mut builder = new_builder()
             .with_bounds(rect)
             .with_incognito(!persistent)
             .with_background_color(window::page_rgba(dark))
@@ -2203,7 +2299,7 @@ impl BrowserApp {
         let proxy = self.proxy.clone();
         let dark = window::is_dark(&win.window, &self.settings.appearance.theme);
         win.overlay_ready = false;
-        win.overlay = WebViewBuilder::new()
+        win.overlay = new_builder()
             .with_bounds(bounds(0.0, 0.0, 10.0, 10.0))
             .with_visible(false)
             .with_html(pages::overlay(&self.settings))
@@ -2721,7 +2817,7 @@ impl BrowserApp {
         if win.notes.is_none() {
             let proxy = self.proxy.clone();
             let dark = window::is_dark(&win.window, &self.settings.appearance.theme);
-            win.notes = WebViewBuilder::new()
+            win.notes = new_builder()
                 .with_bounds(frame_rect(win.notes_desk()))
                 // The page can't be scripted before it loads, so the first open is handed over here.
                 .with_initialization_script(format!(
@@ -2830,7 +2926,7 @@ impl BrowserApp {
         if win.sidebar.is_none() {
             let proxy = self.proxy.clone();
             let dark = window::is_dark(&win.window, &self.settings.appearance.theme);
-            win.sidebar = WebViewBuilder::new()
+            win.sidebar = new_builder()
                 .with_bounds(bounds(0.0, 0.0, SIDEBAR_WIDTH, 1.0))
                 .with_visible(false)
                 .with_html(pages::sidebar(&self.settings))
@@ -4161,6 +4257,13 @@ impl BrowserApp {
                     self.push_data();
                 }
             }
+            M::ExtensionsQuery => self.request_extension_list(),
+            M::AddExtension => self.add_extension_from_folder(win_id),
+            M::RemoveExtension { id } => {
+                if let Some(view) = self.persistent_view() {
+                    webview::remove_extension(view, id, self.proxy.clone());
+                }
+            }
             M::ClearSiteData => {
                 self.site_data.clear();
                 self.push_data();
@@ -4595,7 +4698,7 @@ impl BrowserApp {
                 }
             }
             let dark = self.is_dark(&window);
-            let chrome = WebViewBuilder::new()
+            let chrome = new_builder()
                 .with_html(pages::chrome(&self.settings))
                 .with_custom_protocol("shoji".into(), |_, request| font_response(&request))
                 .with_incognito(true)
@@ -5036,6 +5139,26 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                     }
                 }
             }
+            BrowserEvent::ExtensionsListed(json) => {
+                let on = EXTENSIONS_ON.load(std::sync::atomic::Ordering::Relaxed);
+                let js = format!(
+                    "window.__extensions && window.__extensions({{active:{on},items:{json}}})"
+                );
+                let ids: Vec<WindowId> = self.windows.keys().copied().collect();
+                for id in ids {
+                    self.eval_welcome_and_settings(id, &js);
+                }
+            }
+            BrowserEvent::ExtensionsChanged(error) => {
+                if let Some(error) = error {
+                    self.toast(&serde_json::json!({
+                        "title": "That didn't work.",
+                        "text": error,
+                        "pose": "unfold",
+                    }));
+                }
+                self.request_extension_list();
+            }
             BrowserEvent::TabAudio { tab_id, playing } => {
                 if let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) {
                     if win
@@ -5304,6 +5427,33 @@ fn start_uninstall(_data_dir: &std::path::Path) -> bool {
     false
 }
 
+/// The user's Documents folder, where the extension picker starts.
+fn dirs_documents() -> Option<PathBuf> {
+    std::env::var_os("USERPROFILE").map(|p| PathBuf::from(p).join("Documents"))
+}
+
+/// Copy a folder tree (symbolic links are skipped, depth is capped).
+fn copy_dir_all(from: &std::path::Path, to: &std::path::Path, depth: usize) -> std::io::Result<()> {
+    if depth > 12 {
+        return Ok(());
+    }
+    if to.exists() && depth == 0 {
+        std::fs::remove_dir_all(to)?;
+    }
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        let target = to.join(entry.file_name());
+        if kind.is_dir() {
+            copy_dir_all(&entry.path(), &target, depth + 1)?;
+        } else if kind.is_file() {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if is_process_elevated() {
         #[cfg(windows)]
@@ -5373,10 +5523,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = std::fs::create_dir_all(&webview_data);
     // SAFETY: set before any other thread exists.
     unsafe { std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &webview_data) };
-    if Settings::load_from_path(&data_dir.join("settings.json"))
-        .privacy
-        .block_third_party_cookies
-    {
+    let startup_settings = Settings::load_from_path(&data_dir.join("settings.json"));
+    EXTENSIONS_ON.store(
+        startup_settings.extensions.enabled,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    if startup_settings.privacy.block_third_party_cookies {
         let mut flags = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").unwrap_or_default();
         if !flags.is_empty() {
             flags.push(' ');
