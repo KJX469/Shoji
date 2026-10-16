@@ -12,6 +12,7 @@ All notable changes to Shoji are recorded here. The format follows
 - **Export favourites** as a bookmarks file any browser can import (Settings → Privacy).
 - **Site choices list** (Settings → Privacy → Manage…): every remembered zoom and allowed or blocked permission, each removable, or forget a whole site.
 - **Block third-party cookies** switch (Settings → Privacy; applies after a restart; not yet runtime-verified).
+- **Extensions (experimental).** Settings → Extensions: switch on, restart, then add an unzipped Chromium extension folder; the engine loads it into the browsing profile. No store, no toolbar button, background pages may not run.
 - **Mute.** A speaker mark appears on a tab that is playing sound; click it, or use the tab menu, to mute.
 
 ## [0.1.4] - 2026-10-13

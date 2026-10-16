@@ -176,3 +176,12 @@ The new tab page groups by folder; `FavouriteFolder` and `ExportFavourites` are 
 and gets `window.__siteChoices(list)` back, then removes with `ForgetSiteChoice`. `privacy.block_third_party_cookies`
 is read at startup and adds `--test-third-party-cookie-phaseout` to `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`.
 Fingerprint resistance is only what the engine's strict tracking prevention provides; there is no separate control.
+
+## Extensions
+
+`extensions.enabled` is read once in `main()` into `EXTENSIONS_ON`; every `WebViewBuilder` comes from
+`new_builder()` so all webviews create the engine with the same `AreBrowserExtensionsEnabled` option (the
+engine rejects mixed options). Management runs through `ICoreWebView2Profile7` (`webview::add_extension`,
+`list_extensions`, `remove_extension`) on a webview that uses the real profile, so a website tab must be open.
+Added folders are copied to `<data>/Extensions/<name>` first. Extensions live in the engine profile and load on
+their own at later starts. There is no extension UI beyond Settings.
