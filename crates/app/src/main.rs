@@ -191,6 +191,11 @@ pub(crate) enum BrowserEvent {
         tab_id: TabId,
         loading: bool,
     },
+    /// The page started or stopped making sound
+    TabAudio {
+        tab_id: TabId,
+        playing: bool,
+    },
     /// Byobu blocked something for this tab (or its lists changed: tab 0)
     ShieldTouched(TabId),
     /// The element picker produced a rule for `host`
@@ -1704,6 +1709,7 @@ impl BrowserApp {
                 status: TabStatus::Inactive,
                 last_active_timestamp_secs: now_secs(),
                 group: None,
+                pinned: false,
             },
             None,
         );
@@ -2048,6 +2054,7 @@ impl BrowserApp {
                     url: t.url.clone(),
                     title: t.title.clone(),
                     group: t.group,
+                    pinned: t.pinned,
                 });
             }
             if !tabs.is_empty() {
@@ -2138,7 +2145,9 @@ impl BrowserApp {
             win.tabs.restore_groups(saved.groups.clone());
             for (id, t) in ids.iter().zip(&saved.tabs) {
                 win.tabs.update_title(*id, t.title.clone());
-                if t.group.is_some() {
+                if t.pinned {
+                    win.tabs.set_pinned(*id, true);
+                } else if t.group.is_some() {
                     win.tabs.set_tab_group(*id, t.group);
                 }
             }
@@ -2425,7 +2434,23 @@ impl BrowserApp {
                 None,
             ));
         }
-        for g in win.tabs.groups() {
+        out.push(item(
+            format!("pin:{}", tab_id.0),
+            if tab.pinned { "Unpin tab" } else { "Pin tab" },
+            None,
+        ));
+        if tab.is_audio_playing || tab.is_muted {
+            out.push(item(
+                format!("mute:{}", tab_id.0),
+                if tab.is_muted {
+                    "Unmute tab"
+                } else {
+                    "Mute tab"
+                },
+                None,
+            ));
+        }
+        for g in win.tabs.groups().iter().filter(|_| !tab.pinned) {
             if tab.group != Some(g.id) {
                 out.push(item(
                     format!("group-set:{}:{}", tab_id.0, g.id),
@@ -2434,11 +2459,13 @@ impl BrowserApp {
                 ));
             }
         }
-        out.push(item(
-            format!("group-new:{}", tab_id.0),
-            "New group with this tab…",
-            None,
-        ));
+        if !tab.pinned {
+            out.push(item(
+                format!("group-new:{}", tab_id.0),
+                "New group with this tab…",
+                None,
+            ));
+        }
         if let Some(g) = tab.group {
             out.push(item(
                 format!("group-none:{}", tab_id.0),
@@ -2556,6 +2583,19 @@ impl BrowserApp {
                 if let Some(t) = page {
                     self.favourites.toggle(&t.url, &t.title);
                     self.push_data();
+                }
+            }
+            "pin" => {
+                if let (Some(t), Some(win)) = (tab, self.windows.get_mut(&win_id)) {
+                    let pinned = win.tabs.get_tab_by_id(t).is_some_and(|s| !s.pinned);
+                    if win.tabs.set_pinned(t, pinned) {
+                        win.ui_dirty = true;
+                    }
+                }
+            }
+            "mute" => {
+                if let Some(t) = tab {
+                    self.handle_ipc(win_id, None, M::ToggleMuteTab { tab_id: t }, event_loop);
                 }
             }
             "reload" => {
@@ -3284,6 +3324,16 @@ impl BrowserApp {
                 }
             }
             M::CloseTab { id } => self.close_tab(win_id, id, event_loop),
+            M::ToggleMuteTab { tab_id } => {
+                if let Some(win) = self.windows.get_mut(&win_id) {
+                    let muted = win.tabs.get_tab_by_id(tab_id).is_some_and(|s| !s.is_muted);
+                    if let Some(view) = win.views.get(&tab_id) {
+                        webview::set_muted(&view.view, muted);
+                    }
+                    win.tabs.set_muted(tab_id, muted);
+                    win.ui_dirty = true;
+                }
+            }
             M::Navigate { url } => {
                 // From a page: navigate the tab that sent it, not whichever is active.
                 if let Some(tab) = from_tab {
@@ -4131,7 +4181,14 @@ impl BrowserApp {
                     .get(&win_id)
                     .and_then(|w| w.tabs.active_tab_id())
                 {
-                    self.close_tab(win_id, id, event_loop);
+                    // Ctrl+W leaves a pinned tab alone; its menu and middle-click still close it.
+                    let pinned = self
+                        .windows
+                        .get(&win_id)
+                        .is_some_and(|w| w.tabs.get_tab_by_id(id).is_some_and(|t| t.pinned));
+                    if !pinned {
+                        self.close_tab(win_id, id, event_loop);
+                    }
                 }
             }
             Command::FocusAddress => {
@@ -4912,6 +4969,18 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                             state.is_loading = loading;
                             win.ui_dirty = true;
                         }
+                    }
+                }
+            }
+            BrowserEvent::TabAudio { tab_id, playing } => {
+                if let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) {
+                    if win
+                        .tabs
+                        .get_tab_by_id(tab_id)
+                        .is_some_and(|t| t.is_audio_playing != playing)
+                    {
+                        win.tabs.set_audio_playing(tab_id, playing);
+                        win.ui_dirty = true;
                     }
                 }
             }

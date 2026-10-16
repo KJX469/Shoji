@@ -155,3 +155,10 @@ answers with `__byobuHide([...])`. Settings: `shield.mode` (off / standard / agg
 * **Settings**: per-list switches, lists added by URL, "Update now", paused sites and "My rules"
   (uBlock syntax). Changes wake the updater thread, which rebuilds the engine.
 
+
+## Pinned tabs and sound
+
+`TabState.pinned` keeps pinned tabs first in `TabManager` (`set_pinned`, `pinned_count`; `reorder_tab` and
+`insert_tab` refuse to cross the pinned block). The flag is saved in `SessionTab`. Sound comes from
+`ICoreWebView2_8` (`IsDocumentPlayingAudioChanged` -> `BrowserEvent::TabAudio`; `webview::set_muted`).
+`ToggleMuteTab` is chrome-only, so web pages cannot send it.

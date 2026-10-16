@@ -595,6 +595,8 @@ pub struct SessionTab {
     pub title: String,
     #[serde(default)]
     pub group: Option<u32>,
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

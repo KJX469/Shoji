@@ -424,6 +424,7 @@ fn test_security_v10_web_content_ipc_allowlist() {
             to: "07:00".into(),
         },
         UiToHostMessage::PinSidebar { pinned: true },
+        UiToHostMessage::ToggleMuteTab { tab_id: TabId(1) },
         UiToHostMessage::TrayRects {
             find: Some([0.0, 0.0, 9000.0, 9000.0]),
             permission: None,

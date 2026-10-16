@@ -588,3 +588,54 @@ fn test_link_privacy_defaults_on_and_old_files_load() {
     let off: Settings = serde_json::from_str(r#"{"shield":{"clean_links":false}}"#).unwrap();
     assert!(!off.shield.clean_links && off.shield.send_gpc);
 }
+
+#[test]
+fn pinned_tabs_stay_together_at_the_left() {
+    let mut tm = TabManager::new();
+    let a = tm.create_tab("https://a.com", 0);
+    let b = tm.create_tab("https://b.com", 0);
+    let c = tm.create_tab("https://c.com", 0);
+
+    assert!(tm.set_pinned(c, true));
+    assert!(!tm.set_pinned(c, true), "already pinned");
+    assert!(tm.set_pinned(b, true));
+    let order: Vec<_> = tm.tabs().iter().map(|t| t.id).collect();
+    assert_eq!(order, vec![c, b, a]);
+    assert_eq!(tm.pinned_count(), 2);
+
+    // Pinned tabs reorder only among themselves, unpinned only outside the block.
+    assert!(!tm.reorder_tab(0, 2));
+    assert!(!tm.reorder_tab(2, 0));
+    assert!(tm.reorder_tab(0, 1));
+    assert_eq!(tm.tabs()[0].id, b);
+
+    // Unpinning drops the tab just after the pinned block.
+    assert!(tm.set_pinned(b, false));
+    let order: Vec<_> = tm.tabs().iter().map(|t| t.id).collect();
+    assert_eq!(order, vec![c, b, a]);
+    assert_eq!(tm.pinned_count(), 1);
+}
+
+#[test]
+fn pinning_leaves_a_group_and_inserted_tabs_respect_the_block() {
+    let mut tm = TabManager::new();
+    let a = tm.create_tab("https://a.com", 0);
+    let b = tm.create_tab("https://b.com", 0);
+    let g = tm.create_group("Work", "blue");
+    assert!(tm.set_tab_group(a, Some(g)));
+    assert!(tm.set_pinned(a, true));
+    assert_eq!(tm.get_tab_by_id(a).unwrap().group, None);
+    assert!(tm.groups().is_empty(), "the emptied group is dropped");
+
+    let mut tab = tm.extract_tab(b).unwrap();
+    tab.pinned = false;
+    tm.insert_tab(tab, Some(0));
+    assert_eq!(
+        tm.tabs()[0].id,
+        a,
+        "an unpinned tab can't land before pinned ones"
+    );
+
+    tm.set_muted(b, true);
+    assert!(tm.get_tab_by_id(b).unwrap().is_muted);
+}

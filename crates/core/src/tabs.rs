@@ -37,6 +37,9 @@ pub struct TabState {
     /// Tab group this tab belongs to, if any
     #[serde(default)]
     pub group: Option<u32>,
+    /// Pinned tabs sit together at the left of the strip, icon only
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 /// A named, colour-coded set of tabs. `color` is a crane accent id ("blue", "gold", ...).
@@ -97,6 +100,7 @@ impl TabManager {
             status: TabStatus::Active,
             last_active_timestamp_secs: current_time_secs,
             group: None,
+            pinned: false,
         };
 
         // If another tab was active, mark it inactive
@@ -295,8 +299,44 @@ impl TabManager {
             .retain(|g| tabs.iter().any(|t| t.group == Some(g.id)));
     }
 
+    pub fn set_muted(&mut self, id: TabId, muted: bool) {
+        if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == id) {
+            tab.is_muted = muted;
+        }
+    }
+
+    /// How many tabs are pinned. Pinned tabs are always the first ones.
+    pub fn pinned_count(&self) -> usize {
+        self.tabs.iter().take_while(|t| t.pinned).count()
+    }
+
+    /// Pin or unpin a tab. A pinned tab moves to the end of the pinned block, an unpinned one
+    /// to just after it, so pinned tabs stay together at the left.
+    pub fn set_pinned(&mut self, id: TabId, pinned: bool) -> bool {
+        let Some(pos) = self.tabs.iter().position(|t| t.id == id) else {
+            return false;
+        };
+        if self.tabs[pos].pinned == pinned {
+            return false;
+        }
+        let mut tab = self.tabs.remove(pos);
+        tab.pinned = pinned;
+        if pinned {
+            tab.group = None;
+        }
+        let block = self.pinned_count();
+        self.tabs.insert(block, tab);
+        self.prune_groups();
+        true
+    }
+
+    /// Move a tab. A pinned tab stays inside the pinned block and an unpinned one outside it.
     pub fn reorder_tab(&mut self, from_idx: usize, to_idx: usize) -> bool {
         if from_idx < self.tabs.len() && to_idx < self.tabs.len() && from_idx != to_idx {
+            let block = self.pinned_count();
+            if self.tabs[from_idx].pinned != (to_idx < block) {
+                return false;
+            }
             let tab = self.tabs.remove(from_idx);
             self.tabs.insert(to_idx, tab);
             true
@@ -353,7 +393,13 @@ impl TabManager {
             }
         }
 
-        let idx = at_index.unwrap_or(self.tabs.len()).min(self.tabs.len());
+        let block = self.pinned_count();
+        let mut idx = at_index.unwrap_or(self.tabs.len()).min(self.tabs.len());
+        idx = if tab.pinned {
+            idx.min(block)
+        } else {
+            idx.max(block)
+        };
         self.tabs.insert(idx, tab);
         self.active_tab_id = Some(id);
         id

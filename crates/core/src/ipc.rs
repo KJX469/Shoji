@@ -370,6 +370,10 @@ pub enum UiToHostMessage {
         x: f64,
         y: f64,
     },
+    /// Mute or unmute a tab's sound (the speaker mark on the tab)
+    ToggleMuteTab {
+        tab_id: TabId,
+    },
     /// Reader mode for the active tab (toggles)
     ToggleReader,
     /// Picture-in-picture for the active tab's video

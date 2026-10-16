@@ -4,6 +4,12 @@ All notable changes to Shoji are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Pinned tabs.** Right-click a tab, Pin tab: it shrinks to its icon, sits at the left, is kept across restarts, and ignores Ctrl+W.
+- **Mute.** A speaker mark appears on a tab that is playing sound; click it, or use the tab menu, to mute.
+
 ## [0.1.4] - 2026-10-13
 
 ### Added

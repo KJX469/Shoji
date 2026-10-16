@@ -204,11 +204,13 @@ fn session_file_roundtrips_and_tolerates_garbage() {
                     url: "https://a.com".into(),
                     title: "A".into(),
                     group: Some(1),
+                    pinned: false,
                 },
                 SessionTab {
                     url: "https://b.com".into(),
                     title: "B".into(),
                     group: None,
+                    pinned: true,
                 },
             ],
             active: 1,

@@ -140,6 +140,18 @@
     .group-chip { align-self: center; flex: 0 0 auto; display: block; line-height: 22px; max-width: 120px; height: 22px; margin: 0 2px 0 6px; padding: 0 9px; border-radius: 11px; font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #26231f; background: var(--g, var(--tone)); app-region: no-drag; cursor: default; }
     .tab[data-group]::before { content: ""; position: absolute; left: 6px; right: 6px; bottom: 0; height: 3px; border-radius: 2px 2px 0 0; background: var(--g); }
     .tab.active[data-group]::before { top: auto; left: 6px; right: 6px; height: 3px; background: var(--g); }
+    .tab .audio { display: none; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--ink-3); flex-shrink: 0; align-items: center; justify-content: center; pointer-events: auto; }
+    .tab .audio:hover { background: var(--hover); color: var(--ink); }
+    .tab .audio .i { width: 14px; height: 14px; }
+    .tab .audio .off { display: none; }
+    .tab.sound .audio { display: flex; }
+    .tab.muted .audio { display: flex; }
+    .tab.muted .audio .on { display: none; }
+    .tab.muted .audio .off { display: inline; }
+    .tab.pinned { flex: 0 0 38px; min-width: 38px; padding: 0; justify-content: center; }
+    .tab.pinned .title, .tab.pinned .close, .tab.pinned .zz { display: none; }
+    .tab.pinned .audio { position: absolute; right: 0; bottom: 2px; width: 14px; height: 14px; background: var(--surface); }
+    .tab.pinned .audio .i { width: 10px; height: 10px; }
     .tab.split-pane { box-shadow: inset 0 -2px 0 var(--accent); }
     .tab.split-pane .title::before { content: "\25EB  "; color: var(--accent); }
 
@@ -436,12 +448,14 @@
       el.id = 'tab-' + id;
       el.setAttribute('role', 'tab');
       el.innerHTML = '<img class="favicon" alt="">' + CRANE_MARK + '<span class="zz">z</span><span class="title"></span>' +
+        '<button class="audio" tabindex="-1" aria-label="Mute tab"><svg class="i" viewBox="0 0 24 24"><path d="M4 10v4h4l5 4V6l-5 4z"/><path class="on" d="M16.5 9a4 4 0 0 1 0 6M19 6.5a8 8 0 0 1 0 11"/><path class="off" d="M17 9l5 6M22 9l-5 6"/></svg></button>' +
         '<button class="close" tabindex="-1" aria-label="Close tab"><svg class="i" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg></button>';
       el.querySelector('.favicon').onerror = function () { this.src = SHOJI_FAVICON; };
       el.onmousedown = e => { if (e.button === 1) { e.preventDefault(); post('CloseTab', { id }); } };
       el.onclick = () => post('SwitchTab', { id });
       el.oncontextmenu = e => { e.preventDefault(); post('TabMenu', { tab_id: id, x: e.clientX, y: 36 }); };
       el.querySelector('.close').onclick = e => { e.stopPropagation(); post('CloseTab', { id }); };
+      el.querySelector('.audio').onclick = e => { e.stopPropagation(); post('ToggleMuteTab', { tab_id: id }); };
       el.draggable = true;
       el.ondragstart = e => { drag = { id, index: +el.dataset.index, dropped: false }; el.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; };
       el.ondragend = e => {
@@ -540,6 +554,10 @@
         const busy = !!tab.is_loading && Date.now() - (+el.dataset.ls || Date.now()) < 30000;
         el.classList.toggle('loading', busy);
         el.classList.toggle('asleep', tab.status === 'Suspended');
+        el.classList.toggle('pinned', !!tab.pinned);
+        el.classList.toggle('sound', !!tab.is_audio_playing && !tab.is_muted);
+        el.classList.toggle('muted', !!tab.is_muted);
+        setAttr(el.querySelector('.audio'), 'aria-label', tab.is_muted ? 'Unmute tab' : 'Mute tab');
         const active = tab.id === state_.active_tab_id;
         el.classList.toggle('active', active);
         setAttr(el, 'aria-selected', String(active));
