@@ -4149,6 +4149,18 @@ impl BrowserApp {
                 }
                 self.push_data();
             }
+            M::SiteChoicesQuery => {
+                let json = serde_json::to_string(&self.site_data.entries()).unwrap_or_default();
+                self.eval_welcome_and_settings(
+                    win_id,
+                    &format!("window.__siteChoices && window.__siteChoices({json})"),
+                );
+            }
+            M::ForgetSiteChoice { host, kind } => {
+                if self.site_data.forget(&host, kind.as_deref()) {
+                    self.push_data();
+                }
+            }
             M::ClearSiteData => {
                 self.site_data.clear();
                 self.push_data();
@@ -5361,6 +5373,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = std::fs::create_dir_all(&webview_data);
     // SAFETY: set before any other thread exists.
     unsafe { std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &webview_data) };
+    if Settings::load_from_path(&data_dir.join("settings.json"))
+        .privacy
+        .block_third_party_cookies
+    {
+        let mut flags = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").unwrap_or_default();
+        if !flags.is_empty() {
+            flags.push(' ');
+        }
+        flags.push_str("--test-third-party-cookie-phaseout");
+        // SAFETY: still single-threaded.
+        unsafe { std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", flags) };
+    }
 
     let Some(engine_version) = detect_webview2_runtime() else {
         #[cfg(windows)]

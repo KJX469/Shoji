@@ -338,3 +338,35 @@ fn password_manager_messages_are_page_reports_or_internal_only() {
         }
     );
 }
+
+#[test]
+fn site_choices_can_be_listed_and_forgotten_one_by_one() {
+    let dir = std::env::temp_dir().join(format!("shoji_site_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("sitedata.json");
+    let mut d = SiteData::load(path.clone());
+    d.set_zoom("a.com", Some(1.5));
+    d.set_permission("a.com", "Camera", true);
+    d.set_permission("a.com", "Microphone", false);
+    d.set_permission("b.com", "Geolocation", false);
+
+    let list = d.entries();
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0].host, "a.com");
+    assert_eq!(list[0].zoom, Some(1.5));
+    assert_eq!(list[0].permissions.len(), 2);
+
+    assert!(d.forget("a.com", Some("Camera")));
+    assert_eq!(d.permission("a.com", "Camera"), None);
+    assert_eq!(d.permission("a.com", "Microphone"), Some(false));
+    assert!(d.forget("a.com", Some("zoom")));
+    assert!(d.forget("b.com", Some("Geolocation")));
+    assert_eq!(d.entries().len(), 1, "a site with nothing left disappears");
+    assert!(!d.forget("a.com", Some("Camera")));
+    assert!(d.forget("a.com", None));
+    assert_eq!(d.count(), 0);
+    // And it persisted.
+    assert_eq!(SiteData::load(path).count(), 0);
+    let _ = std::fs::remove_dir_all(dir);
+}

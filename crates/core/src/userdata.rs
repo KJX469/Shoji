@@ -4,7 +4,7 @@
 
 use crate::tabs::TabGroup;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 pub fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
@@ -604,6 +604,15 @@ struct SiteFile {
     permissions: BTreeMap<String, BTreeMap<String, String>>,
 }
 
+/// What is remembered about one site.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SiteEntry {
+    pub host: String,
+    pub zoom: Option<f64>,
+    /// (permission, allowed)
+    pub permissions: Vec<(String, bool)>,
+}
+
 /// Remembered per-site zoom and permission decisions.
 #[derive(Debug, Default)]
 pub struct SiteData {
@@ -659,6 +668,56 @@ impl SiteData {
                 if allow { "allow" } else { "block" }.to_string(),
             );
         self.save();
+    }
+
+    /// Everything remembered, one entry per site, for the Settings list.
+    pub fn entries(&self) -> Vec<SiteEntry> {
+        let mut hosts: BTreeSet<&String> = self.data.zoom.keys().collect();
+        hosts.extend(self.data.permissions.keys());
+        hosts
+            .into_iter()
+            .map(|host| SiteEntry {
+                host: host.clone(),
+                zoom: self.data.zoom.get(host).copied(),
+                permissions: self
+                    .data
+                    .permissions
+                    .get(host)
+                    .map(|p| p.iter().map(|(k, v)| (k.clone(), v == "allow")).collect())
+                    .unwrap_or_default(),
+            })
+            .collect()
+    }
+
+    /// Forget one remembered choice: `kind` is a permission name, `"zoom"`, or `None` for the
+    /// whole site. Returns whether anything was removed.
+    pub fn forget(&mut self, host: &str, kind: Option<&str>) -> bool {
+        let changed = match kind {
+            None => {
+                self.data.zoom.remove(host).is_some() | self.data.permissions.remove(host).is_some()
+            }
+            Some("zoom") => self.data.zoom.remove(host).is_some(),
+            Some(k) => {
+                let removed = self
+                    .data
+                    .permissions
+                    .get_mut(host)
+                    .is_some_and(|p| p.remove(k).is_some());
+                if self
+                    .data
+                    .permissions
+                    .get(host)
+                    .is_some_and(|p| p.is_empty())
+                {
+                    self.data.permissions.remove(host);
+                }
+                removed
+            }
+        };
+        if changed {
+            self.save();
+        }
+        changed
     }
 
     /// Number of remembered choices (zoom levels and permissions), for Settings.

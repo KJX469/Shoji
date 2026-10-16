@@ -169,3 +169,10 @@ answers with `__byobuHide([...])`. Settings: `shield.mode` (off / standard / agg
 compatible. Importers (`import/bookmarks.rs`, Firefox in `import/sqlite.rs`) fill it; `Favourites` has
 `set_folder`, `folders`, `rename_folder` and `to_netscape_html` (round-trips through `from_netscape_html`).
 The new tab page groups by folder; `FavouriteFolder` and `ExportFavourites` are chrome/internal-page only.
+
+## Site choices and cookie policy
+
+`SiteData` (`sitedata.json`) exposes `entries()` and `forget(host, kind)`; Settings asks with `SiteChoicesQuery`
+and gets `window.__siteChoices(list)` back, then removes with `ForgetSiteChoice`. `privacy.block_third_party_cookies`
+is read at startup and adds `--test-third-party-cookie-phaseout` to `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`.
+Fingerprint resistance is only what the engine's strict tracking prevention provides; there is no separate control.

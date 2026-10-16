@@ -10,6 +10,8 @@ All notable changes to Shoji are recorded here. The format follows
 - **Pinned tabs.** Right-click a tab, Pin tab: it shrinks to its icon, sits at the left, is kept across restarts, and ignores Ctrl+W.
 - **Favourite folders.** Imports keep their folders (Chrome, Edge, Brave, Firefox, bookmarks files, IE favourites); right-click a favourite on the new tab page, or use the tab menu, to file it in a folder. The new tab page groups them.
 - **Export favourites** as a bookmarks file any browser can import (Settings → Privacy).
+- **Site choices list** (Settings → Privacy → Manage…): every remembered zoom and allowed or blocked permission, each removable, or forget a whole site.
+- **Block third-party cookies** switch (Settings → Privacy; applies after a restart; not yet runtime-verified).
 - **Mute.** A speaker mark appears on a tab that is playing sound; click it, or use the tab menu, to mute.
 
 ## [0.1.4] - 2026-10-13

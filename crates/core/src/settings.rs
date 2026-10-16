@@ -252,6 +252,8 @@ pub struct PrivacySettings {
     pub https_only: bool,
     /// Ask the engine for its strictest tracking prevention
     pub strict_tracking_prevention: bool,
+    /// Refuse cookies that a page's embedded sites try to set (read when the engine starts)
+    pub block_third_party_cookies: bool,
     /// Offer to save and fill passwords (stored by the engine, encrypted for this Windows user)
     pub save_passwords: bool,
     /// What to do with open tabs after a crash or force close: "ask", "always" or "never"
@@ -348,6 +350,7 @@ impl Default for PrivacySettings {
             persistent_sites: Vec::new(),
             https_only: true,
             strict_tracking_prevention: true,
+            block_third_party_cookies: false,
             save_passwords: true,
             restore_session: "ask".to_string(),
         }

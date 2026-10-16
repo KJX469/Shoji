@@ -393,6 +393,13 @@ pub enum UiToHostMessage {
     DismissSession,
     /// Forget remembered per-site choices (permissions and zoom)
     ClearSiteData,
+    /// Settings asks for the list of remembered site choices
+    SiteChoicesQuery,
+    /// Forget one remembered choice: a permission name, "zoom", or `None` for the whole site
+    ForgetSiteChoice {
+        host: String,
+        kind: Option<String>,
+    },
     /// Delete saved logins and autofill entries from the profile
     ClearSavedLogins,
     /// Uninstall Shoji and delete everything it stored. Honoured only when `confirm` is

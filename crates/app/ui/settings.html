@@ -15,6 +15,16 @@
     section { margin-top: 34px; }
     section > .label { display: block; margin: 0 4px 10px; }
     .card { border-radius: 12px; background: var(--surface); border: 1px solid var(--line); }
+    .sitelist { padding: 4px 20px 12px; border-bottom: 1px solid var(--line); }
+    .sitelist[hidden] { display: none; }
+    .siterow { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
+    .siterow:first-child { border-top: 0; }
+    .siterow b { min-width: 140px; font-weight: 600; }
+    .siterow .chips { flex: 1; display: flex; flex-wrap: wrap; gap: 6px; }
+    .siterow .chip { height: 24px; padding: 0 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); cursor: pointer; color: var(--ink-2); }
+    .siterow .chip:hover { border-color: var(--line-strong); color: var(--danger); }
+    .siterow .btn.small { height: 26px; padding: 0 10px; }
+    .siteempty { padding: 12px 0; color: var(--ink-3); }
     .row { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 60px; padding: 12px 20px; border-bottom: 1px solid var(--line); }
     .row:last-child { border-bottom: 0; }
     .row.stack { flex-direction: column; align-items: stretch; gap: 12px; }
@@ -200,6 +210,10 @@
           <label class="switch"><input type="checkbox" data-path="privacy.strict_tracking_prevention"><span></span></label>
         </div>
         <div class="row">
+          <div class="what"><b>Block third-party cookies</b><small>Embedded sites can't set cookies on the pages you visit. Some sign-in and payment flows need them. Applies after a restart</small></div>
+          <label class="switch"><input type="checkbox" data-path="privacy.block_third_party_cookies"><span></span></label>
+        </div>
+        <div class="row">
           <div class="what"><b>Save and fill passwords</b><small>Offers to save a login when you sign in, and fills it from Shoji's password manager. Not used in private mode. Applies to new tabs</small></div>
           <label class="switch"><input type="checkbox" data-path="privacy.save_passwords"><span></span></label>
         </div>
@@ -228,8 +242,10 @@
         </div>
         <div class="row">
           <div class="what"><b>Remembered site choices</b><small id="siteChoices">{{SITE_CHOICES}} saved: per-site zoom and allowed or blocked permissions</small></div>
-          <button class="btn" onclick="post('ClearSiteData'); $('siteChoices').textContent = '0 saved: per-site zoom and allowed or blocked permissions'; toast('Cleared')">Clear</button>
+          <button class="btn" onclick="toggleSites()">Manage…</button>
+          <button class="btn" onclick="post('ClearSiteData'); $('siteChoices').textContent = '0 saved: per-site zoom and allowed or blocked permissions'; $('siteList').textContent = ''; toast('Cleared')">Clear</button>
         </div>
+        <div class="sitelist" id="siteList" hidden></div>
       </div>
     </section>
 
@@ -438,6 +454,35 @@
     window.__setDownloadFolder = path => { S.downloads.default_folder = path; $('dlFolder').textContent = path; toast('Saved'); };
     $('dlFolder').textContent = S.downloads.default_folder;
 
+    /* Remembered site choices: one row per site, each choice removable */
+    function toggleSites() {
+      const box = $('siteList');
+      box.hidden = !box.hidden;
+      if (!box.hidden) post('SiteChoicesQuery');
+    }
+    window.__siteChoices = list => {
+      const box = $('siteList');
+      box.textContent = '';
+      if (!list.length) { box.innerHTML = '<div class="siteempty">Nothing saved yet. Allow or block a permission, or change a site\u2019s zoom, and it shows up here.</div>'; return; }
+      list.forEach(site => {
+        const row = document.createElement('div');
+        row.className = 'siterow';
+        const chips = [];
+        if (site.zoom != null) chips.push({ kind: 'zoom', label: Math.round(site.zoom * 100) + '% zoom' });
+        site.permissions.forEach(([k, allow]) => chips.push({ kind: k, label: k + ': ' + (allow ? 'allowed' : 'blocked') }));
+        row.innerHTML = '<b>' + esc(site.host) + '</b><span class="chips"></span><button class="btn small" title="Forget everything for this site">Forget site</button>';
+        const holder = row.querySelector('.chips');
+        chips.forEach(c => {
+          const chip = document.createElement('button');
+          chip.className = 'chip'; chip.title = 'Forget this choice';
+          chip.textContent = c.label + ' \u00d7';
+          chip.onclick = () => { post('ForgetSiteChoice', { host: site.host, kind: c.kind }); post('SiteChoicesQuery'); };
+          holder.appendChild(chip);
+        });
+        row.querySelector('button.small').onclick = () => { post('ForgetSiteChoice', { host: site.host, kind: null }); post('SiteChoicesQuery'); };
+        box.appendChild(row);
+      });
+    };
     const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     // The keep list only applies in private mode.
     function showKeepRow() { $('keepRow').hidden = !$('privateMode').checked; }

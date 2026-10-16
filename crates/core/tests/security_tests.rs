@@ -429,6 +429,11 @@ fn test_security_v10_web_content_ipc_allowlist() {
             url: "https://a.com".into(),
         },
         UiToHostMessage::ExportFavourites,
+        UiToHostMessage::SiteChoicesQuery,
+        UiToHostMessage::ForgetSiteChoice {
+            host: "a.com".into(),
+            kind: None,
+        },
         UiToHostMessage::TrayRects {
             find: Some([0.0, 0.0, 9000.0, 9000.0]),
             permission: None,
