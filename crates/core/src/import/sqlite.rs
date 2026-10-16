@@ -137,7 +137,8 @@ pub fn firefox_bookmarks(path: &Path) -> Result<Vec<Favourite>, ImportError> {
     let mut stmt = db
         .conn()
         .prepare(
-            "SELECT p.url, b.title FROM moz_bookmarks b JOIN moz_places p ON b.fk = p.id \
+            "SELECT p.url, b.title, f.title FROM moz_bookmarks b JOIN moz_places p ON b.fk = p.id \
+             LEFT JOIN moz_bookmarks f ON f.id = b.parent AND f.parent > 1 \
              WHERE b.type = 1 ORDER BY b.parent, b.position",
         )
         .map_err(other)?;
@@ -146,6 +147,10 @@ pub fn firefox_bookmarks(path: &Path) -> Result<Vec<Favourite>, ImportError> {
             Ok(Favourite {
                 url: r.get(0)?,
                 title: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                // Immediate parent folder, except Firefox's own roots (toolbar, menu, ...)
+                folder: crate::userdata::clean_folder(
+                    &r.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                ),
             })
         })
         .map_err(other)?;

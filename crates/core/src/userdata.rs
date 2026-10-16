@@ -29,6 +29,29 @@ fn read_json<T: for<'de> Deserialize<'de> + Default>(path: &Path) -> T {
 pub struct Favourite {
     pub url: String,
     pub title: String,
+    /// Folder it is filed in ("" for the top level; nested folders are joined with " / ")
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub folder: String,
+}
+
+impl Favourite {
+    pub fn new(url: &str, title: &str) -> Self {
+        Self {
+            url: url.to_string(),
+            title: title.to_string(),
+            folder: String::new(),
+        }
+    }
+}
+
+/// Folder names are trimmed, capped and kept free of control characters.
+pub fn clean_folder(name: &str) -> String {
+    name.chars()
+        .filter(|c| !c.is_control())
+        .take(80)
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 /// Cap so a runaway script can't grow the file without bound.
@@ -72,6 +95,7 @@ impl Favourites {
             } else {
                 title
             },
+            folder: String::new(),
         });
         self.save();
         true
@@ -103,6 +127,7 @@ impl Favourites {
                 } else {
                     title
                 },
+                folder: clean_folder(&f.folder),
             });
         }
         let added = self.items.len() - before;
@@ -110,6 +135,78 @@ impl Favourites {
             self.save();
         }
         added
+    }
+
+    /// File a favourite in `folder` ("" for the top level). Returns false if it isn't saved.
+    pub fn set_folder(&mut self, url: &str, folder: &str) -> bool {
+        let folder = clean_folder(folder);
+        let Some(f) = self.items.iter_mut().find(|f| same_page(&f.url, url)) else {
+            return false;
+        };
+        if f.folder != folder {
+            f.folder = folder;
+            self.save();
+        }
+        true
+    }
+
+    /// Every folder in use, sorted.
+    pub fn folders(&self) -> Vec<String> {
+        let mut out: Vec<String> = self
+            .items
+            .iter()
+            .filter(|f| !f.folder.is_empty())
+            .map(|f| f.folder.clone())
+            .collect();
+        out.sort_by_key(|f| f.to_lowercase());
+        out.dedup();
+        out
+    }
+
+    /// Rename a folder (an empty `to` moves its favourites back to the top level).
+    pub fn rename_folder(&mut self, from: &str, to: &str) -> usize {
+        let to = clean_folder(to);
+        let mut n = 0;
+        for f in self.items.iter_mut().filter(|f| f.folder == from) {
+            f.folder = to.clone();
+            n += 1;
+        }
+        if n > 0 {
+            self.save();
+        }
+        n
+    }
+
+    /// The favourites as a Netscape bookmarks file, which every browser can import.
+    pub fn to_netscape_html(&self) -> String {
+        fn esc(s: &str) -> String {
+            s.replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;")
+                .replace('"', "&quot;")
+        }
+        let line = |f: &Favourite, pad: &str| {
+            format!(
+                "{pad}<DT><A HREF=\"{}\">{}</A>\n",
+                esc(&f.url),
+                esc(&f.title)
+            )
+        };
+        let mut out = String::from(
+            "<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<META HTTP-EQUIV=\"Content-Type\" CONTENT=\"text/html; charset=UTF-8\">\n<TITLE>Bookmarks</TITLE>\n<H1>Bookmarks</H1>\n<DL><p>\n",
+        );
+        for f in self.items.iter().filter(|f| f.folder.is_empty()) {
+            out.push_str(&line(f, "    "));
+        }
+        for folder in self.folders() {
+            out.push_str(&format!("    <DT><H3>{}</H3>\n    <DL><p>\n", esc(&folder)));
+            for f in self.items.iter().filter(|f| f.folder == folder) {
+                out.push_str(&line(f, "        "));
+            }
+            out.push_str("    </DL><p>\n");
+        }
+        out.push_str("</DL><p>\n");
+        out
     }
 
     /// Add if missing, remove if present. Returns true when it is now a favourite.
@@ -805,25 +902,44 @@ mod history_tests {
         let _ = std::fs::remove_file(&p);
         let mut f = Favourites::load(p.clone());
         let n = f.add_many(&[
-            Favourite {
-                url: "https://a.com".into(),
-                title: "A".into(),
-            },
-            Favourite {
-                url: "https://a.com/".into(),
-                title: "dup".into(),
-            },
-            Favourite {
-                url: "ftp://x".into(),
-                title: "no".into(),
-            },
-            Favourite {
-                url: "http://b.com".into(),
-                title: "".into(),
-            },
+            Favourite::new("https://a.com", "A"),
+            Favourite::new("https://a.com/", "dup"),
+            Favourite::new("ftp://x", "no"),
+            Favourite::new("http://b.com", ""),
         ]);
         assert_eq!(n, 2);
         assert_eq!(f.items()[1].title, "http://b.com");
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn favourite_folders_file_rename_and_export() {
+        let p = path("fav-folders");
+        let _ = std::fs::remove_file(&p);
+        let mut f = Favourites::load(p.clone());
+        f.add("https://a.com", "A & B");
+        f.add("https://b.com", "B");
+        assert!(f.set_folder("https://a.com/", "  News "));
+        assert!(!f.set_folder("https://nope.com", "X"));
+        assert_eq!(f.folders(), vec!["News".to_string()]);
+
+        let html = f.to_netscape_html();
+        assert!(html.contains("<H3>News</H3>"));
+        assert!(html.contains("A &amp; B"));
+        // What we export, we can import back, folders included.
+        let back = crate::import::bookmarks::from_netscape_html(&html);
+        assert_eq!(back.len(), 2);
+        assert_eq!(
+            back.iter()
+                .find(|x| x.url == "https://a.com")
+                .unwrap()
+                .folder,
+            "News"
+        );
+
+        assert_eq!(f.rename_folder("News", "Reading"), 1);
+        let reloaded = Favourites::load(p.clone());
+        assert_eq!(reloaded.folders(), vec!["Reading".to_string()]);
         let _ = std::fs::remove_file(&p);
     }
 }

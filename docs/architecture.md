@@ -162,3 +162,10 @@ answers with `__byobuHide([...])`. Settings: `shield.mode` (off / standard / agg
 `insert_tab` refuse to cross the pinned block). The flag is saved in `SessionTab`. Sound comes from
 `ICoreWebView2_8` (`IsDocumentPlayingAudioChanged` -> `BrowserEvent::TabAudio`; `webview::set_muted`).
 `ToggleMuteTab` is chrome-only, so web pages cannot send it.
+
+## Favourite folders
+
+`Favourite.folder` is a flat path string (`"Dev / Docs"`; empty is the top level), so `favourites.json` stays
+compatible. Importers (`import/bookmarks.rs`, Firefox in `import/sqlite.rs`) fill it; `Favourites` has
+`set_folder`, `folders`, `rename_folder` and `to_netscape_html` (round-trips through `from_netscape_html`).
+The new tab page groups by folder; `FavouriteFolder` and `ExportFavourites` are chrome/internal-page only.

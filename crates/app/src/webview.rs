@@ -712,6 +712,32 @@ pub fn pick_save_csv(default_name: &str) -> Option<PathBuf> {
     }
 }
 
+/// Save-as dialog for a bookmarks file named `default_name`.
+pub fn pick_save_html(default_name: &str) -> Option<PathBuf> {
+    use windows::core::{w, HSTRING};
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
+    use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
+    use windows::Win32::UI::Shell::{FileSaveDialog, IFileSaveDialog, SIGDN_FILESYSPATH};
+    unsafe {
+        let dialog: IFileSaveDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_ALL).ok()?;
+        let filters = [COMDLG_FILTERSPEC {
+            pszName: w!("Bookmarks (*.html)"),
+            pszSpec: w!("*.html"),
+        }];
+        let _ = dialog.SetFileTypes(&filters);
+        let _ = dialog.SetDefaultExtension(w!("html"));
+        let _ = dialog.SetFileName(&HSTRING::from(default_name));
+        let _ = dialog.SetTitle(&HSTRING::from("Export favourites"));
+        dialog.Show(None).ok()?;
+        let path = dialog
+            .GetResult()
+            .ok()?
+            .GetDisplayName(SIGDN_FILESYSPATH)
+            .ok()?;
+        Some(PathBuf::from(take(path)))
+    }
+}
+
 /// Put cookies read from another browser into the engine's profile (shared by every persistent
 /// tab). Returns how many were accepted.
 pub fn add_cookies(webview: &WebView, cookies: &[shoji_core::import::Cookie]) -> usize {

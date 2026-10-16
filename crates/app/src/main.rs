@@ -464,10 +464,12 @@ struct Tab {
 }
 
 /// What a text prompt in the overlay is asking for.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum Prompt {
     NewGroup(TabId),
     RenameGroup(u32),
+    /// Folder for the favourite with this address
+    FavFolder(String),
 }
 
 struct BrowserWindow {
@@ -2293,6 +2295,24 @@ impl BrowserApp {
         self.show_overlay(win_id, "prompt", Vec::new(), frame, title, "Name", value);
     }
 
+    /// Prompt for the folder of a favourite, starting from its current one.
+    fn ask_favourite_folder(&mut self, win_id: WindowId, url: &str) {
+        let current = self
+            .favourites
+            .items()
+            .iter()
+            .find(|f| f.url.trim_end_matches('/') == url.trim_end_matches('/'))
+            .map(|f| f.folder.clone());
+        if let Some(current) = current {
+            self.open_prompt(
+                win_id,
+                Prompt::FavFolder(url.to_string()),
+                "Folder (blank for none)",
+                &current,
+            );
+        }
+    }
+
     fn finish_prompt(&mut self, win_id: WindowId, text: &str) {
         let Some(win) = self.windows.get_mut(&win_id) else {
             return;
@@ -2305,9 +2325,15 @@ impl BrowserApp {
                 gather_group(win, tab, gid);
             }
             Some(Prompt::RenameGroup(gid)) => win.tabs.rename_group(gid, text),
+            Some(Prompt::FavFolder(url)) => {
+                self.favourites.set_folder(&url, text);
+                self.push_data();
+            }
             None => {}
         }
-        win.ui_dirty = true;
+        if let Some(win) = self.windows.get_mut(&win_id) {
+            win.ui_dirty = true;
+        }
     }
 
     fn palette_items(&self, win_id: WindowId) -> Vec<shoji_core::ipc::OverlayItem> {
@@ -2487,6 +2513,13 @@ impl BrowserApp {
                 "Add to favourites"
             };
             out.push(item(format!("fav:{}", tab_id.0), label, None));
+            if self.favourites.contains(&tab.url) {
+                out.push(item(
+                    format!("fav-folder:{}", tab_id.0),
+                    "Move favourite to a folder…",
+                    None,
+                ));
+            }
         }
         out.push(item(format!("reload:{}", tab_id.0), "Reload", None));
         out.push(item(format!("close:{}", tab_id.0), "Close tab", None));
@@ -2596,6 +2629,13 @@ impl BrowserApp {
             "mute" => {
                 if let Some(t) = tab {
                     self.handle_ipc(win_id, None, M::ToggleMuteTab { tab_id: t }, event_loop);
+                }
+            }
+            "fav-folder" => {
+                let page =
+                    tab.and_then(|t| self.windows.get(&win_id)?.tabs.get_tab_by_id(t).cloned());
+                if let Some(t) = page {
+                    self.ask_favourite_folder(win_id, &t.url);
                 }
             }
             "reload" => {
@@ -3946,6 +3986,17 @@ impl BrowserApp {
                     self.push_data();
                 }
             }
+            M::FavouriteFolder { url } => self.ask_favourite_folder(win_id, &url),
+            M::ExportFavourites => {
+                if let Some(path) = webview::pick_save_html("shoji-favourites.html") {
+                    let ok = std::fs::write(&path, self.favourites.to_netscape_html()).is_ok();
+                    self.toast(&serde_json::json!({
+                        "title": if ok { "Exported." } else { "Couldn't write the file." },
+                        "text": if ok { "Your favourites are in a file any browser can import." } else { "Pick another place to save it." },
+                        "pose": "unfold",
+                    }));
+                }
+            }
             M::RemoveFavourite { url } => {
                 if self.favourites.remove(&url) {
                     self.push_data();
@@ -4040,8 +4091,9 @@ impl BrowserApp {
             M::OverlayChoose { kind, value } => {
                 // Navigation and tab switches focus the page themselves; actions that open a
                 // prompt must keep the focus for it.
-                let opens_prompt =
-                    value.starts_with("group-new") || value.starts_with("group-rename");
+                let opens_prompt = ["group-new", "group-rename", "fav-folder"]
+                    .iter()
+                    .any(|p| value.starts_with(p));
                 self.hide_overlay(win_id, kind == "action" && !opens_prompt);
                 match kind.as_str() {
                     "url" => self.navigate(win_id, &value),

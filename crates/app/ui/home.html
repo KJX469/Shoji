@@ -33,6 +33,7 @@
     .block h2 { margin: 0 0 12px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); text-align: center; }
     .favs { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
     .fav { position: relative; width: 108px; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 8px 10px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; font-size: 12px; cursor: pointer; transition: border-color .15s, transform .2s var(--ease); }
+    .favfolder { flex: 0 0 100%; margin: 6px 0 0; text-align: center; font-size: 11px; letter-spacing: .06em; color: var(--ink-3); }
     .fav:hover { border-color: var(--line-strong); transform: translateY(-2px); }
     .fav .tile { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 10px; background: var(--tint); color: var(--ink); font-family: var(--font-display); font-size: 19px; }
     .fav .name { width: 100%; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -113,7 +114,21 @@
     function render(d) {
       const favs = $('favs');
       favs.textContent = '';
-      d.favourites.forEach(f => {
+      // Top-level favourites first, then one labelled row per folder.
+      const folders = [...new Set(d.favourites.map(f => f.folder || '').filter(Boolean))].sort((a, b) => a.localeCompare(b));
+      const sections = [''].concat(folders);
+      let ordered = [];
+      sections.forEach(name => {
+        const items = d.favourites.filter(f => (f.folder || '') === name);
+        if (name && items.length) {
+          const h = document.createElement('div');
+          h.className = 'favfolder'; h.textContent = name;
+          ordered.push(h);
+        }
+        ordered = ordered.concat(items);
+      });
+      ordered.forEach(f => {
+        if (f instanceof HTMLElement) { favs.appendChild(f); return; }
         const b = document.createElement('div');
         b.className = 'fav'; b.tabIndex = 0; b.setAttribute('role', 'link'); b.title = f.url;
         const tile = document.createElement('div'); tile.className = 'tile';
@@ -123,6 +138,7 @@
         x.onclick = e => { e.stopPropagation(); post('RemoveFavourite', { url: f.url }); };
         b.append(tile, name, x);
         b.onclick = () => post('Navigate', { url: f.url });
+        b.oncontextmenu = e => { e.preventDefault(); post('FavouriteFolder', { url: f.url }); };
         b.onkeydown = e => { if (e.key === 'Enter') post('Navigate', { url: f.url }); };
         favs.appendChild(b);
       });

@@ -342,6 +342,12 @@ pub enum UiToHostMessage {
     RemoveFavourite {
         url: String,
     },
+    /// Ask for the folder to file a favourite in (opens a name prompt)
+    FavouriteFolder {
+        url: String,
+    },
+    /// Save the favourites as a bookmarks file other browsers can import
+    ExportFavourites,
     /// Address-bar suggestions, built by the chrome strip: the rows to show and where the box
     /// sits (logical px)
     SuggestShow {
