@@ -620,6 +620,10 @@ pub fn add_extension(
     let _ = unsafe { profile.AddBrowserExtension(&HSTRING::from(folder.as_os_str()), &handler) };
 }
 
+/// Extensions the engine ships with; they aren't the user's to list or remove.
+const BUILT_IN_EXTENSIONS: [&str; 2] =
+    ["Microsoft Clipboard Extension", "Microsoft Edge PDF Viewer"];
+
 fn each_extension(
     list: &ICoreWebView2BrowserExtensionList,
     mut f: impl FnMut(&ICoreWebView2BrowserExtension, String, String, bool),
@@ -638,7 +642,10 @@ fn each_extension(
             let _ = ext.Name(&mut name);
             let _ = ext.IsEnabled(&mut enabled);
         }
-        f(&ext, take(id), take(name), enabled.as_bool());
+        let (id, name) = (take(id), take(name));
+        if !BUILT_IN_EXTENSIONS.contains(&name.as_str()) {
+            f(&ext, id, name, enabled.as_bool());
+        }
     }
 }
 
