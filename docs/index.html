@@ -60,6 +60,8 @@ h1 em{font-style:italic;background:linear-gradient(120deg,var(--accent-hi),var(-
 
 .again{margin:96px auto 0;text-align:center}
 .again p{margin:18px auto 0;max-width:460px;font-size:14.5px;color:var(--ink-3)}
+.again p a{color:var(--ink-2)}
+.again code{font-size:13px}
 
 footer{margin-top:110px;border-top:1px solid var(--line);padding:30px 0 50px;font-size:14px;color:var(--ink-3);text-align:center}
 footer a{color:var(--ink-2)}
@@ -100,6 +102,7 @@ footer a{color:var(--ink-2)}
   <div class="again">
     <a class="btn" id="dl2" href="https://github.com/KJX469/Shoji/releases/latest/download/ShojiSetup.exe">Download <span id="ver">Shoji</span></a>
     <p>Installs for your user only, no admin prompt. Not code-signed yet, so SmartScreen may hesitate: choose <b>More info → Run anyway</b>.</p>
+    <p>Asks before it updates. To check the download, compare <code>Get-FileHash ShojiSetup.exe</code> with the <a href="https://github.com/KJX469/Shoji/releases/latest/download/ShojiSetup.exe.sha256">SHA-256 file</a> from the release.</p>
   </div>
 </main>
 
