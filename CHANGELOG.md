@@ -6,7 +6,16 @@ All notable changes to Shoji are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-10-19
+
 ### Added
+- **Updates ask first.** A new release arrives as a letter from the crane: its card unfolds once (never over full screen, never taking focus), folds into a sealed letter in the toolbar if ignored, and offers Restart and update (tabs come back), When I close Shoji, Later (tomorrow) or Skip this version. Nothing downloads before you choose.
+- **Settings › About:** Check for updates, what the new version brings, and a small "together since" line.
+- **Kage icon:** the crane's shadow on a lit shoji screen, in your color, for the taskbar, shortcuts and the app.
+- **Welcome opens like a shoji:** the crane's shadow on the paper, the panels slide apart, and they slide shut behind it at the end. Each crane color shows its old Japanese name.
+- **The installer** is a small lit shoji that brightens as it works and opens onto the crane.
+- **The crane remembers:** your first new tab, welcome back after a few days, the day you met each year, a once-only note after an update, and quiet words at 100, 250 and 500 cranes.
+- **Kept secrets:** the wish page shows which of Shoji's small hidden things you have found, never the ones you haven't.
 - **Bookmarks, properly.** "Favourites" are now Bookmarks everywhere. A bookmarks bar under the address bar (Ctrl+Shift+B, or Settings): folders first, then bookmarks, extras behind a » button, drag to reorder or onto a folder, right-click for open / rename / move / copy / delete. Folders nest, can be empty, and open as a dropdown from the bar.
 - **Bookmark manager** (`shoji://bookmarks`, Ctrl+Shift+O): folder tree, search, add and edit (name, address, folder), drag to file, multi-select to open, move or delete, import and export.
 - **Bookmarks dropdown.** Point at the toolbar's bookmarks button (Settings: Bookmarks button) or at "All bookmarks" on the bar and the list drops down; move off and it folds away at once; only typing inside keeps it. It floats over the page, never takes page space and never opens by itself. It is built ahead of time, so it opens at once, and draws at most 300 rows however many bookmarks there are; arrow keys, Enter, Delete and Right / Left on folders work.
@@ -14,24 +23,6 @@ All notable changes to Shoji are recorded here. The format follows
 - **Ctrl+Shift+D** bookmarks every open tab into a dated folder.
 - **New private window** (Ctrl+Shift+N): no cookies, history, saved logins or session; a violet title bar and "Private" label.
 - **A fuller menu, like Brave's:** Passwords and autofill, History (with recent and recently closed), Bookmarks and lists, Extensions, Find and edit (cut, copy, paste, select all), Save and share, More tools, Help, Exit, and Zoom with full screen. Shoji's own tools sit in a row of tiles.
-
-### Fixed
-- **Uninstall removes everything.** It runs from a temporary copy, no longer locks the profile it deletes, stops only the installed copy, and keeps retrying until the program folder, settings, profile, updates, temp files, shortcuts and Windows' records of Shoji are gone. Deleting your data is now ticked by default.
-- Setup no longer leaves a `ShojiSetup.exe.WebView2` folder next to itself.
-- **The toolbar and tab strip no longer wash out to light grey on a light page** (Brave Search reports white while it is being darkened): the page-colour tint now skips colours that fight the theme.
-- **Darkened pages are held back as the dark canvas until they look dark**, instead of showing their white page for a second first.
-- **Dragged tabs stay inside the strip** (they were clipped at its edges); tabs shrink to an icon before the strip ever scrolls.
-- **Split pills** have a clearer outline and a roomier seam, so the L|R badge no longer crowds a pane's title or close button.
-
-### Changed
-- The bookmark manager draws the first rows at once and the rest as you scroll, marks selected rows without redrawing, and listens through the list instead of per row, so thousands of bookmarks stay quick.
-- Back and forward are one solid arrow (turned round for back), in the toolbar and the split-view pane bars.
-- The menu is tighter (29 px rows) so all of it fits a normal window without scrolling.
-- Exporting bookmarks writes folders at any depth.
-
-## [0.1.5] - 2026-10-17
-
-### Added
 - **Split groups.** A split pair is now a named, coloured group you create on purpose (Ctrl+Shift+S picks the partner, or "Split view with the open tab" in the tab menu). You can have several. Each shows a chip ahead of its tabs and an L/R (or T/B) badge on each pane, and the marks stay visible while other tabs are open. Rename, recolour, swap panes or ungroup from the chip's menu. Nothing is split for you any more (dropping a link no longer opens a split).
 - **Drag a tab out and its window follows the cursor.** Pull a tab off the strip and its real window comes with the pointer: drop it in another Shoji window's strip (a bar shows where), on the desktop to keep it as a window, or press Esc to put it back. Drag a tab near the left or right edge of another window and a tile glides into that half; let go to snap the tab in beside the open page as a split group.
 - **Faster tear-off and divider.** The dragged window appears at once and stays above the others (a spare window is built while idle); the split divider follows the live mouse, so fast drags no longer lag.
@@ -46,6 +37,12 @@ All notable changes to Shoji are recorded here. The format follows
 - **Workspaces and Split View.** Organize tabs into named, colored spaces and view any two tabs side by side with a vertical or horizontal divider.
 
 ### Changed
+- An idle new tab or wish page rests after a minute (the crane's animation alone kept WebView2 at about a quarter of a core); any input wakes it.
+- The crash page has the crane keeping watch instead of a warning sign.
+- The bookmark manager draws the first rows at once and the rest as you scroll, marks selected rows without redrawing, and listens through the list instead of per row, so thousands of bookmarks stay quick.
+- Back and forward are one solid arrow (turned round for back), in the toolbar and the split-view pane bars.
+- The menu is tighter (29 px rows) so all of it fits a normal window without scrolling.
+- Exporting bookmarks writes folders at any depth.
 - "All bookmarks" on the bookmarks bar drops the whole list down when you hover it (folders open beside it); clicking it opens the bookmarks page.
 - **Clear a site's cookies from the site dropdown.** The dropdown behind the seal/lock shows how many cookies the page uses and has "Clear cookies and site data…" (press twice): it deletes the site's cookies and its stored data (local storage, databases, caches), then reloads the page.
 - **Dropdowns can no longer be pinned.** The pin button is gone from every dropdown; they always float over the page and never resize the windows or split panes.
@@ -75,6 +72,12 @@ All notable changes to Shoji are recorded here. The format follows
 - **Updates install in the background.** A new version is put in place beside the running copy as soon as it is downloaded (nothing closes, nothing is shown), so the next start is already the new one; it restarts into it from the tray when the last window closes. Only the installed copy updates itself, never a portable or development one.
 
 ### Fixed
+- **Uninstall removes everything.** It runs from a temporary copy, no longer locks the profile it deletes, stops only the installed copy, and keeps retrying until the program folder, settings, profile, updates, temp files, shortcuts and Windows' records of Shoji are gone. Deleting your data is now ticked by default.
+- Setup no longer leaves a `ShojiSetup.exe.WebView2` folder next to itself.
+- **The toolbar and tab strip no longer wash out to light grey on a light page** (Brave Search reports white while it is being darkened): the page-colour tint now skips colours that fight the theme.
+- **Darkened pages are held back as the dark canvas until they look dark**, instead of showing their white page for a second first.
+- **Dragged tabs stay inside the strip** (they were clipped at its edges); tabs shrink to an icon before the strip ever scrolls.
+- **Split pills** have a clearer outline and a roomier seam, so the L|R badge no longer crowds a pane's title or close button.
 - A split's tab pill no longer squeezes to nothing in a crowded tab strip and spills over the tab next to it; it keeps room for each pane.
 - The first letter typed in the address bar no longer drops the keyboard focus: the suggestion window, built the first time it is needed, used to take focus from the bar.
 - Frosted toolbar: the toolbar and tab strip no longer show as a white band (windowed WebView2 paints a transparent background white); the toolbar keeps its translucent look over a solid colour.
