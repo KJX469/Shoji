@@ -34,7 +34,7 @@ side panel, settings — drawn in a calm paper-and-ink interface.
 
 ## Almost nothing
 
-- **~6 MB.** Fonts and ad blocker included.
+- **~12 MB download.** Fonts and ad blocker included.
 - **No account, no sync, no telemetry.**
 - **Ads and trackers gone** from the first launch, tracking links cleaned, Global Privacy Control on.
 - **Dark mode for every website**, tuned like the extension: presets, brightness, contrast,
