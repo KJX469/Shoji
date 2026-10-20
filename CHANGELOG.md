@@ -4,6 +4,88 @@ All notable changes to Shoji are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Bookmarks, properly.** "Favourites" are now Bookmarks everywhere. A bookmarks bar under the address bar (Ctrl+Shift+B, or Settings): folders first, then bookmarks, extras behind a » button, drag to reorder or onto a folder, right-click for open / rename / move / copy / delete. Folders nest, can be empty, and open as a dropdown from the bar.
+- **Bookmark manager** (`shoji://bookmarks`, Ctrl+Shift+O): folder tree, search, add and edit (name, address, folder), drag to file, multi-select to open, move or delete, import and export.
+- **Bookmarks dropdown.** Point at the toolbar's bookmarks button (Settings: Bookmarks button) or at "All bookmarks" on the bar and the list drops down; move off and it folds away at once; only typing inside keeps it. It floats over the page, never takes page space and never opens by itself. It is built ahead of time, so it opens at once, and draws at most 300 rows however many bookmarks there are; arrow keys, Enter, Delete and Right / Left on folders work.
+- **The star asks where a bookmark should live.** Ctrl+D or the star saves the page and drops a short "Save to" list under the star: Top level, every folder (the one it is in is ticked), New folder…, Remove bookmark. A click files it; ignoring it keeps it at the top level.
+- **Ctrl+Shift+D** bookmarks every open tab into a dated folder.
+- **New private window** (Ctrl+Shift+N): no cookies, history, saved logins or session; a violet title bar and "Private" label.
+- **A fuller menu, like Brave's:** Passwords and autofill, History (with recent and recently closed), Bookmarks and lists, Extensions, Find and edit (cut, copy, paste, select all), Save and share, More tools, Help, Exit, and Zoom with full screen. Shoji's own tools sit in a row of tiles.
+
+### Fixed
+- **Uninstall removes everything.** It runs from a temporary copy, no longer locks the profile it deletes, stops only the installed copy, and keeps retrying until the program folder, settings, profile, updates, temp files, shortcuts and Windows' records of Shoji are gone. Deleting your data is now ticked by default.
+- Setup no longer leaves a `ShojiSetup.exe.WebView2` folder next to itself.
+- **The toolbar and tab strip no longer wash out to light grey on a light page** (Brave Search reports white while it is being darkened): the page-colour tint now skips colours that fight the theme.
+- **Darkened pages are held back as the dark canvas until they look dark**, instead of showing their white page for a second first.
+- **Dragged tabs stay inside the strip** (they were clipped at its edges); tabs shrink to an icon before the strip ever scrolls.
+- **Split pills** have a clearer outline and a roomier seam, so the L|R badge no longer crowds a pane's title or close button.
+
+### Changed
+- The bookmark manager draws the first rows at once and the rest as you scroll, marks selected rows without redrawing, and listens through the list instead of per row, so thousands of bookmarks stay quick.
+- Back and forward are one solid arrow (turned round for back), in the toolbar and the split-view pane bars.
+- The menu is tighter (29 px rows) so all of it fits a normal window without scrolling.
+- Exporting bookmarks writes folders at any depth.
+
+## [0.1.5] - 2026-10-17
+
+### Added
+- **Split groups.** A split pair is now a named, coloured group you create on purpose (Ctrl+Shift+S picks the partner, or "Split view with the open tab" in the tab menu). You can have several. Each shows a chip ahead of its tabs and an L/R (or T/B) badge on each pane, and the marks stay visible while other tabs are open. Rename, recolour, swap panes or ungroup from the chip's menu. Nothing is split for you any more (dropping a link no longer opens a split).
+- **Drag a tab out and its window follows the cursor.** Pull a tab off the strip and its real window comes with the pointer: drop it in another Shoji window's strip (a bar shows where), on the desktop to keep it as a window, or press Esc to put it back. Drag a tab near the left or right edge of another window and a tile glides into that half; let go to snap the tab in beside the open page as a split group.
+- **Faster tear-off and divider.** The dragged window appears at once and stays above the others (a spare window is built while idle); the split divider follows the live mouse, so fast drags no longer lag.
+- **Bigger tabs.** Taller tabs, bigger close, mute and new-tab buttons, and a larger title bar; tabs, split groups and tab groups are higher contrast in light and dark.
+- **Pinned tabs.** Right-click a tab, Pin tab: it shrinks to its icon, sits at the left, is kept across restarts, and ignores Ctrl+W.
+- **Favourite folders.** Imports keep their folders (Chrome, Edge, Brave, Firefox, bookmarks files, IE favourites); right-click a favourite on the new tab page, or use the tab menu, to file it in a folder. The new tab page groups them.
+- **Export favourites** as a bookmarks file any browser can import (Settings → Privacy).
+- **Site choices list** (Settings → Privacy → Manage…): every remembered zoom and allowed or blocked permission, each removable, or forget a whole site.
+- **Block third-party cookies** switch (Settings → Privacy; applies after a restart; not yet runtime-verified).
+- **Extensions (experimental).** Settings → Extensions: switch on, restart, then add an unzipped Chromium extension folder; the engine loads it into the browsing profile. No store, no toolbar button, background pages may not run.
+- **Mute.** A speaker mark appears on a tab that is playing sound; click it, or use the tab menu, to mute.
+- **Workspaces and Split View.** Organize tabs into named, colored spaces and view any two tabs side by side with a vertical or horizontal divider.
+
+### Changed
+- "All bookmarks" on the bookmarks bar drops the whole list down when you hover it (folders open beside it); clicking it opens the bookmarks page.
+- **Clear a site's cookies from the site dropdown.** The dropdown behind the seal/lock shows how many cookies the page uses and has "Clear cookies and site data…" (press twice): it deletes the site's cookies and its stored data (local storage, databases, caches), then reloads the page.
+- **Dropdowns can no longer be pinned.** The pin button is gone from every dropdown; they always float over the page and never resize the windows or split panes.
+- Split panes' address bars show the same red seal on secure pages as the single bar (not a padlock).
+- **Adding a split pane works like the address bar.** The add-a-pane window is now an address bar: open tabs that match what you type come first (Enter adds that very tab, nothing reloads); under them are the ways to open it in a new pane: the site from your history, what you typed, matching history, and the search engine's suggestions. With no matching tab open, the site from your history comes first. Parent domains complete too ("wiki" finds wikipedia.org).
+- **The Byōbu shield lives at the right end of every address bar** (inside the field, as in Brave), in the same spot on every page and in every split pane; the logo or site icon stays at the left.
+- **The address bar learns your sites.** Typing the start of a site you visit ("yout") completes it in the bar ("youtube.com") and puts it first, already selected, so Enter goes straight there; the more and the more recently you visit a site, the likelier it is. What you typed stays the second row, as a search or an address.
+- **Suggestions no longer flash.** The suggestion window keeps one size and shows only the part that is needed, instead of resizing on every key, so the page behind never shows through.
+- **Proportions like Brave's.** Tabs are 36 px in a 44 px strip, the address bar is 34 px in a 40 px toolbar (same 84 px in all).
+- The crane colour on the desktop and Start menu shortcuts is restored at every start, so an update or reinstall no longer leaves them white.
+- **Search engine list on the logo.** Click the search engine's logo in the address bar (on a new tab) to pick another engine; on a website the same spot still opens the site's information. The Byōbu shield is now always the first thing at the left of every address bar, in the same place on every page and in every split pane.
+- **Search suggestions work and the first one is selected.** The engine's suggestions (Google, Bing, Brave, Ecosia, DuckDuckGo) are now fetched by the browser itself, since the page was refused by their cross-origin rules and never showed them; what you typed is the first row, already selected, so Enter takes it.
+- **Split view strip.** A split is a plain pill with numbered seam badges and a raised selected pane (the bracket is gone); tabs are shorter (34 px), address bars are 32 px in single and split view alike, and a pane's Byōbu shield sits at the left of its address field with no padlock beside it.
+- **Address bar like Brave's.** On a new tab the search provider's logo sits at the left of the address field (instead of the square), the Byōbu shield always lives inside the field beside it (in split view too, on every pane's bar), and the hint reads "Search Google or type a URL". A window that opens on the new tab page starts with the address bar active, so typing goes there and gets the search engine's suggestions.
+- Dark websites: picking another colour restyles open pages at once (including YouTube); Dark Reader's per-site fixes are built in; darkened pages report a light colour scheme so sites that follow the system theme (YouTube, GitHub) are darkened fully; sites with their own dark theme get your chosen look (`dark_detect_native` in `settings.json` restores leaving them alone); the pages on screen change first.
+- Websites show their text in the interface font you pick in Settings (icons and code keep their own).
+- Closing a window's last tab with Ctrl+W closes the window.
+- **Split view for many tabs.** A split is now one combined tab in the strip (no chip taking room): every pane keeps its favicon, title, mute and close, a numbered badge sits on each seam (L|R for two), and the selected pane is marked by the accent line dropping down both seams and running under it. Splits hold up to 20 panes in equal columns with a draggable divider between each (the flip button stacks them), and each pane has its own toolbar (back, forward, reload, address, favourite, dark mode) that drops buttons into a menu as it narrows; downloads, notes and the menu stay window-wide beside the window controls. Add a tab with the split button, by dropping a tab on the combined tab, or by dragging a window to the edge of one. Creating a split slides the tabs together with a short merge animation.
+- **The "Main" space pill only shows once you have more than one space** (Alt+W or "Move to a new space" in a tab's menu).
+- **Dragging a tab into another window** shows a preview tab that follows the pointer along the strip; nothing moves until you let go, and Esc puts it back.
+- **Smoother tab drag.** A tab pulled out of the strip stays under the pointer. Over another window's tab strip the dragged window melts away while the tabs part and a slot opens; on drop the tab settles into it. Tabs now slide into place when one closes, opens, moves or is dropped in, instead of jumping.
+- **A clearer dark mode panel.** One switch for dark websites, then three plain choices for the site you are on (same as other sites, always dark, never dark), then the style: presets, with the sliders under Fine-tune, for every site or just this one. Every choice now does something whichever one was showing before, so you no longer have to pick "left as is" first.
+- **Dark mode on pages that resisted it.** A page that is still light a moment after dark mode was applied (Brave Search, for one) is now darkened by inverting it, so turning dark mode off and on again isn't needed.
+- **Extensions work out of the box.** They are on by default, you can install one by pasting its Chrome Web Store link or id in Settings, and each one's popup and options pages open from the list (they have no toolbar button).
+- **The tray icon follows your crane colour.**
+- **Browser-like defaults.** Search suggestions are on (choosing Private mode in setup turns them off), and downloads go straight to your Downloads folder without asking (that folder is found through Windows, so it follows a redirected Downloads). Settings saved by older versions are brought along once.
+- **Updates install in the background.** A new version is put in place beside the running copy as soon as it is downloaded (nothing closes, nothing is shown), so the next start is already the new one; it restarts into it from the tray when the last window closes. Only the installed copy updates itself, never a portable or development one.
+
+### Fixed
+- A split's tab pill no longer squeezes to nothing in a crowded tab strip and spills over the tab next to it; it keeps room for each pane.
+- The first letter typed in the address bar no longer drops the keyboard focus: the suggestion window, built the first time it is needed, used to take focus from the bar.
+- Frosted toolbar: the toolbar and tab strip no longer show as a white band (windowed WebView2 paints a transparent background white); the toolbar keeps its translucent look over a solid colour.
+- Idle CPU: the window no longer wakes continuously when there is one tab (it used to use a whole core); the tear-off spare window is built only when nothing is loading.
+- Heavy pages (ad-laden news sites) no longer pin a CPU core and freeze the window when several tabs are open: the loading crane in the tab now animates in steps instead of at 60 fps.
+- Black flashes: the notepad, dropdowns, menus and new tab pages are shown only after their first frame.
+- `window.open()` and `target="_blank"` keep their opener (sign-in popups, payment frames); tab ids are unique across windows; closing a split no longer leaves a pane on top; many tabs scroll in the strip; idle tabs show their titles.
+- One wrong value in `settings.json` keeps the rest; damaged settings, vault and data files are kept as `.bad`; `localhost:3000` and IPs open over http; `blob:`, `mailto:`, `ftp:` are refused.
+- Dark websites now work on pages whose Content-Security-Policy blocks inline styles.
+- Shield: Aggressive strips tracking parameters from every request; `$document` rules (malware, phishing) stop a page with a warning; `navigator.globalPrivacyControl`; `$method=` rules; link cleaning handles Google `url=`, Reddit, href.li and DuckDuckGo and keeps signed links intact.
+
 ## [0.1.4] - 2026-10-13
 
 ### Added
@@ -111,7 +193,8 @@ First public version.
   list management and custom rules.
 - A per-user installer and uninstaller that need no administrator rights.
 
-[Unreleased]: https://github.com/KJX469/Shoji/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/KJX469/Shoji/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/KJX469/Shoji/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/KJX469/Shoji/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/KJX469/Shoji/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/KJX469/Shoji/compare/v0.1.1...v0.1.2

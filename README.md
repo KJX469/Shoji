@@ -52,20 +52,19 @@ user only — no administrator prompt — and keeps itself up to date.
 > Shoji isn't code-signed yet, so SmartScreen may say the app is unrecognized. Choose
 > **More info → Run anyway**.
 
-## Build
+## About this repository
 
-Windows 10/11 x64, the Rust MSVC toolchain and the Visual Studio C++ build tools.
-
-```powershell
-cargo run -p shoji               # run the browser
-cargo test --workspace           # tests
-.\scripts\build-installer.ps1    # dist\ShojiSetup.exe
-```
-
-How it fits together: [docs/architecture.md](docs/architecture.md).
+Shoji's source code isn't published here. This repository hosts the installer
+([releases](../../releases)), the [website](https://kjx469.github.io/Shoji/), the
+[changelog](CHANGELOG.md) and the filter data Byōbu downloads. Found a bug? [Open an
+issue](../../issues/new/choose).
 
 ## License
 
 [MIT](LICENSE). Built on Microsoft WebView2, [Dark Reader](https://github.com/darkreader/darkreader),
 Brave's [adblock-rust](https://github.com/brave/adblock-rust) and uBlock Origin's filter lists; see
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Browser names and logos shown when importing data (Chrome, Edge, Firefox, Brave and others) are
+trademarks of their owners. Shoji is not affiliated with or endorsed by them; the logos only
+identify the browser you are importing from.

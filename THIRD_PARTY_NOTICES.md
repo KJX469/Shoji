@@ -3,17 +3,17 @@
 Shoji is MIT licensed (see [LICENSE](LICENSE)). It includes, links against or downloads the
 following. Each keeps its own licence.
 
-## Included in the source tree
+## Included in Shoji
 
-| Component | Licence | Where |
-| --- | --- | --- |
-| [Dark Reader](https://github.com/darkreader/darkreader) (modified) | MIT | `third_party/darkreader/`, bundled at `crates/app/ui/vendor/darkreader.min.js` (licence beside it) |
-| Browser logos ([browser-logos](https://github.com/alrra/browser-logos), MIT, and [Simple Icons](https://simpleicons.org), CC0). The logos remain trademarks of their owners and only identify the browser to import from | MIT / CC0 | `crates/brand/assets/logos/` |
-| Instrument Sans, Newsreader, Fraunces, Literata | SIL Open Font License 1.1 | `assets/fonts/` (licence texts alongside) |
+| Component | Licence |
+| --- | --- |
+| [Dark Reader](https://github.com/darkreader/darkreader) (modified) | MIT |
+| Browser logos ([browser-logos](https://github.com/alrra/browser-logos), MIT, and [Simple Icons](https://simpleicons.org), CC0). The logos remain trademarks of their owners and only identify the browser to import from | MIT / CC0 |
+| Instrument Sans, Newsreader, Fraunces, Literata | SIL Open Font License 1.1 |
 
 ## Linked into the browser
 
-Rust crates resolved in [Cargo.lock](Cargo.lock), including:
+Rust crates, including:
 
 | Crate | Licence |
 | --- | --- |
@@ -25,7 +25,7 @@ Rust crates resolved in [Cargo.lock](Cargo.lock), including:
 | [ring](https://github.com/briansmith/ring) (encrypts the password vault) | ISC-style / OpenSSL-derived |
 | serde, serde_json and the other dependencies | MIT and/or Apache-2.0 |
 
-Run `cargo tree` for the full list. The MPL-2.0 source for `adblock` is available from its
+The MPL-2.0 source for `adblock` is available from its
 repository.
 
 ## Downloaded at runtime (not part of the binary)
@@ -39,6 +39,14 @@ repository.
 These are fetched onto the user's machine when Byōbu updates and are never compiled into
 `shoji.exe`. The `byobu-data` release asset published by this repository's workflow is a build of
 uBlock Origin's scriptlets and remains under GPL-3.0.
+
+## Trademarks and logos
+
+Shoji's import feature shows the names and logos of other browsers (including Chrome, Edge,
+Firefox, Brave, Opera, Vivaldi, Arc, Safari and Tor Browser) so you can pick where to import from.
+These names and logos are trademarks or registered trademarks of their respective owners. They are
+used only to identify those products; Shoji is not affiliated with, sponsored by or endorsed by
+any of them.
 
 ## Provided by Windows
 
