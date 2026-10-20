@@ -39,15 +39,27 @@ side panel, settings — drawn in a calm paper-and-ink interface.
 - **Ads and trackers gone** from the first launch, tracking links cleaned, Global Privacy Control on.
 - **Dark mode for every website**, tuned like the extension: presets, brightness, contrast,
   colors, fonts, a schedule, and a look of its own for any site.
+- **Bookmarks that behave.** A bookmarks bar (Ctrl+Shift+B), a bookmark manager (Ctrl+Shift+O),
+  folders, and imports from Chrome, Edge, Brave and Firefox.
+- **Split view and pinned tabs.** Put tabs side by side in named split groups (Ctrl+Shift+S), pin the
+  ones you keep, and drag a tab out into its own window.
 - **History, downloads and the usual shortcuts** (Ctrl+H, Ctrl+J, Ctrl+Shift+Del) where you expect them.
 - **Nothing resizes the page.** Menus and panels float over it.
-- **Private mode** is one switch.
+- **Private windows** (Ctrl+Shift+N) keep no cookies, history or logins.
+- **Extensions (experimental):** add a Chromium extension from its Chrome Web Store link.
 - A few small things aren't listed here. Have fun finding them.
 
 ## Install
 
 Download **`ShojiSetup.exe`** from the [latest release](../../releases/latest). It installs for your
-user only — no administrator prompt — and keeps itself up to date.
+user only — no administrator prompt. When a new version is out, Shoji tells you and asks before
+it updates; nothing downloads until you choose.
+
+To check the download, compare its hash with `ShojiSetup.exe.sha256` from the same release:
+
+```powershell
+(Get-FileHash .\ShojiSetup.exe -Algorithm SHA256).Hash
+```
 
 > Shoji isn't code-signed yet, so SmartScreen may say the app is unrecognized. Choose
 > **More info → Run anyway**.
