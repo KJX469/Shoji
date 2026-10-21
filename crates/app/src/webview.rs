@@ -1412,3 +1412,94 @@ pub fn save_page(webview: &WebView) {
     let handler = ShowSaveAsUICompletedHandler::create(Box::new(|_, _| Ok(())));
     let _ = unsafe { core25.ShowSaveAsUI(&handler) };
 }
+
+/* ---------- Bounce tracking ---------- */
+
+/// A page left in less than this, without the user asking, was a hop in a redirect chain.
+const BOUNCE_DWELL: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The registrable domain of a URL's host.
+pub fn site_of(url: &str) -> Option<(String, String)> {
+    let host = crate::extract_host(url)?;
+    let site = psl::domain_str(&host).unwrap_or(&host).to_string();
+    Some((site, host))
+}
+
+/// Report the tab's redirect hops and the sites the user really visits (see `shoji_core::bounce`):
+/// a server redirect through another site, or a page that sends you on to another site within
+/// a few seconds without you asking, is a hop; a page you open yourself, or stay on, is a visit.
+pub fn attach_bounce_watch(webview: &WebView, proxy: EventLoopProxy<BrowserEvent>) {
+    let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
+        return;
+    };
+    #[derive(Default)]
+    struct Watch {
+        /// The last address of the navigation under way
+        chain: String,
+        /// The page on screen and when it arrived
+        page: Option<(String, std::time::Instant)>,
+    }
+    let state = std::rc::Rc::new(std::cell::RefCell::new(Watch::default()));
+    let web = |u: &str| {
+        (u.starts_with("https://") || u.starts_with("http://")) && !u.starts_with("http://shoji.")
+    };
+    let mut token = Default::default();
+    {
+        let state = state.clone();
+        let handler = NavigationStartingEventHandler::create(Box::new(move |_, args| {
+            let Some(args) = args else { return Ok(()) };
+            let mut uri = PWSTR::null();
+            unsafe { args.Uri(&mut uri)? };
+            let uri = take(uri);
+            let (mut redirected, mut user) = (BOOL(0), BOOL(0));
+            let _ = unsafe { args.IsRedirected(&mut redirected) };
+            let _ = unsafe { args.IsUserInitiated(&mut user) };
+            let mut st = state.borrow_mut();
+            let send = |host: String, hop: bool| {
+                let _ = proxy.send_event(BrowserEvent::Bounce { host, hop });
+            };
+            let to_site = site_of(&uri).map(|s| s.0);
+            if redirected.as_bool() {
+                let from = std::mem::replace(&mut st.chain, uri.clone());
+                if let Some((site, host)) = site_of(&from).filter(|_| web(&from)) {
+                    if to_site.as_deref() != Some(site.as_str()) {
+                        send(host, true);
+                    }
+                }
+                return Ok(());
+            }
+            st.chain = uri.clone();
+            if let Some((page, at)) = st.page.take() {
+                if let Some((site, host)) = site_of(&page).filter(|_| web(&page)) {
+                    if at.elapsed() >= BOUNCE_DWELL {
+                        send(host, false);
+                    } else if !user.as_bool() && to_site.as_deref() != Some(site.as_str()) {
+                        send(host, true);
+                    }
+                }
+            }
+            if user.as_bool() && web(&uri) {
+                if let Some((_, host)) = site_of(&uri) {
+                    send(host, false);
+                }
+            }
+            Ok(())
+        }));
+        let _ = unsafe { core.add_NavigationStarting(&handler, &mut token) };
+    }
+    {
+        let core_src = core.clone();
+        let handler = SourceChangedEventHandler::create(Box::new(move |_, _| {
+            let mut src = PWSTR::null();
+            unsafe { core_src.Source(&mut src)? };
+            let src = take(src);
+            let mut st = state.borrow_mut();
+            // A same-document change keeps the time the page arrived.
+            if st.page.as_ref().map(|p| site_of(&p.0)) != Some(site_of(&src)) {
+                st.page = Some((src, std::time::Instant::now()));
+            }
+            Ok(())
+        }));
+        let _ = unsafe { core.add_SourceChanged(&handler, &mut token) };
+    }
+}
