@@ -814,6 +814,21 @@ pub fn attach(
                 if mode == Mode::Off {
                     return Ok(());
                 }
+                if trim_request(&request, &url, &top_target.borrow(), kind) {
+                    let answer = Answer {
+                        decision: Decision::Block,
+                        rule: Some(PING_RULE.into()),
+                    };
+                    hub().record(
+                        tab,
+                        &top_target.borrow().url,
+                        &url,
+                        kind,
+                        &answer.decision,
+                        answer.rule.clone(),
+                    );
+                    return net.respond(&args, &request, &answer);
+                }
                 let mut method = PWSTR::null();
                 unsafe { request.Method(&mut method)? };
                 let method = take(method);
@@ -1650,6 +1665,54 @@ fn accept_rule(core: &ICoreWebView2, tab: u64, body: &str) {
     }
 }
 
+/// The logger's reason for blocking an `<a ping>` click report.
+const PING_RULE: &str = "Shoji: hyperlink auditing is off";
+
+/// Say less to other sites: a cross-site request's `Referer` is cut to the page's origin and
+/// its high-entropy client hints are removed (see `shoji_byobu::headers`). Returns true for an
+/// `<a ping>` click report, which exists only to track clicks and is blocked on every site;
+/// CSP reports, which sites use to find their own bugs, are left alone.
+fn trim_request(
+    request: &ICoreWebView2WebResourceRequest,
+    url: &str,
+    page: &TabPage,
+    kind: RequestKind,
+) -> bool {
+    let Ok(headers) = (unsafe { request.Headers() }) else {
+        return false;
+    };
+    let get = |name: &str| -> Option<String> {
+        let w = wide(name);
+        let mut found = windows::core::BOOL(0);
+        unsafe { headers.Contains(PCWSTR(w.as_ptr()), &mut found) }.ok()?;
+        if !found.as_bool() {
+            return None;
+        }
+        let mut value = PWSTR::null();
+        unsafe { headers.GetHeader(PCWSTR(w.as_ptr()), &mut value) }.ok()?;
+        Some(take(value))
+    };
+    if kind == RequestKind::Ping && get("Ping-To").is_some() {
+        return true;
+    }
+    let cross = match (&page.site, shoji_byobu::headers::site(url)) {
+        (Some(page), Some(to)) => *page != to,
+        _ => false,
+    };
+    if !cross {
+        return false;
+    }
+    if let Some(origin) = get("Referer").and_then(|r| shoji_byobu::headers::trimmed_referer(&r)) {
+        let (name, value) = (wide("Referer"), wide(&origin));
+        let _ = unsafe { headers.SetHeader(PCWSTR(name.as_ptr()), PCWSTR(value.as_ptr())) };
+    }
+    for hint in shoji_byobu::headers::HIGH_ENTROPY_HINTS {
+        let w = wide(hint);
+        let _ = unsafe { headers.RemoveHeader(PCWSTR(w.as_ptr())) };
+    }
+    false
+}
+
 /* ---------------------------------------------------------------- matching */
 
 /// The one matcher thread every tab hands its requests to (see `shoji_byobu::matcher`).
@@ -1704,6 +1767,8 @@ fn handoff() -> Handoff {
 #[derive(Default)]
 struct TabPage {
     url: String,
+    /// The page's registrable domain, for telling third-party requests apart
+    site: Option<String>,
     mode: Mode,
     decisions: DecisionCache,
 }
@@ -1713,6 +1778,7 @@ impl TabPage {
     fn set(&mut self, url: String, mode: Mode) {
         if crate::extract_host(&url) != crate::extract_host(&self.url) || mode != self.mode {
             self.decisions.clear();
+            self.site = shoji_byobu::headers::site(&url);
         }
         self.url = url;
         self.mode = mode;

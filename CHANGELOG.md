@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+- Other sites get only the page's origin as the referrer, and none of its high-entropy client hints.
+- Click-tracking pings (`<a ping>`) are blocked on every site.
+
 ## [0.1.6] - 2026-10-21
 
 ### Added
