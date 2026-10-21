@@ -3,6 +3,7 @@
 
 mod bookmarks;
 mod cert;
+mod crash;
 mod darkfixes;
 mod default_browser;
 mod extstore;
@@ -4621,6 +4622,42 @@ impl BrowserApp {
         }
     }
 
+    /// Give the UI watchdog a window of this thread to ping.
+    fn note_ui_window(&self) {
+        let Some(win) = self.windows.values().next() else {
+            return;
+        };
+        if let Ok(handle) =
+            winit::raw_window_handle::HasWindowHandle::window_handle(win.window.as_ref())
+        {
+            if let winit::raw_window_handle::RawWindowHandle::Win32(h) = handle.as_raw() {
+                crash::set_ui_window(h.hwnd.get());
+            }
+        }
+    }
+
+    /// If Shoji crashed since it last said so, offer to open a prefilled bug report.
+    fn mention_crash(&self) {
+        let reports = crash::unseen_reports(&self.data_dir);
+        let Some(newest) = reports.first() else {
+            return;
+        };
+        crash::mark_seen(&self.data_dir);
+        let report = std::fs::read_to_string(newest).unwrap_or_default();
+        self.toast(&serde_json::json!({
+            "title": "Shoji closed unexpectedly",
+            "text": "A report was saved on this PC. Nothing is sent unless you open it and submit it.",
+            "pose": "bow",
+            "ms": 12000,
+            "actions": [{
+                "label": "Report on GitHub",
+                "action": "CreateTab",
+                "payload": {"url": crash::issue_url(&report)},
+                "primary": true,
+            }],
+        }));
+    }
+
     /// Show the crane's card in the focused window (or every window if none has focus).
     fn toast(&self, toast: &serde_json::Value) {
         let js = format!("window.__toast && window.__toast({toast})");
@@ -4986,6 +5023,7 @@ impl BrowserApp {
                 self.push_update();
                 if self.settings.first_run_complete {
                     self.greet_after_update();
+                    self.mention_crash();
                 }
             }
             M::MinimizeWindow | M::ToggleMaximize | M::StartWindowResize => {
@@ -7139,6 +7177,7 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
             Some(format!("{INTERNAL_SCHEME}welcome"))
         };
         self.new_window(event_loop, first);
+        self.note_ui_window();
         if self.windows.is_empty() {
             event_loop.exit();
         } else if self.restore_on_start {
@@ -7150,6 +7189,12 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: BrowserEvent) {
+        let _doing = crash::doing(crash::intern(match &event {
+            BrowserEvent::TabIpc(_, m) | BrowserEvent::WindowIpc(_, m) => {
+                format!("{} {}", crash::variant_name(&event), crash::variant_name(m))
+            }
+            _ => crash::variant_name(&event),
+        }));
         self.sync_pending = true;
         self.session_dirty = true;
         match event {
@@ -7465,6 +7510,12 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 }
             },
             BrowserEvent::TabCrashed(tab_id, kind) => {
+                let runtime = self
+                    .pages
+                    .read()
+                    .map(|c| c.engine_version.clone())
+                    .unwrap_or_default();
+                crash::log_engine_failure(&self.data_dir, kind, &runtime);
                 // 0 = browser process exited (all views are dead); 1/2 = this page's renderer.
                 if kind == 0 {
                     return self.restart_engine();
@@ -7866,6 +7917,10 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
         window_id: WindowId,
         event: WindowEvent,
     ) {
+        let _doing = crash::doing(crash::intern(format!(
+            "window {}",
+            crash::variant_name(&event)
+        )));
         match event {
             WindowEvent::CloseRequested => self.close_window(window_id, event_loop),
             WindowEvent::Resized(size) => {
@@ -8004,6 +8059,8 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let _doing = crash::doing("about_to_wait");
+        self.note_ui_window();
         self.flush();
         let mut animating = self.step_tab_drag(event_loop);
         self.warm_spare(event_loop);
@@ -8229,6 +8286,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let data_dir = shoji_core::env::resolve_data_directory(&exe_dir);
+    crash::install(&data_dir);
+    crash::spawn_watchdog(&data_dir);
     let webview_data = shoji_core::env::resolve_profile_directory(&data_dir);
     // Private mode with nothing on the keep list: drop anything remembered from before it was
     // switched on. Runs before the engine starts, so no browser process holds the files.
