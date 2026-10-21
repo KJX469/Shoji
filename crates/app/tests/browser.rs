@@ -279,3 +279,45 @@ fn fingerprinting_noise_is_stable_per_site_and_differs_between_sites() {
     assert_eq!(a1, sub, "subdomains share their site's noise");
     assert_ne!(a1, b, "other sites get other noise");
 }
+
+#[test]
+fn other_sites_get_the_origin_as_referrer_and_click_pings_are_blocked() {
+    if !can_run() {
+        return;
+    }
+    let server = site(vec![(
+        "/story",
+        "<meta name=referrer content=unsafe-url>\
+         <img src=\"http://cdn.paper.test:{P}/same.gif\">\
+         <img src=\"http://other-site.test:{P}/cross.gif\">\
+         <a id=l href=\"#read\" ping=\"http://paper.test:{P}/ping\">read</a>"
+            .into(),
+    )]);
+    let url = server.url("paper.test", "/story?id=9");
+    let shoji = Shoji::start("referrer", &url, Options::default());
+    let mut page = shoji.page("paper.test");
+    page.goto(&url);
+    let wait = |host: &str, path: &str| {
+        server
+            .wait_for(host, path, Duration::from_secs(10))
+            .unwrap_or_else(|| panic!("{host}{path} never loaded"))
+    };
+    let port = server.port;
+    assert_eq!(
+        wait("other-site.test", "/cross.gif").header("referer"),
+        Some(format!("http://paper.test:{port}/").as_str())
+    );
+    assert_eq!(
+        wait("cdn.paper.test", "/same.gif").header("referer"),
+        Some(url.as_str()),
+        "a same-site request keeps the page's own referrer policy"
+    );
+    page.click_on("#l");
+    page.eval("navigator.sendBeacon('/beacon', 'b')");
+    wait("paper.test", "/beacon");
+    std::thread::sleep(Duration::from_secs(1));
+    assert!(
+        !server.saw("paper.test", "/ping"),
+        "the click ping was sent"
+    );
+}
