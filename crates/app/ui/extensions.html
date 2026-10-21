@@ -63,6 +63,7 @@
     .by-link .what small { display: block; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .toast { position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 20px); padding: 9px 16px; border-radius: 10px; background: var(--ink); color: var(--bg); opacity: 0; transition: .2s; pointer-events: none; }
     .toast.show { opacity: 1; transform: translate(-50%, 0); }
+    .more-row { display: flex; justify-content: center; margin: 14px 0 0; }
     .foot-note { margin-top: 22px; color: var(--ink-3); font-size: 12px; text-align: center; }
   </style>
 </head>
@@ -77,7 +78,7 @@
     <div class="card off-note" id="offNote" hidden>Extensions are off. Switch them on in Settings and restart Shoji.</div>
 
     <div id="app" hidden>
-      <input type="search" id="q" placeholder="Search extensions, or paste a Chrome Web Store link" oninput="render()" autocomplete="off" aria-label="Search extensions">
+      <input type="search" id="q" placeholder="Search extensions, or paste a Chrome Web Store link" oninput="shownMax = 48; render()" autocomplete="off" aria-label="Search extensions">
       <div class="tabs" role="tablist" style="margin-top:16px">
         <button class="tab" role="tab" id="tabFind" aria-selected="true" onclick="setTab('find')">Discover</button>
         <button class="tab" role="tab" id="tabMine" aria-selected="false" onclick="setTab('mine')">Installed<span class="n" id="mineN"></span></button>
@@ -90,6 +91,7 @@
         </div>
         <div class="chips" id="chips" role="group" aria-label="Categories"></div>
         <div class="grid" id="grid"></div>
+        <div class="more-row" id="more" hidden><button class="btn" id="moreBtn">Show more</button></div>
         <div class="card empty" id="noMatch" hidden><h2>Nothing like that here</h2><p>Search the Chrome Web Store, then paste the extension's link in the box above.</p></div>
       </section>
 
@@ -125,7 +127,7 @@
     ];
     window.__catalog = list => { if (Array.isArray(list) && list.length) { catalog = list; render(); } };
 
-    let tab = 'find', cat = '', items = [], pending = {}, active = ON;
+    let tab = 'find', cat = '', shownMax = 48, items = [], pending = {}, active = ON;
     const TONES = ['#c0563c', '#b8872f', '#4f8a5b', '#3f7fa6', '#6c5aa8', '#a24b78', '#5b6f7a'];
     const tone = s => TONES[[...s].reduce((a, c) => a + c.charCodeAt(0), 0) % TONES.length];
 
@@ -146,7 +148,8 @@
       $('mine').hidden = t !== 'mine';
       render();
     }
-    function setCat(c) { cat = cat === c ? '' : c; render(); }
+    function setCat(c) { cat = cat === c ? '' : c; shownMax = 48; render(); }
+    const count = n => n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\.0$/, '') + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'K' : String(n);
     const installed = id => items.find(x => x.id === id);
     function install(id) {
       pending[id] = Date.now();
@@ -172,13 +175,13 @@
       const shown = catalog.filter(c => (!cat || c.cat === cat) && words.every(w => (c.name + ' ' + c.text + ' ' + c.cat).toLowerCase().includes(w)));
       const grid = $('grid');
       grid.textContent = '';
-      shown.forEach(c => {
+      shown.slice(0, shownMax).forEach(c => {
         const card = el('div', 'card ext');
         const top = el('div', 'top');
         top.appendChild(tile(c.name, c.id, c.icon));
         const names = el('div');
         names.style.minWidth = 0;
-        names.append(el('div', 'name', c.name), el('div', 'cat', c.cat));
+        names.append(el('div', 'name', c.name), el('div', 'cat', c.rating ? c.cat + ' · ★ ' + c.rating + (c.users ? ' · ' + count(c.users) + ' users' : '') : c.cat));
         top.appendChild(names);
         const foot = el('div', 'foot');
         const have = installed(c.id);
@@ -191,6 +194,7 @@
         card.append(top, el('p', null, c.text), foot);
         grid.appendChild(card);
       });
+      $('more').hidden = shown.length <= shownMax;
       $('noMatch').hidden = shown.length > 0 || !!pasted;
 
       /* installed */
@@ -239,7 +243,9 @@
     $('offNote').hidden = ON;
     $('app').hidden = !ON;
     render();
+    $('moreBtn').onclick = () => { shownMax += 48; render(); };
     post('ExtensionsQuery');
+    post('ExtensionsCatalog');
   </script>
 </body>
 </html>

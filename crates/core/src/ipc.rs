@@ -657,6 +657,8 @@ pub enum UiToHostMessage {
     ClearSiteCookies,
     /// Settings asks for the installed extensions
     ExtensionsQuery,
+    /// The store page wants the downloaded catalog (and a refresh of it)
+    ExtensionsCatalog,
     /// Choose an unpacked extension folder and install it
     AddExtension,
     /// Install an extension from the Chrome Web Store, given its link or id
