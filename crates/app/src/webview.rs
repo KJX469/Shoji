@@ -431,6 +431,8 @@ pub fn attach_tab_events(
                 let _ = args.PermissionKind(&mut kind);
             }
             let uri = take(uri);
+            let mut user = BOOL(0);
+            let _ = unsafe { args.IsUserInitiated(&mut user) };
             let id = NEXT_PERMISSION_ID.fetch_add(1, Ordering::Relaxed);
             if let Ok(mut map) = PERMISSIONS.lock() {
                 map.get_or_insert_with(HashMap::new).insert(
@@ -446,6 +448,7 @@ pub fn attach_tab_events(
                 permission_id: id,
                 origin: crate::extract_host(&uri).unwrap_or(uri),
                 kind: permission_name(kind),
+                user: user.as_bool(),
             });
             Ok(())
         }));
@@ -1009,6 +1012,154 @@ pub fn site_cookies(webview: &WebView, url: &str, clear: bool, done: impl FnOnce
         Ok(())
     }));
     let _ = unsafe { manager.GetCookies(&HSTRING::from(url), &handler) };
+}
+
+fn wide(s: &str) -> Vec<u16> {
+    s.encode_utf16().chain(Some(0)).collect()
+}
+
+/// Runs `done` once, after the last of the engine answers it waits for.
+#[derive(Clone)]
+struct Countdown(std::rc::Rc<std::cell::RefCell<CountdownState>>);
+
+/// Answers still awaited, and what to run after the last.
+type CountdownState = (usize, Option<Box<dyn FnOnce()>>);
+
+impl Countdown {
+    fn new(done: impl FnOnce() + 'static) -> Self {
+        Self(std::rc::Rc::new(std::cell::RefCell::new((
+            1,
+            Some(Box::new(done)),
+        ))))
+    }
+
+    fn add(&self) {
+        self.0.borrow_mut().0 += 1;
+    }
+
+    fn tick(&self) {
+        let done = {
+            let mut st = self.0.borrow_mut();
+            st.0 = st.0.saturating_sub(1);
+            if st.0 == 0 {
+                st.1.take()
+            } else {
+                None
+            }
+        };
+        if let Some(done) = done {
+            done();
+        }
+    }
+}
+
+/// Delete the cookies and stored data (local storage, IndexedDB, caches, service workers) of
+/// every site `forget` picks, by registrable domain, in the view's profile. Cookies are found
+/// in the whole profile; storage is cleared for the hosts those cookies were set for and for
+/// `hosts`. `done` runs once the engine has answered (or at once if it can't be reached).
+pub fn forget_sites(
+    webview: &WebView,
+    forget: impl Fn(&str) -> bool + 'static,
+    hosts: Vec<String>,
+    done: impl FnOnce() + 'static,
+) {
+    use windows::core::HSTRING;
+    let countdown = Countdown::new(done);
+    let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
+        return countdown.tick();
+    };
+    let Ok(manager) = core
+        .cast::<ICoreWebView2_2>()
+        .and_then(|c| unsafe { c.CookieManager() })
+    else {
+        return countdown.tick();
+    };
+    let deleter = manager.clone();
+    let cd = countdown.clone();
+    let handler = GetCookiesCompletedHandler::create(Box::new(move |result, list| {
+        let mut origins: HashSet<String> = hosts
+            .iter()
+            .map(|h| h.trim_start_matches('.').to_ascii_lowercase())
+            .collect();
+        if let (true, Some(list)) = (result.is_ok(), list) {
+            let mut count = 0u32;
+            let _ = unsafe { list.Count(&mut count) };
+            for i in 0..count {
+                let Ok(cookie) = (unsafe { list.GetValueAtIndex(i) }) else {
+                    continue;
+                };
+                let mut domain = PWSTR::null();
+                let _ = unsafe { cookie.Domain(&mut domain) };
+                let domain = take(domain).trim_start_matches('.').to_ascii_lowercase();
+                let site = psl::domain_str(&domain).unwrap_or(&domain).to_string();
+                if !domain.is_empty() && forget(&site) {
+                    let _ = unsafe { deleter.DeleteCookie(&cookie) };
+                    origins.insert(domain);
+                }
+            }
+        }
+        for host in origins {
+            let site = psl::domain_str(&host).unwrap_or(&host).to_string();
+            if host.is_empty() || !forget(&site) {
+                continue;
+            }
+            for scheme in ["https", "http"] {
+                let params = serde_json::json!({
+                    "origin": format!("{scheme}://{host}"),
+                    "storageTypes": "local_storage,indexeddb,cache_storage,service_workers,file_systems,websql",
+                })
+                .to_string();
+                let (m, p) = (wide("Storage.clearDataForOrigin"), wide(&params));
+                let tick = cd.clone();
+                tick.add();
+                let answered =
+                    CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move |_, _| {
+                        tick.tick();
+                        Ok(())
+                    }));
+                let sent = unsafe {
+                    core.CallDevToolsProtocolMethod(
+                        PCWSTR(m.as_ptr()),
+                        PCWSTR(p.as_ptr()),
+                        &answered,
+                    )
+                };
+                if sent.is_err() {
+                    cd.tick();
+                }
+            }
+        }
+        cd.tick();
+        Ok(())
+    }));
+    // An empty address lists every cookie in the profile.
+    if unsafe { manager.GetCookies(&HSTRING::new(), &handler) }.is_err() {
+        countdown.tick();
+    }
+}
+
+/// Delete every site's cookies and stored data, and the cache, from the view's profile; `done`
+/// runs once the engine has finished.
+pub fn clear_all_site_data(webview: &WebView, done: impl FnOnce() + 'static) {
+    let profile = unsafe { webview.controller().CoreWebView2() }
+        .and_then(|c| c.cast::<ICoreWebView2_13>())
+        .and_then(|c| unsafe { c.Profile() })
+        .and_then(|p| p.cast::<ICoreWebView2Profile2>());
+    let Ok(profile) = profile else {
+        return done();
+    };
+    let kinds = COREWEBVIEW2_BROWSING_DATA_KINDS(
+        COREWEBVIEW2_BROWSING_DATA_KINDS_ALL_SITE.0 | COREWEBVIEW2_BROWSING_DATA_KINDS_DISK_CACHE.0,
+    );
+    let countdown = Countdown::new(done);
+    let cd = countdown.clone();
+    let handler = ClearBrowsingDataCompletedHandler::create(Box::new(move |_| {
+        cd.tick();
+        Ok(())
+    }));
+    if unsafe { profile.ClearBrowsingData(kinds, &handler) }.is_err() {
+        countdown.tick();
+    }
 }
 
 /// Put cookies read from another browser into the engine's profile (shared by every persistent

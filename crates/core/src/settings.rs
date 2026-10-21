@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use shoji_brand::{theme::TypeProfile, Accent};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// The newest set of default choices; see `Settings::load_from_path`.
@@ -174,7 +175,19 @@ pub struct ShieldSettings {
     pub clean_links: bool,
     /// Tell sites not to sell or share your data (Global Privacy Control)
     pub send_gpc: bool,
+    /// Protections turned off on single sites (the master switch is `paused_sites`): site ->
+    /// categories from [`SHIELD_CATEGORIES`]
+    pub site_off: BTreeMap<String, Vec<String>>,
+    /// Answer cookie notices with "Reject all" where the site offers it; never "Accept"
+    pub reject_cookie_notices: bool,
+    /// Block embedded posts and widgets from these networks; their sign-in buttons keep working
+    pub block_facebook_embeds: bool,
+    pub block_x_embeds: bool,
+    pub block_linkedin_embeds: bool,
 }
+
+/// What can be turned off on one site from the shield dropdown.
+pub const SHIELD_CATEGORIES: [&str; 4] = ["trackers", "fingerprinting", "cookie_notices", "popups"];
 
 impl Default for ShieldSettings {
     fn default() -> Self {
@@ -186,6 +199,11 @@ impl Default for ShieldSettings {
             custom_rules: String::new(),
             clean_links: true,
             send_gpc: true,
+            site_off: BTreeMap::new(),
+            reject_cookie_notices: true,
+            block_facebook_embeds: true,
+            block_x_embeds: true,
+            block_linkedin_embeds: true,
         }
     }
 }
@@ -407,6 +425,10 @@ pub struct PrivacySettings {
     pub save_passwords: bool,
     /// What to do with open tabs after a crash or force close: "ask", "always" or "never"
     pub restore_session: String,
+    /// Delete cookies and site data when the last window closes, except for `persistent_sites`
+    pub clear_on_exit: bool,
+    /// Sites whose cookies and data are deleted when their last tab closes
+    pub forget_on_close: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -449,6 +471,9 @@ pub struct PermissionSettings {
     pub camera: String,
     pub microphone: String,
     pub notifications: String,
+    /// Refuse notification requests a page makes without being clicked first (shown as a mark
+    /// in the address bar instead of a prompt)
+    pub quiet_notifications: bool,
 }
 
 impl Default for Settings {
@@ -511,6 +536,8 @@ impl Default for PrivacySettings {
             fingerprinting: "standard".to_string(),
             save_passwords: true,
             restore_session: "ask".to_string(),
+            clear_on_exit: false,
+            forget_on_close: Vec::new(),
         }
     }
 }
@@ -552,6 +579,7 @@ impl Default for PermissionSettings {
             camera: ask(),
             microphone: ask(),
             notifications: ask(),
+            quiet_notifications: true,
         }
     }
 }
@@ -621,27 +649,116 @@ impl Settings {
             || !self.appearance.dark_websites_include.is_empty()
     }
 
-    /// The shield mode for a page on `host`: its configured mode, or "off" for paused sites.
-    /// The fingerprinting protection that applies on `host`: none where the shield is paused.
+    /// The fingerprinting protection that applies on `host`: none where the shield is paused
+    /// or fingerprinting is turned off for the site.
     pub fn fingerprint_mode_for(&self, host: &str) -> &str {
-        if self.shield_mode_for(host) == "off" && self.shield.mode != "off" {
+        if self.shield_paused(host) || self.site_category_off(host, "fingerprinting") {
             "off"
         } else {
             self.privacy.fingerprinting.as_str()
         }
     }
 
+    /// The blocking mode for a page on `host`: its configured mode, or "off" where the shield is
+    /// paused or ads and trackers are allowed on the site.
     pub fn shield_mode_for(&self, host: &str) -> &str {
-        let host = extract_domain(host);
-        let paused = self.shield.paused_sites.iter().any(|p| {
-            let p = p.trim_start_matches("*.");
-            host == p || host.strip_suffix(p).is_some_and(|r| r.ends_with('.'))
-        });
-        if paused {
+        if self.shield_paused(host) || self.site_category_off(host, "trackers") {
             "off"
         } else {
             self.shield.mode.as_str()
         }
+    }
+
+    /// Whether the user paused the shield on `host` (the dropdown's master switch).
+    pub fn shield_paused(&self, host: &str) -> bool {
+        let host = extract_domain(host);
+        self.shield
+            .paused_sites
+            .iter()
+            .any(|p| domain_covers(p, &host))
+    }
+
+    /// Whether one shield category ([`SHIELD_CATEGORIES`]) protects pages on `host`. Trackers,
+    /// cookie notices and popups also follow the global shield mode; fingerprinting has its own.
+    pub fn shield_on(&self, host: &str, category: &str) -> bool {
+        self.shield_category_enabled(category)
+            && !self.shield_paused(host)
+            && !self.site_category_off(host, category)
+    }
+
+    /// Whether a shield category is on at all (in Settings), before any per-site choice.
+    pub fn shield_category_enabled(&self, category: &str) -> bool {
+        match category {
+            "fingerprinting" => self.privacy.fingerprinting != "off",
+            "cookie_notices" => self.shield.mode != "off" && self.shield.reject_cookie_notices,
+            _ => self.shield.mode != "off",
+        }
+    }
+
+    fn site_category_off(&self, host: &str, category: &str) -> bool {
+        let host = extract_domain(host);
+        self.shield
+            .site_off
+            .iter()
+            .any(|(site, off)| off.iter().any(|c| c == category) && domain_covers(site, &host))
+    }
+
+    /// Turn one category on or off for `host`'s site.
+    pub fn set_site_category(&mut self, host: &str, category: &str, on: bool) {
+        if !SHIELD_CATEGORIES.contains(&category) {
+            return;
+        }
+        let site = site_key(host);
+        if site.is_empty() {
+            return;
+        }
+        // A rule for the host itself, or one inherited from its domain, is lifted too.
+        let host = extract_domain(host);
+        for (key, off) in self.shield.site_off.iter_mut() {
+            if domain_covers(key, &host) {
+                off.retain(|c| c != category);
+            }
+        }
+        if !on {
+            let off = self.shield.site_off.entry(site).or_default();
+            off.push(category.to_string());
+        }
+        self.shield.site_off.retain(|_, off| !off.is_empty());
+    }
+
+    /// Whether `host`'s cookies and data are deleted when its last tab closes.
+    pub fn forgets_on_close(&self, host: &str) -> bool {
+        let host = extract_domain(host);
+        !host.is_empty()
+            && self
+                .privacy
+                .forget_on_close
+                .iter()
+                .any(|p| domain_covers(p, &host))
+    }
+
+    /// Forget `host`'s site whenever its last tab closes, or stop doing so.
+    pub fn set_forget_on_close(&mut self, host: &str, on: bool) {
+        let site = site_key(host);
+        let host = extract_domain(host);
+        self.privacy
+            .forget_on_close
+            .retain(|p| !domain_covers(p, &host));
+        if on && !site.is_empty() {
+            self.privacy.forget_on_close.push(site);
+        }
+    }
+
+    /// Whether `host` is on the keep list, whatever the mode (what "Clear when Shoji closes"
+    /// leaves alone).
+    pub fn keeps_site(&self, host: &str) -> bool {
+        let host = extract_domain(host);
+        !host.is_empty()
+            && self
+                .privacy
+                .persistent_sites
+                .iter()
+                .any(|p| domain_covers(&extract_domain(p.trim_start_matches("*.")), &host))
     }
 
     /// Returns true if the given URL or domain is whitelisted for persistent session storage.
@@ -748,8 +865,23 @@ impl Settings {
                 *policy = "ask".to_string();
             }
         }
+        let mut site_off = BTreeMap::new();
+        for (site, off) in std::mem::take(&mut self.shield.site_off) {
+            let site = site_key(&site);
+            let mut off: Vec<String> = off
+                .into_iter()
+                .filter(|c| SHIELD_CATEGORIES.contains(&c.as_str()))
+                .collect();
+            off.sort();
+            off.dedup();
+            if !site.is_empty() && site.len() < 254 && !off.is_empty() && site_off.len() < 5000 {
+                site_off.insert(site, off);
+            }
+        }
+        self.shield.site_off = site_off;
         for list in [
             &mut self.privacy.persistent_sites,
+            &mut self.privacy.forget_on_close,
             &mut self.appearance.dark_websites_exclude,
             &mut self.appearance.dark_websites_include,
             &mut self.shield.paused_sites,
@@ -910,4 +1042,17 @@ pub fn extract_domain(input: &str) -> String {
         Some(stripped) => stripped.to_string(),
         None => domain,
     }
+}
+
+/// Whether a site rule (`example.com`, `*.example.com` or a host) covers `host` (already
+/// normalized by [`extract_domain`]).
+fn domain_covers(rule: &str, host: &str) -> bool {
+    let rule = rule.trim_start_matches("*.");
+    let rule = rule.strip_prefix("www.").unwrap_or(rule);
+    !rule.is_empty() && (host == rule || host.strip_suffix(rule).is_some_and(|r| r.ends_with('.')))
+}
+
+/// The key a per-site choice is stored under: the host without `www.`, lowercased.
+fn site_key(host: &str) -> String {
+    extract_domain(host)
 }

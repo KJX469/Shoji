@@ -1445,3 +1445,52 @@ fn test_purge_outlasts_a_locked_file() {
         });
     assert!(!scripts_left, "the clean-up script should delete itself");
 }
+
+#[test]
+fn shield_categories_are_per_site() {
+    let mut s = Settings::default();
+    assert!(s.shield_on("news.example", "trackers"));
+    s.set_site_category("www.news.example", "fingerprinting", false);
+    assert!(!s.shield_on("news.example", "fingerprinting"));
+    assert!(!s.shield_on("live.news.example", "fingerprinting"));
+    assert_eq!(s.fingerprint_mode_for("news.example"), "off");
+    // Fingerprinting off leaves blocking alone, and the other way round.
+    assert_eq!(s.shield_mode_for("news.example"), "standard");
+    s.set_site_category("news.example", "trackers", false);
+    assert_eq!(s.shield_mode_for("news.example"), "off");
+    s.set_site_category("news.example", "fingerprinting", true);
+    assert_eq!(s.fingerprint_mode_for("news.example"), "standard");
+    assert!(s.shield_on("other.example", "trackers"));
+    s.set_site_category("news.example", "trackers", true);
+    assert!(s.shield.site_off.is_empty());
+    s.set_site_category("news.example", "made-up", false);
+    assert!(s.shield.site_off.is_empty());
+    // Unknown categories from a hand-edited file are dropped.
+    assert!(s.apply_patch(
+        &serde_json::json!({"shield": {"site_off": {"WWW.A.example": ["popups", "x"]}}})
+    ));
+    assert_eq!(
+        s.shield.site_off.get("a.example"),
+        Some(&vec!["popups".to_string()])
+    );
+    assert!(!s.shield_on("a.example", "popups"));
+    s.shield.reject_cookie_notices = false;
+    assert!(!s.shield_on("b.example", "cookie_notices"));
+}
+
+#[test]
+fn forget_on_close_and_keep_list() {
+    let mut s = Settings::default();
+    s.set_forget_on_close("example.com", true);
+    assert!(s.forgets_on_close("https://www.example.com/a"));
+    assert!(s.forgets_on_close("mail.example.com"));
+    assert!(!s.forgets_on_close("notexample.com"));
+    s.set_forget_on_close("mail.example.com", false);
+    assert!(!s.forgets_on_close("example.com"));
+    s.privacy.persistent_sites = vec!["*.github.com".into()];
+    assert!(s.keeps_site("gist.github.com"));
+    assert!(s.keeps_site("github.com"));
+    assert!(!s.keeps_site("example.com"));
+    assert!(!s.privacy.clear_on_exit);
+    assert!(s.permissions.quiet_notifications);
+}

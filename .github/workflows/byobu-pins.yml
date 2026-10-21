@@ -26,10 +26,11 @@ jobs:
             echo
           } > "$RUNNER_TEMP/body.md"
           changed=0
-          for name in ublock brave; do
+          for name in ublock brave consentomatic; do
             case $name in
               ublock) url=https://github.com/gorhill/uBlock; paths="src/js/resources src/js/redirect-resources.js src/web_accessible_resources" ;;
               brave) url=https://github.com/brave/adblock-resources; paths="dist/resources.json" ;;
+              consentomatic) url=https://github.com/cavi-au/Consent-O-Matic; paths="rules" ;;
             esac
             old=$(jq -r ".$name" "$pins")
             new=$(git ls-remote "$url.git" refs/heads/master | cut -f1)

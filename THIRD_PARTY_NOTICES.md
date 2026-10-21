@@ -29,9 +29,12 @@ Shoji is MIT licensed. It includes, links or downloads the following, each under
 | [uBlock Origin](https://github.com/gorhill/uBlock) scriptlets and [uAssets](https://github.com/uBlockOrigin/uAssets) lists | GPL-3.0 |
 | [EasyList and EasyPrivacy](https://easylist.to) | GPL-3.0 / CC BY-SA 3.0 |
 | [Brave lists and resources](https://github.com/brave/adblock-resources) | MPL-2.0 |
+| [Consent-O-Matic](https://github.com/cavi-au/Consent-O-Matic) cookie-notice rules | MIT |
 
 These are never compiled into `shoji.exe`. The `byobu-data` release carries a build of uBlock
-Origin's scriptlets (GPL-3.0) and an unmodified copy of Brave's resources (MPL-2.0).
+Origin's scriptlets (GPL-3.0), an unmodified copy of Brave's resources (MPL-2.0) and
+Consent-O-Matic's rules merged into one file (MIT, © Janus Bager Kristensen and Rolf Bagge,
+CAVI, Aarhus University).
 
 ## Trademarks
 
