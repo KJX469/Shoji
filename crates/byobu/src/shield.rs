@@ -571,6 +571,12 @@ mod tests {
         ] {
             check(url);
         }
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while check("https://cdn.news.test/ads/x.js") == Decision::Allow
+            && std::time::Instant::now() < end
+        {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
         std::thread::sleep(std::time::Duration::from_millis(100));
         assert_eq!(check("https://ok.news.test/t.js"), Decision::Allow);
         assert_eq!(check("https://www.news.test/t.js"), Decision::Allow);

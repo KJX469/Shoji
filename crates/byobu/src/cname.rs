@@ -223,7 +223,11 @@ mod tests {
         assert!(u.epoch() > e0, "a cloaked host bumps the epoch");
         let e1 = u.epoch();
         assert_eq!(u.canonical("cdn.news.test"), None);
-        std::thread::sleep(Duration::from_millis(100));
+        let end = Instant::now() + Duration::from_secs(5);
+        while !calls.lock().unwrap().iter().any(|h| h == "cdn.news.test") && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::thread::sleep(Duration::from_millis(50));
         assert_eq!(u.canonical("cdn.news.test"), None);
         assert_eq!(u.epoch(), e1, "a plain host doesn't");
         let calls = calls.lock().unwrap();
