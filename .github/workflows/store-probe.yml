@@ -10,10 +10,14 @@ jobs:
       - run: |
           set +e
           id=nngceckbapebfimnlniiiahkandclblb
-          echo "== updatecheck"; curl -sS -m 30 "https://clients2.google.com/service/update2/crx?prodversion=130.0&acceptformat=crx3&x=id%3D$id%26v%3D0.0.0%26uc" | head -c 600; echo
-          echo "== crx"; curl -sS -m 60 -o /tmp/a.crx -w '%{http_code} %{size_download}\n' -L "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=130.0&acceptformat=crx3&x=id%3D$id%26uc"; head -c 4 /tmp/a.crx; echo
-          echo "== detail"; curl -sS -m 30 -A 'Mozilla/5.0' -w '\n%{http_code}\n' "https://chromewebstore.google.com/detail/$id" -o /tmp/d.html; tail -c 20 /tmp/d.html; wc -c /tmp/d.html; grep -o '"ratingValue"[^,]*' /tmp/d.html | head -2; grep -o 'ld+json.\{0,400\}' /tmp/d.html | head -c 800; echo
-          echo "== sitemap"; curl -sS -m 30 -A 'Mozilla/5.0' -w '\n%{http_code}\n' "https://chromewebstore.google.com/sitemap" | head -c 800
-          echo "== robots"; curl -sS -m 30 -A 'Mozilla/5.0' "https://chromewebstore.google.com/robots.txt" | head -30
-          echo "== search"; curl -sS -m 30 -A 'Mozilla/5.0' -w '\n%{http_code}\n' "https://chromewebstore.google.com/search/password" -o /tmp/s.html; wc -c /tmp/s.html; grep -o '/detail/[a-z0-9-]*/[a-p]\{32\}' /tmp/s.html | sort -u | head -5
-          echo "== amo"; curl -sS -m 30 "https://addons.mozilla.org/api/v5/addons/search/?sort=users&page_size=2&app=firefox" | head -c 700
+          q="os=win&arch=x64&os_arch=x86_64&nacl_arch=x86-64&prodversion=130.0.6723.92&acceptformat=crx2,crx3"
+          echo "== updatecheck"; curl -sS -m 30 "https://clients2.google.com/service/update2/crx?$q&x=id%3D$id%26v%3D0.0.1%26installsource%3Dondemand%26uc"; echo
+          echo "== crx"; curl -sS -m 60 -o /tmp/a.crx -w '%{http_code} %{size_download} %{url_effective}\n' -L "https://clients2.google.com/service/update2/crx?response=redirect&$q&x=id%3D$id%26installsource%3Dondemand%26uc"; head -c 4 /tmp/a.crx; echo
+          echo "== detail"; curl -sSL -m 30 -A 'Mozilla/5.0' -o /tmp/d.html -w '%{http_code}\n' "https://chromewebstore.google.com/detail/$id"; wc -c /tmp/d.html
+          grep -o '<title>[^<]*' /tmp/d.html; grep -o 'og:[a-z:]*" content="[^"]\{0,120\}' /tmp/d.html | head -8
+          grep -o 'ratingValue[^,]\{0,40\}' /tmp/d.html | head -2; grep -o 'ratingCount[^,]\{0,40\}' /tmp/d.html | head -2; grep -o '[0-9,]* users' /tmp/d.html | head -2
+          grep -o 'application/ld+json[^<]\{0,700\}' /tmp/d.html | head -c 900; echo
+          echo "== category"; for c in extensions extensions/productivity extensions/lifestyle/shopping; do curl -sSL -m 30 -A 'Mozilla/5.0' -o /tmp/c.html -w "$c %{http_code} %{size_download}\n" "https://chromewebstore.google.com/category/$c"; grep -o '/detail/[a-z0-9-]*/[a-p]\{32\}' /tmp/c.html | sort -u | wc -l; done
+          echo "== collection"; curl -sSL -m 30 -A 'Mozilla/5.0' -o /tmp/c.html -w "%{http_code} %{size_download}\n" "https://chromewebstore.google.com/category/extensions/lifestyle/art"; grep -o '/detail/[a-z0-9-]*/[a-p]\{32\}' /tmp/c.html | sort -u | wc -l
+          echo "== search page structure"; curl -sSL -m 30 -A 'Mozilla/5.0' -o /tmp/s.html "https://chromewebstore.google.com/search/dark"; grep -o 'AF_initDataCallback' /tmp/s.html | wc -l; grep -o '"[a-p]\{32\}",\["[^]]\{0,300\}' /tmp/s.html | head -2
+          echo "== sitemap shard"; curl -sS -m 60 -A 'Mozilla/5.0' "https://chromewebstore.google.com/sitemap?shard=0" -o /tmp/sm.xml; wc -c /tmp/sm.xml; head -c 500 /tmp/sm.xml; grep -c '<loc>' /tmp/sm.xml
