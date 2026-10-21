@@ -42,6 +42,7 @@
       <div class="stat"><b id="sShown">0</b><span>in this view</span></div>
       <div class="stat"><b id="sWeek">0</b><span>blocked this week</span></div>
       <div class="stat"><b id="sTotal">0</b><span>blocked in all</span></div>
+      <div class="stat" id="speed" hidden><b id="sSpeed">0</b><span id="sSpeedSub">µs per request</span></div>
     </div>
     <div class="tools">
       <input type="text" id="q" placeholder="Filter by site, address or rule" spellcheck="false">
@@ -77,6 +78,11 @@
       $('sShown').textContent = num(rows.length);
       $('sWeek').textContent = num(data.week);
       $('sTotal').textContent = num(data.total);
+      $('speed').hidden = !data.timing;
+      if (data.timing) {
+        $('sSpeed').textContent = data.timing.p50 + ' µs';
+        $('sSpeedSub').textContent = 'per request, 99% under ' + data.timing.p99 + ' µs';
+      }
       const kinds = [...new Set(data.log.map(e => e.kind))].sort();
       const cur = $('kind').value;
       if ([...$('kind').options].length - 1 !== kinds.length) {

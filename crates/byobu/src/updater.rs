@@ -48,6 +48,11 @@ impl Updater {
         Self { dir, agent }
     }
 
+    /// The cache folder.
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+
     fn file(&self, id: &str, ext: &str) -> PathBuf {
         self.dir.join(format!("{id}.{ext}"))
     }
