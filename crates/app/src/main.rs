@@ -3087,6 +3087,38 @@ fn copy_dir_all(from: &std::path::Path, to: &std::path::Path, depth: usize) -> s
     Ok(())
 }
 
+/// Delete what the engine remembered for sites (cookies, storage, caches, history, form data)
+/// from the main profile and every container, keeping installed extensions and preferences.
+fn forget_remembered(engine_dir: &std::path::Path) {
+    let keep = |name: &str| name.contains("Extension") || name.ends_with("Preferences");
+    for e in std::fs::read_dir(engine_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.to_ascii_lowercase().starts_with("wv2profile_c-") {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
+    for e in std::fs::read_dir(engine_dir.join("Default"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if keep(&name) {
+            continue;
+        }
+        let path = e.path();
+        let _ = if path.is_dir() {
+            std::fs::remove_dir_all(&path)
+        } else {
+            std::fs::remove_file(&path)
+        };
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if is_process_elevated() {
         #[cfg(windows)]
@@ -3152,7 +3184,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let s = Settings::load_from_path(&data_dir.join("settings.json"));
         if s.privacy.ephemeral_default && s.privacy.persistent_sites.is_empty() {
-            let _ = std::fs::remove_dir_all(webview_data.join("Default"));
+            forget_remembered(&webview_data.join("EBWebView"));
         }
     }
     let _ = std::fs::create_dir_all(&webview_data);
