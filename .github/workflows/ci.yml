@@ -18,6 +18,17 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Tests
+        run: cargo test --workspace --locked
+        env:
+          # Their own job, below
+          SHOJI_SKIP_BROWSER: "1"
+
+  browser:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: WebView2 runtime
         shell: pwsh
         run: |
@@ -26,8 +37,8 @@ jobs:
             Invoke-WebRequest https://go.microsoft.com/fwlink/p/?LinkId=2124703 -OutFile "$env:RUNNER_TEMP\wv2.exe"
             Start-Process "$env:RUNNER_TEMP\wv2.exe" -ArgumentList "/silent /install" -Wait
           }
-      - name: Tests (including the browser tests and the blocking score)
-        run: cargo test --workspace --locked -- --nocapture
+      - name: Browser tests and blocking score
+        run: cargo test -p shoji --test browser --test score --locked -- --nocapture
 
   portable:
     runs-on: ubuntu-latest

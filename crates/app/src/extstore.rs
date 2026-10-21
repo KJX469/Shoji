@@ -68,7 +68,20 @@ pub fn unpack(zip_bytes: &[u8], dest: &Path) -> Result<(), String> {
     }
     let tmp = dest.with_extension("part");
     let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+    // A damaged package leaves nothing behind: the folder in use is only replaced at the end.
+    if let Err(e) = unpack_into(&mut archive, &tmp) {
+        let _ = std::fs::remove_dir_all(&tmp);
+        return Err(e);
+    }
+    let _ = std::fs::remove_dir_all(dest);
+    std::fs::rename(&tmp, dest).map_err(|e| e.to_string())
+}
+
+fn unpack_into(
+    archive: &mut zip::ZipArchive<std::io::Cursor<&[u8]>>,
+    tmp: &Path,
+) -> Result<(), String> {
+    std::fs::create_dir_all(tmp).map_err(|e| e.to_string())?;
     let mut total = 0u64;
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
@@ -90,17 +103,14 @@ pub fn unpack(zip_bytes: &[u8], dest: &Path) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         total += data.len() as u64;
         if total > MAX_UNPACKED_BYTES {
-            let _ = std::fs::remove_dir_all(&tmp);
             return Err("That extension is too large.".into());
         }
         std::fs::write(&out, data).map_err(|e| e.to_string())?;
     }
     if !tmp.join("manifest.json").is_file() {
-        let _ = std::fs::remove_dir_all(&tmp);
         return Err("That package has no manifest.json.".into());
     }
-    let _ = std::fs::remove_dir_all(dest);
-    std::fs::rename(&tmp, dest).map_err(|e| e.to_string())
+    Ok(())
 }
 
 /// Download the store's extension `id` and unpack it under `extensions_dir`. Blocking.
@@ -475,5 +485,138 @@ mod tests {
             updates_in(&xml, &installed),
             vec![("a".repeat(32), "1.2.0".to_string())]
         );
+    }
+
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+        fn below(&mut self, n: usize) -> usize {
+            (self.next() % n.max(1) as u64) as usize
+        }
+    }
+
+    /// A package with a manifest, a nested file, a large compressible file and entries whose
+    /// names try to escape the folder.
+    fn hostile_zip() -> Vec<u8> {
+        use std::io::Write;
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        for (name, body) in [
+            (
+                "manifest.json",
+                br#"{"name":"x","manifest_version":3}"#.to_vec(),
+            ),
+            ("js/app.js", b"console.log(1)".to_vec()),
+            ("big.bin", vec![0u8; 1 << 20]),
+            ("../escape.txt", b"no".to_vec()),
+            ("/abs.txt", b"no".to_vec()),
+            ("js/../../up.txt", b"no".to_vec()),
+            ("C:\\win.txt", b"no".to_vec()),
+        ] {
+            zip.start_file(name, opts).unwrap();
+            zip.write_all(&body).unwrap();
+        }
+        zip.finish().unwrap().into_inner()
+    }
+
+    /// Every file under `dir`, relative to it.
+    fn files_under(dir: &Path) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        let mut stack = vec![dir.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else {
+                    out.push(p.strip_prefix(dir).unwrap().to_path_buf());
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn crx_headers_never_point_outside_the_package() {
+        let mut rng = Rng(0xc0de_cafe_f00d_0001);
+        for _ in 0..20_000 {
+            let mut b = b"Cr24".to_vec();
+            b.extend(((rng.below(4)) as u32).to_le_bytes());
+            for _ in 0..rng.below(4) {
+                let n = match rng.below(3) {
+                    0 => rng.below(64) as u32,
+                    1 => u32::MAX - rng.below(16) as u32,
+                    _ => rng.next() as u32,
+                };
+                b.extend(n.to_le_bytes());
+            }
+            b.extend((0..rng.below(64)).map(|_| rng.next() as u8));
+            b.truncate(rng.below(b.len() + 1));
+            if let Some(payload) = crx_payload(&b) {
+                assert!(payload.len() <= b.len());
+            }
+        }
+    }
+
+    /// The unpacker over damaged packages: nothing panics, nothing lands outside the folder, and
+    /// a package is either unpacked whole with its manifest or not at all.
+    #[test]
+    fn damaged_packages_never_escape_or_half_install() {
+        let root = std::env::temp_dir().join(format!("shoji-crx-fuzz-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dest = root.join("exts").join("abc");
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        let good = hostile_zip();
+        unpack(&good, &dest).unwrap();
+        // Names that climb out are skipped; absolute ones are kept inside the folder.
+        let found = files_under(&dest);
+        for want in ["manifest.json", "js/app.js", "big.bin"] {
+            assert!(found.contains(&PathBuf::from(want)), "{found:?}");
+        }
+        assert!(
+            !found
+                .iter()
+                .any(|p| p.ends_with("escape.txt") || p.ends_with("up.txt")),
+            "{found:?}"
+        );
+        let mut rng = Rng(0x5eed_0fa1_17e5_7000);
+        for _ in 0..400 {
+            let mut bytes = good.clone();
+            match rng.below(3) {
+                0 => bytes.truncate(rng.below(bytes.len())),
+                1 => {
+                    for _ in 0..1 + rng.below(16) {
+                        let at = rng.below(bytes.len());
+                        bytes[at] = rng.next() as u8;
+                    }
+                }
+                _ => {
+                    let at = rng.below(bytes.len());
+                    let end = (at + rng.below(256)).min(bytes.len());
+                    bytes.drain(at..end);
+                }
+            }
+            // On failure the last good install stays and the half-unpacked copy is gone.
+            let result = unpack(&bytes, &dest);
+            assert!(dest.join("manifest.json").is_file(), "{result:?}");
+            if result.is_err() {
+                assert!(!dest.with_extension("part").exists());
+            }
+            let stray: Vec<_> = files_under(&root)
+                .into_iter()
+                .filter(|p| !p.starts_with("exts"))
+                .collect();
+            assert!(stray.is_empty(), "{stray:?}");
+            for name in ["escape.txt", "up.txt", "abs.txt", "win.txt"] {
+                assert!(!root.join(name).exists() && !root.join("exts").join(name).exists());
+            }
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
