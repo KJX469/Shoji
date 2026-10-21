@@ -115,10 +115,31 @@ for (const [slug, label] of Object.entries(CATEGORIES)) {
   console.log(`${slug}: ${list.length} listed, ${kept} new Manifest V3`);
 }
 
-// Widen: read the most-used extensions' pages, which list related extensions, again and again.
+// Widen: the category lists are ranked per language, so other languages surface other popular
+// extensions. They only supply ids; each is read in English on its own page below.
+const LOCALES = ['es', 'fr', 'de', 'pt-BR', 'pt-PT', 'it', 'ja', 'ko', 'zh-CN', 'zh-TW', 'ru', 'ar', 'hi', 'tr', 'nl', 'pl', 'sv', 'id', 'vi', 'th', 'uk', 'cs', 'ro', 'hu', 'el', 'he', 'fi', 'da', 'no', 'bn', 'fa', 'ms', 'bg', 'sk', 'hr', 'sr', 'ca', 'lt', 'sl', 'lv', 'et', 'en-GB', 'es-419', 'fr-CA', 'en-AU', 'en-IN'];
+for (const hl of LOCALES) {
+  let added = 0;
+  for (const slug of Object.keys(CATEGORIES)) {
+    try {
+      const data = embedded(await (await get(`${BASE}/category/extensions/${slug}?hl=${hl}`, 2)).text());
+      for (const r of data ? records(data) : []) {
+        if (found.has(r[0]) || candidates.has(r[0])) continue;
+        candidates.set(r[0], entryOf(r));
+        added++;
+      }
+    } catch (err) {
+      console.warn(`${slug} ${hl}: ${err.message}`);
+    }
+    await new Promise(r => setTimeout(r, 150));
+  }
+  console.log(`${hl}: ${added} new, ${candidates.size} to confirm`);
+}
+
+// Read the most-used extensions' pages, which list related extensions, again and again.
 // Each page confirms its own extension's manifest.
 const PAGES = 6000;
-const DEADLINE = Date.now() + 25 * 60 * 1000;
+const DEADLINE = Date.now() + 35 * 60 * 1000;
 const seen = new Set();
 let crawled = 0;
 while (crawled < PAGES && Date.now() < DEADLINE) {
