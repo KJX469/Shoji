@@ -146,18 +146,25 @@ pub fn intern(name: String) -> &'static str {
     leaked
 }
 
-/// Marks what the UI thread is doing until the returned guard is dropped.
+/// Marks what the UI thread is doing until the returned guard is dropped (labels nest).
 pub fn doing(label: &'static str) -> Doing {
+    let previous = (
+        DOING.load(Ordering::Acquire),
+        DOING_LEN.load(Ordering::Relaxed),
+    );
     DOING_LEN.store(label.len() as isize, Ordering::Relaxed);
     DOING.store(label.as_ptr() as *mut u8, Ordering::Release);
-    Doing
+    Doing { previous }
 }
 
-pub struct Doing;
+pub struct Doing {
+    previous: (*mut u8, isize),
+}
 
 impl Drop for Doing {
     fn drop(&mut self) {
-        DOING.store(std::ptr::null_mut(), Ordering::Release);
+        DOING_LEN.store(self.previous.1, Ordering::Relaxed);
+        DOING.store(self.previous.0, Ordering::Release);
     }
 }
 
