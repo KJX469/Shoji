@@ -152,9 +152,29 @@ pub fn fetch(id: &str, extensions_dir: &Path) -> Result<PathBuf, String> {
     let bytes = download(id)?;
     let zip = crx_payload(&bytes).ok_or("The download wasn't an extension package.")?;
     let dest = extensions_dir.join(id);
+    let existed = dest.exists();
     std::fs::create_dir_all(extensions_dir).map_err(|e| e.to_string())?;
     unpack(zip, &dest)?;
+    if let Some(why) = unsupported(&dest) {
+        if !existed {
+            let _ = std::fs::remove_dir_all(&dest);
+        }
+        return Err(why);
+    }
     Ok(dest)
+}
+
+/// Why the engine can't run the unpacked extension in `dir`, if it can't: it only runs
+/// Manifest V3, and the store still lists older ones.
+fn unsupported(dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join("manifest.json")).ok()?;
+    let manifest: serde_json::Value =
+        serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()?;
+    let version = manifest.get("manifest_version")?.as_u64()?;
+    (version < 3).then(|| {
+        "This extension is built for an older Chrome standard (Manifest V2), which browsers no longer run. Look for its newer version in the store."
+            .to_string()
+    })
 }
 
 /// What a manifest calls the extension: its name, looked up in `_locales` when it is a
@@ -502,6 +522,17 @@ mod tests {
         assert_eq!(out[1]["icon"], "data:image/webp;base64,AAAA");
         assert_eq!(clean_catalog("[]"), None);
         assert_eq!(clean_catalog("not json"), None);
+    }
+
+    #[test]
+    fn manifest_v2_extensions_are_refused() {
+        let dir = std::env::temp_dir().join(format!("shoji-mv-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("manifest.json"), r#"{"manifest_version":2}"#).unwrap();
+        assert!(unsupported(&dir).is_some());
+        std::fs::write(dir.join("manifest.json"), r#"{"manifest_version":3}"#).unwrap();
+        assert!(unsupported(&dir).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
