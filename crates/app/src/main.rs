@@ -3120,7 +3120,9 @@ fn forget_remembered(engine_dir: &std::path::Path) {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    if is_process_elevated() {
+    // Test runners (CI's are elevated) may run a debug build anyway; release builds never do.
+    let elevated_ok = cfg!(debug_assertions) && std::env::var_os("SHOJI_ALLOW_ELEVATED").is_some();
+    if is_process_elevated() && !elevated_ok {
         #[cfg(windows)]
         unsafe {
             use windows::core::w;

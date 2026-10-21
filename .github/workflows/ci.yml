@@ -18,8 +18,16 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Tests
-        run: cargo test --workspace --locked
+      - name: WebView2 runtime
+        shell: pwsh
+        run: |
+          $dirs = "${env:ProgramFiles(x86)}\Microsoft\EdgeWebView\Application", "$env:ProgramFiles\Microsoft\EdgeWebView\Application"
+          if (-not ($dirs | Where-Object { Test-Path $_ })) {
+            Invoke-WebRequest https://go.microsoft.com/fwlink/p/?LinkId=2124703 -OutFile "$env:RUNNER_TEMP\wv2.exe"
+            Start-Process "$env:RUNNER_TEMP\wv2.exe" -ArgumentList "/silent /install" -Wait
+          }
+      - name: Tests (including the browser tests and the blocking score)
+        run: cargo test --workspace --locked -- --nocapture
 
   portable:
     runs-on: ubuntu-latest

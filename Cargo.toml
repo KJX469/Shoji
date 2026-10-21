@@ -14,3 +14,7 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Byōbu compiles hundreds of thousands of rules; unoptimised, that takes minutes in test builds.
+[profile.dev.package.adblock]
+opt-level = 3
