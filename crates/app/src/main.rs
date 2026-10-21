@@ -300,6 +300,10 @@ pub(crate) enum BrowserEvent {
     ExtensionsChanged(Option<String>),
     /// A store extension was downloaded and unpacked; the engine can load this folder now
     ExtensionFetched(Result<PathBuf, String>),
+    /// A window's extension popup wants this size (logical px)
+    ExtensionPopupSize(WindowId, f64, f64),
+    /// A window's extension popup lost focus or closed itself
+    ExtensionPopupClosed(WindowId),
     /// The search engine's suggestions for what was typed in a window's address bar
     SuggestWords(WindowId, u64, Vec<String>, bool),
     /// Cookies of a window's page: how many, and whether they were just deleted
@@ -814,6 +818,8 @@ struct BrowserWindow {
     last_title: String,
     /// Floating surface for address-bar suggestions, the command palette, menus and prompts
     overlay: Option<WebView>,
+    /// An extension's popup, open under its toolbar button
+    ext_popup: Option<app_extensions::ExtensionPopup>,
     overlay_open: bool,
     overlay_mode: &'static str,
     overlay_ready: bool,
@@ -877,6 +883,15 @@ struct BrowserApp {
     last_engine_restart: Option<Instant>,
     notebook: shoji_core::notes::Notebook,
     shield: shoji_byobu::Shield,
+    /// The toolbar's extension buttons (JSON for the chrome strip)
+    extension_buttons: String,
+    /// What each extension's button opens, and whether it is a popup (by extension id)
+    extension_popups: HashMap<String, (String, bool)>,
+    /// The extension popup that last closed by losing focus, and when (a click on its own
+    /// button closes it first; that click must not open it again)
+    popup_blurred: Option<(String, Instant)>,
+    /// The toolbar has asked the engine for the installed extensions
+    extensions_asked: std::cell::Cell<bool>,
     favourites: shoji_core::userdata::Favourites,
     history: shoji_core::userdata::History,
     /// Files downloaded, newest first
@@ -1048,6 +1063,10 @@ impl BrowserApp {
             windows: HashMap::new(),
             proxy,
             shield,
+            extension_buttons: "[]".into(),
+            extension_popups: HashMap::new(),
+            popup_blurred: None,
+            extensions_asked: std::cell::Cell::new(false),
             settings,
             settings_path,
             data_dir: data_dir.clone(),
@@ -1226,6 +1245,7 @@ impl BrowserApp {
                 frame_state: None,
                 last_title: String::new(),
                 overlay: None,
+                ext_popup: None,
                 overlay_open: false,
                 overlay_mode: "suggest",
                 overlay_ready: false,
@@ -2538,24 +2558,8 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
             }
             BrowserEvent::ExtensionsListed(json) => {
                 let on = EXTENSIONS_ON.load(std::sync::atomic::Ordering::Relaxed);
-                // Their popup and options pages open as ordinary tabs.
-                let json = {
-                    let pages = extstore::pages(&self.data_dir.join("Extensions"));
-                    let mut items: Vec<serde_json::Value> =
-                        serde_json::from_str(&json).unwrap_or_default();
-                    for item in &mut items {
-                        let id = item["id"].as_str().unwrap_or("").to_string();
-                        let name = item["name"].as_str().unwrap_or("").to_string();
-                        if let Some((_, popup, options)) = pages.iter().find(|p| p.0 == name) {
-                            let url = |p: &Option<String>| {
-                                p.as_ref().map(|p| format!("chrome-extension://{id}/{p}"))
-                            };
-                            item["popup"] = serde_json::json!(url(popup));
-                            item["options"] = serde_json::json!(url(options));
-                        }
-                    }
-                    serde_json::Value::Array(items).to_string()
-                };
+                // Popups open from the toolbar; options pages open as ordinary tabs.
+                let json = self.extensions_listed(&json);
                 let js = format!(
                     "window.__extensions && window.__extensions({{active:{on},items:{json}}})"
                 );
@@ -2564,6 +2568,10 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                     self.eval_welcome_and_settings(id, &js);
                 }
             }
+            BrowserEvent::ExtensionPopupSize(win_id, w, h) => {
+                self.size_extension_popup(win_id, w, h)
+            }
+            BrowserEvent::ExtensionPopupClosed(win_id) => self.blur_extension_popup(win_id),
             BrowserEvent::SiteCookies(win_id, n, cleared) => {
                 if let Some(win) = self.windows.get(&win_id) {
                     win.eval_sidebar(&format!(

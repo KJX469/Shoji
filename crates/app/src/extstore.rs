@@ -141,9 +141,72 @@ fn display_name(dir: &Path, manifest: &serde_json::Value) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// The pages an installed extension offers: (name, popup path, options path), for each folder
-/// under `extensions_dir`.
-pub fn pages(extensions_dir: &Path) -> Vec<(String, Option<String>, Option<String>)> {
+/// What an installed extension offers the browser's own UI.
+#[derive(Debug, Default, PartialEq)]
+pub struct ExtensionPages {
+    /// The folder it was loaded from (the store id for store installs)
+    pub folder: String,
+    pub name: String,
+    /// Paths inside the extension
+    pub popup: Option<String>,
+    pub options: Option<String>,
+    /// Its toolbar icon as a `data:` URL
+    pub icon: Option<String>,
+}
+
+/// The toolbar icon a manifest names: `action.default_icon` (a path, or paths by size), then
+/// the extension's own `icons`. The size nearest 32 px wins (16 px at 200%).
+fn icon_path(m: &serde_json::Value) -> Option<String> {
+    let pick = |v: &serde_json::Value| -> Option<String> {
+        if let Some(p) = v.as_str() {
+            return Some(p.to_string());
+        }
+        v.as_object()?
+            .iter()
+            .filter_map(|(size, p)| Some((size.parse::<i64>().ok()?, p.as_str()?)))
+            .min_by_key(|(size, _)| ((size - 32).abs(), -size))
+            .map(|(_, p)| p.to_string())
+    };
+    [
+        "/action/default_icon",
+        "/browser_action/default_icon",
+        "/icons",
+    ]
+    .iter()
+    .find_map(|k| m.pointer(k).and_then(pick))
+}
+
+/// `path` inside `dir` as a `data:` URL, if it is a small image that stays inside `dir`.
+fn icon_data(dir: &Path, path: &str) -> Option<String> {
+    let rel = Path::new(path.trim_start_matches('/'));
+    if rel
+        .components()
+        .any(|c| !matches!(c, std::path::Component::Normal(_)))
+    {
+        return None;
+    }
+    let mime = match rel.extension()?.to_str()?.to_ascii_lowercase().as_str() {
+        "png" => "image/png",
+        "svg" => "image/svg+xml",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "ico" => "image/x-icon",
+        _ => return None,
+    };
+    let bytes = std::fs::read(dir.join(rel)).ok()?;
+    if bytes.len() > 256 * 1024 {
+        return None;
+    }
+    use base64::Engine as _;
+    Some(format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
+}
+
+/// What each extension folder under `extensions_dir` offers.
+pub fn pages(extensions_dir: &Path) -> Vec<ExtensionPages> {
     let mut out = Vec::new();
     let Ok(entries) = std::fs::read_dir(extensions_dir) else {
         return out;
@@ -163,6 +226,7 @@ pub fn pages(extensions_dir: &Path) -> Vec<(String, Option<String>, Option<Strin
         let path = |v: Option<&serde_json::Value>| {
             v.and_then(|p| p.as_str())
                 .map(|p| p.trim_start_matches('/').to_string())
+                .filter(|p| !p.is_empty())
         };
         let popup = path(
             m.pointer("/action/default_popup")
@@ -172,9 +236,25 @@ pub fn pages(extensions_dir: &Path) -> Vec<(String, Option<String>, Option<Strin
             m.get("options_page")
                 .or_else(|| m.pointer("/options_ui/page")),
         );
-        out.push((name, popup, options));
+        let icon = icon_path(&m).and_then(|p| icon_data(&dir, &p));
+        out.push(ExtensionPages {
+            folder: e.file_name().to_string_lossy().into_owned(),
+            name,
+            popup,
+            options,
+            icon,
+        });
     }
     out
+}
+
+/// The entry in `pages` for the engine's extension `id` called `name`: by folder first (store
+/// installs are unpacked under their id), then by name.
+pub fn find<'a>(pages: &'a [ExtensionPages], id: &str, name: &str) -> Option<&'a ExtensionPages> {
+    pages
+        .iter()
+        .find(|p| p.folder == id)
+        .or_else(|| pages.iter().find(|p| p.name == name))
 }
 
 #[cfg(test)]
@@ -220,5 +300,38 @@ mod tests {
 
         assert_eq!(crx_payload(b"PK\x03\x04"), None);
         assert_eq!(crx_payload(b"Cr24\x03\x00\x00\x00\xff\xff\xff\x7f"), None);
+    }
+
+    #[test]
+    fn toolbar_icons_come_from_the_manifest_and_stay_inside_the_extension() {
+        let dir = std::env::temp_dir().join(format!("shoji-ext-{}", std::process::id()));
+        let ext = dir.join("abcdefghijklmnopabcdefghijklmnop");
+        std::fs::create_dir_all(ext.join("img")).unwrap();
+        std::fs::write(ext.join("img/32.png"), b"\x89PNG").unwrap();
+        std::fs::write(
+            ext.join("manifest.json"),
+            r#"{"name":"Vault","manifest_version":3,"background":{"service_worker":"sw.js"},
+               "action":{"default_popup":"/popup/index.html",
+                         "default_icon":{"16":"img/16.png","32":"img/32.png","128":"img/128.png"}},
+               "options_ui":{"page":"options.html"}}"#,
+        )
+        .unwrap();
+        let found = pages(&dir);
+        assert_eq!(found.len(), 1);
+        let p = &found[0];
+        assert_eq!(p.popup.as_deref(), Some("popup/index.html"));
+        assert_eq!(p.options.as_deref(), Some("options.html"));
+        assert_eq!(p.icon.as_deref(), Some("data:image/png;base64,iVBORw=="));
+        assert_eq!(
+            find(&found, "abcdefghijklmnopabcdefghijklmnop", "x").map(|p| p.name.as_str()),
+            Some("Vault")
+        );
+        assert_eq!(
+            find(&found, "other", "Vault").map(|p| p.name.as_str()),
+            Some("Vault")
+        );
+        assert_eq!(icon_data(&ext, "../../secret.png"), None);
+        assert_eq!(icon_data(&ext, "img/32.exe"), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

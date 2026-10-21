@@ -4,6 +4,7 @@
 
 ### Added
 - Byōbu uncloaks trackers hidden behind a site's own subdomains (CNAME).
+- Extensions get a toolbar button that opens their popup.
 
 ## [0.1.6] - 2026-10-21
 
