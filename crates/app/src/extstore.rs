@@ -201,6 +201,59 @@ pub fn updates_in(xml: &str, installed: &[(String, String)]) -> Vec<(String, Str
     out
 }
 
+/// (store id, version) of each store-installed extension under `extensions_dir` (those unpacked
+/// into a folder named by their id).
+pub fn installed_versions(extensions_dir: &Path) -> Vec<(String, String)> {
+    let Ok(entries) = std::fs::read_dir(extensions_dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|e| {
+            let id = e.file_name().to_string_lossy().into_owned();
+            parse_id(&id).filter(|i| *i == id)?;
+            let text = std::fs::read_to_string(e.path().join("manifest.json")).ok()?;
+            let m: serde_json::Value =
+                serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()?;
+            Some((id, m.get("version")?.as_str()?.to_string()))
+        })
+        .collect()
+}
+
+/// Ask the store which installed extensions have a newer version and download them over the old
+/// folders. Returns the ids updated. Blocking.
+pub fn update_all(extensions_dir: &Path) -> Result<Vec<String>, String> {
+    let installed = installed_versions(extensions_dir);
+    if installed.is_empty() {
+        return Ok(Vec::new());
+    }
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(60)))
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let mut resp = agent
+        .get(&update_check_url(&installed))
+        .call()
+        .map_err(|e| e.to_string())?;
+    if resp.status().as_u16() != 200 {
+        return Err(format!("The Chrome Web Store answered {}.", resp.status()));
+    }
+    let xml = resp
+        .body_mut()
+        .with_config()
+        .limit(1024 * 1024)
+        .read_to_string()
+        .map_err(|e| e.to_string())?;
+    let mut done = Vec::new();
+    for (id, _) in updates_in(&xml, &installed) {
+        if fetch(&id, extensions_dir).is_ok() {
+            done.push(id);
+        }
+    }
+    Ok(done)
+}
+
 /// What an installed extension offers the browser's own UI.
 #[derive(Debug, Default, PartialEq)]
 pub struct ExtensionPages {

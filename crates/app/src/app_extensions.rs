@@ -222,6 +222,23 @@ impl BrowserApp {
         serde_json::Value::Array(items).to_string()
     }
 
+    /// Check the store for newer versions of installed extensions, at most every six hours.
+    pub(super) fn check_extension_updates(&mut self) {
+        const EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+        if self.extensions_checked.is_some_and(|t| t.elapsed() < EVERY) {
+            return;
+        }
+        self.extensions_checked = Some(Instant::now());
+        let proxy = self.proxy.clone();
+        let dir = self.data_dir.join("Extensions");
+        let _ = std::thread::Builder::new()
+            .name("shoji-extension-updates".into())
+            .spawn(move || {
+                let _ =
+                    proxy.send_event(BrowserEvent::ExtensionsUpdated(extstore::update_all(&dir)));
+            });
+    }
+
     pub(super) fn push_extension_buttons(&self, win_id: WindowId) {
         if let Some(win) = self.windows.get(&win_id) {
             win.eval_chrome(&format!(

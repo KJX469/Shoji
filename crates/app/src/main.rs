@@ -302,6 +302,8 @@ pub(crate) enum BrowserEvent {
     ExtensionFetched(Result<PathBuf, String>),
     /// Breach counts by password hash, and whether every lookup was answered
     VaultBreaches(HashMap<String, u64>, bool),
+    /// Store extensions were checked for updates: the ids that were replaced on disk
+    ExtensionsUpdated(Result<Vec<String>, String>),
     /// A window's extension popup wants this size (logical px)
     ExtensionPopupSize(WindowId, f64, f64),
     /// A window's extension popup lost focus or closed itself
@@ -892,6 +894,8 @@ struct BrowserApp {
     /// The extension popup that last closed by losing focus, and when (a click on its own
     /// button closes it first; that click must not open it again)
     popup_blurred: Option<(String, Instant)>,
+    /// When store extensions were last checked for updates
+    extensions_checked: Option<Instant>,
     /// The toolbar has asked the engine for the installed extensions
     extensions_asked: std::cell::Cell<bool>,
     favourites: shoji_core::userdata::Favourites,
@@ -1070,6 +1074,7 @@ impl BrowserApp {
             extension_popups: HashMap::new(),
             popup_blurred: None,
             extensions_asked: std::cell::Cell::new(false),
+            extensions_checked: None,
             settings,
             settings_path,
             data_dir: data_dir.clone(),
@@ -2564,6 +2569,7 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 let on = EXTENSIONS_ON.load(std::sync::atomic::Ordering::Relaxed);
                 // Popups open from the toolbar; options pages open as ordinary tabs.
                 let json = self.extensions_listed(&json);
+                self.check_extension_updates();
                 let js = format!(
                     "window.__extensions && window.__extensions({{active:{on},items:{json}}})"
                 );
@@ -2576,6 +2582,17 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 self.size_extension_popup(win_id, w, h)
             }
             BrowserEvent::ExtensionPopupClosed(win_id) => self.blur_extension_popup(win_id),
+            BrowserEvent::ExtensionsUpdated(result) => {
+                if let Ok(ids) = result {
+                    if !ids.is_empty() {
+                        self.toast(&serde_json::json!({
+                            "title": "Extensions updated.",
+                            "text": "New versions are used after you restart Shoji.",
+                            "pose": "unfold",
+                        }));
+                    }
+                }
+            }
             BrowserEvent::VaultBreaches(found, complete) => self.breaches_checked(found, complete),
             BrowserEvent::SiteCookies(win_id, n, cleared) => {
                 if let Some(win) = self.windows.get(&win_id) {
