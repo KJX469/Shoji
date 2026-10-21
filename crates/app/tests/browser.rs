@@ -321,3 +321,51 @@ fn other_sites_get_the_origin_as_referrer_and_click_pings_are_blocked() {
         "the click ping was sent"
     );
 }
+
+#[test]
+fn popup_rules_stop_ad_windows_and_popunders() {
+    if !can_run() {
+        return;
+    }
+    let server = site(vec![
+        (
+            "/",
+            "<a id=ad href=\"http://popads.test:{P}/direct\" target=_blank>ad</a>\
+             <button id=under onclick=\"var w=window.open('');setTimeout(function(){w.location='http://popads.test:{P}/late'},300)\">under</button>\
+             <a id=ok href=\"http://fine.test:{P}/page\" target=_blank>ok</a>"
+                .into(),
+        ),
+        ("/page", "<p>fine</p>".into()),
+    ]);
+    let url = server.url("opener.test", "/");
+    let shoji = Shoji::start(
+        "popups",
+        &url,
+        Options {
+            settings: shield_settings(&["||popads.test^$popup"]),
+            ..Default::default()
+        },
+    );
+    let mut page = shoji.page("opener.test");
+    wait_for_shield(&server, &mut page, &url, ("probe.test", "/p.gif"));
+    page.goto(&url);
+    // As if clicked: the tab that opens may hide this one.
+    for id in ["ad", "under", "ok"] {
+        page.call(
+            "Runtime.evaluate",
+            json!({ "expression": format!("document.getElementById('{id}').click()"), "userGesture": true }),
+        );
+    }
+    assert!(
+        server
+            .wait_for("fine.test", "/page", Duration::from_secs(10))
+            .is_some(),
+        "an ordinary popup didn't open"
+    );
+    std::thread::sleep(Duration::from_secs(2));
+    assert!(
+        !server.saw("popads.test", "/direct"),
+        "the ad window opened"
+    );
+    assert!(!server.saw("popads.test", "/late"), "the popunder opened");
+}

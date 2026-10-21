@@ -101,6 +101,15 @@ struct Inner {
     synced: HashMap<String, String>,
     updating: bool,
     ready: bool,
+    /// Tabs opened as popups, until their first page is known (see [`watch_popup`])
+    popups: HashMap<u64, PopupWatch>,
+}
+
+/// A popup tab whose navigations are checked against `$popup` rules until its first page loads:
+/// a window opened blank and sent somewhere later, or through a redirect, is the popunder trick.
+struct PopupWatch {
+    opener_tab: u64,
+    opener: String,
 }
 
 pub struct Hub {
@@ -283,6 +292,18 @@ impl Hub {
         }
     }
 
+    /// Tell the host to close a popup tab Byōbu stopped.
+    fn closing_popup(&self, tab: TabId) {
+        if let Ok(mut h) = self.inner.lock() {
+            h.popups.remove(&tab.0);
+        }
+        if let Ok(p) = self.proxy.lock() {
+            if let Some(p) = p.as_ref() {
+                let _ = p.send_event(BrowserEvent::ShieldBlockedPopup(tab));
+            }
+        }
+    }
+
     /// Ask the host to refresh whatever shows this tab's counters.
     fn touch(&self, tab: u64) {
         // A page that keeps retrying blocked requests would otherwise wake the host once per
@@ -325,6 +346,7 @@ impl Hub {
         if let Ok(mut h) = self.inner.lock() {
             h.tabs.remove(&tab);
             h.tokens.remove(&tab);
+            h.popups.remove(&tab);
         }
     }
 
@@ -462,6 +484,44 @@ impl Hub {
     }
 }
 
+/// Count and log a popup Byōbu stopped (the opener's tab gets the count).
+pub fn popup_blocked(opener_tab: TabId, opener: &str, url: &str, rule: String) {
+    hub().record(
+        opener_tab.0,
+        opener,
+        url,
+        RequestKind::Popup,
+        &Decision::Block,
+        Some(rule),
+    );
+}
+
+/// Check where the popup `tab`, opened by the page at `opener`, goes first.
+pub fn watch_popup(tab: TabId, opener_tab: TabId, opener: &str) {
+    if let Ok(mut h) = hub().inner.lock() {
+        h.popups.insert(
+            tab.0,
+            PopupWatch {
+                opener_tab: opener_tab.0,
+                opener: opener.to_string(),
+            },
+        );
+    }
+}
+
+/// The tab and page that opened `tab`, until its first page loads.
+fn popup_opener(tab: u64) -> Option<(u64, String)> {
+    let h = hub().inner.lock().ok()?;
+    h.popups.get(&tab).map(|w| (w.opener_tab, w.opener.clone()))
+}
+
+/// `tab` has loaded a page: it is an ordinary tab now.
+fn popup_loaded(tab: u64) {
+    if let Ok(mut h) = hub().inner.lock() {
+        h.popups.remove(&tab);
+    }
+}
+
 /// Hand the hub the event-loop proxy so request handlers can notify the host.
 pub fn init(proxy: EventLoopProxy<BrowserEvent>) {
     if let Ok(mut p) = hub().proxy.lock() {
@@ -559,6 +619,7 @@ fn kind_name(k: RequestKind) -> &'static str {
         RequestKind::Xhr => "xhr",
         RequestKind::Ping => "ping",
         RequestKind::Websocket => "websocket",
+        RequestKind::Popup => "popup",
         RequestKind::Other => "other",
     }
 }
@@ -1002,6 +1063,18 @@ pub fn attach(
             let mut uri = PWSTR::null();
             unsafe { args.Uri(&mut uri)? };
             let url = take(uri);
+            if is_web(&url) {
+                if let Some((opener_tab, opener)) = popup_opener(tab_id.0) {
+                    // A popup sent somewhere `$popup` rules name (often after opening blank,
+                    // or through a redirect) is closed.
+                    if let Some(rule) = shield.check_popup(&url, &opener, mode_for(&opener)) {
+                        unsafe { args.SetCancel(true)? };
+                        popup_blocked(TabId(opener_tab), &opener, &url, rule);
+                        hub().closing_popup(tab_id);
+                        return Ok(());
+                    }
+                }
+            }
             if CLEAN_LINKS.load(Ordering::Relaxed) && mode_for(&url) != Mode::Off {
                 if let Some(clean) = shoji_byobu::links::clean(&url) {
                     // Cancel and go to the cleaned address; it passes through here again
@@ -1074,6 +1147,7 @@ pub fn attach(
     // site) gets them as soon as it starts loading; they skip themselves where they already ran.
     {
         let core_load = core.clone();
+        let tab = tab_id.0;
         let handler = ContentLoadingEventHandler::create(Box::new(move |_, _| {
             let _doing = crate::crash::doing("byobu content loading");
             let mut src = PWSTR::null();
@@ -1081,6 +1155,7 @@ pub fn attach(
             let Some(host) = crate::extract_host(&take(src)) else {
                 return Ok(());
             };
+            popup_loaded(tab);
             let js = page_scripts.borrow().text(&host);
             if let Some(js) = js {
                 let w = wide(&js);

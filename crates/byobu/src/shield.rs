@@ -1,5 +1,6 @@
 //! The matcher: network decisions and per-site cosmetic payloads.
 
+use crate::popups::Popups;
 use crate::sources::ListSource;
 use crate::updater::Updater;
 use adblock::lists::{FilterSet, ParseOptions};
@@ -41,6 +42,8 @@ pub enum RequestKind {
     Xhr,
     Ping,
     Websocket,
+    /// A new window (`window.open`, `target="_blank"`), matched with `$popup` rules
+    Popup,
     Other,
 }
 
@@ -57,6 +60,7 @@ impl RequestKind {
             RequestKind::Xhr => "xhr",
             RequestKind::Ping => "ping",
             RequestKind::Websocket => "websocket",
+            RequestKind::Popup => "popup",
             RequestKind::Other => "other",
         }
     }
@@ -98,6 +102,8 @@ pub struct Shield {
     generation: Arc<AtomicU64>,
     /// Cosmetic payloads (and their exceptions) by host and mode, for the current engine
     cosmetics: Arc<Mutex<CosmeticCache>>,
+    /// The lists' `$popup` rules, which the engine itself drops
+    popups: Arc<RwLock<Option<Arc<Popups>>>>,
 }
 
 type Exceptions = Arc<HashSet<String>>;
@@ -163,6 +169,7 @@ impl Shield {
             allowed_pages: Arc::new(RwLock::new(HashSet::new())),
             generation: Arc::new(AtomicU64::new(0)),
             cosmetics: Arc::default(),
+            popups: Arc::default(),
         }
     }
 
@@ -194,6 +201,7 @@ impl Shield {
             return false;
         }
         let key = engine_key(&lists);
+        let popups = Popups::compile(&lists).map(Arc::new);
         let saved = dir.and_then(|d| {
             let same = std::fs::read_to_string(d.join(SAVED_KEY)).ok()? == key;
             let data = std::fs::read(d.join(SAVED_ENGINE)).ok().filter(|_| same)?;
@@ -227,6 +235,9 @@ impl Shield {
         engine.use_resources(resources);
         if let Ok(mut slot) = self.engine.write() {
             *slot = Some(Arc::new(engine));
+        }
+        if let Ok(mut slot) = self.popups.write() {
+            *slot = popups;
         }
         self.generation.fetch_add(1, Ordering::AcqRel);
         true
@@ -349,6 +360,16 @@ impl Shield {
             .split(',')
             .any(|o| matches!(o.trim(), "document" | "doc" | "all"))
             .then_some(line)
+    }
+
+    /// The rule that stops the page at `opener` opening `url` in a new window (a `$popup` rule:
+    /// popunders, ad windows), if one does.
+    pub fn check_popup(&self, url: &str, opener: &str, mode: Mode) -> Option<String> {
+        if mode == Mode::Off || !(url.starts_with("https://") || url.starts_with("http://")) {
+            return None;
+        }
+        let popups = self.popups.read().ok()?.clone()?;
+        popups.blocks(url, opener)
     }
 
     /// Open `host` despite the warning, for the rest of this session.
@@ -629,6 +650,31 @@ news.test##.banner
         assert!(s
             .check_document("https://bad.example/", Mode::Standard)
             .is_none());
+    }
+
+    #[test]
+    fn popup_rules_are_kept_for_new_windows() {
+        let s = shield("||popads.test^$popup\n||ads.test^\n");
+        let page = "https://news.test/";
+        assert!(s
+            .check_popup("https://popads.test/x", page, Mode::Standard)
+            .is_some());
+        assert!(s
+            .check_popup("https://popads.test/x", page, Mode::Off)
+            .is_none());
+        assert!(s
+            .check_popup("https://ads.test/x", page, Mode::Standard)
+            .is_none());
+        // The engine never sees a popup, so the rule blocks nothing else.
+        assert_eq!(
+            s.check(
+                "https://popads.test/x.js",
+                page,
+                RequestKind::Script,
+                Mode::Standard
+            ),
+            Decision::Allow
+        );
     }
 
     #[test]

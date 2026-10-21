@@ -323,6 +323,8 @@ pub(crate) enum BrowserEvent {
         tab_id: TabId,
         url: String,
     },
+    /// Byobu stopped a popup tab on its way to a `$popup` address: close it
+    ShieldBlockedPopup(TabId),
     /// The element picker produced a rule for `host`
     ShieldRule {
         host: String,
@@ -2736,6 +2738,11 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                     let _ = tab
                         .view
                         .load_url(&format!("{INTERNAL_ORIGIN}notice-{}/", tab_id.0));
+                }
+            }
+            BrowserEvent::ShieldBlockedPopup(tab_id) => {
+                if let Some(win_id) = self.owner(tab_id) {
+                    self.close_tab(win_id, tab_id, event_loop);
                 }
             }
             BrowserEvent::ShieldRule { host, selector } => {
