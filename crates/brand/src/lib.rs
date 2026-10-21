@@ -166,12 +166,12 @@ fn flatten(d: &str) -> Vec<(f32, f32)> {
     let flush = |cmd: char, nums: &mut Vec<f32>, points: &mut Vec<(f32, f32)>| {
         match cmd {
             'M' | 'L' => {
-                for pair in nums.chunks_exact(2) {
+                for pair in nums.as_chunks::<2>().0 {
                     points.push((pair[0], pair[1]));
                 }
             }
             'Q' => {
-                for quad in nums.chunks_exact(4) {
+                for quad in nums.as_chunks::<4>().0 {
                     let p0 = *points.last().unwrap_or(&(quad[0], quad[1]));
                     let (c, p1) = ((quad[0], quad[1]), (quad[2], quad[3]));
                     const STEPS: usize = 8;

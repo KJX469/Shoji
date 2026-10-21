@@ -971,7 +971,7 @@ impl TabManager {
                 pos - 1
             };
             let next_ws_id = self.workspaces[next_pos].id;
-            let removed_tabs: Vec<TabState> = self.tabs.drain(..).collect();
+            let removed_tabs: Vec<TabState> = std::mem::take(&mut self.tabs);
             for t in removed_tabs {
                 self.record_closed(t.url, t.title);
             }
