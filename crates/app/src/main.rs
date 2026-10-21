@@ -316,6 +316,8 @@ pub(crate) enum BrowserEvent {
     },
     /// Byobu blocked something for this tab (or its lists changed: tab 0)
     ShieldTouched(TabId),
+    /// The matcher has answers for held requests
+    ShieldAnswers,
     /// Byobu stopped a page from opening (a `$document` rule matched)
     ShieldBlockedPage {
         tab_id: TabId,
@@ -2709,6 +2711,7 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                         .load_url(&format!("{INTERNAL_ORIGIN}notice-{}/", tab_id.0));
                 }
             }
+            BrowserEvent::ShieldAnswers => shield::apply_answers(),
             BrowserEvent::ShieldTouched(tab_id) => {
                 shield::hub().touch_handled();
                 // Counters are picked up by the next flush; tab 0 means the lists changed.
