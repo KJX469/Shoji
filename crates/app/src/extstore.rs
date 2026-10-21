@@ -418,7 +418,7 @@ pub fn find<'a>(pages: &'a [ExtensionPages], id: &str, name: &str) -> Option<&'a
 /// The catalog the store page browses, built weekly into the Byobu data release.
 const CATALOG_URL: &str =
     "https://github.com/KJX469/Shoji/releases/download/byobu-data/extension-catalog.json";
-const CATALOG_MAX_BYTES: u64 = 8 * 1024 * 1024;
+const CATALOG_MAX_BYTES: u64 = 16 * 1024 * 1024;
 const CATALOG_MAX_AGE: Duration = Duration::from_secs(3 * 24 * 60 * 60);
 
 fn catalog_file(data_dir: &Path) -> PathBuf {
