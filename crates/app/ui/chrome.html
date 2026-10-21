@@ -60,6 +60,10 @@
     .tab.arriving { animation: tab-arrive .26s cubic-bezier(.22, 1, .36, 1); transform-origin: 50% 100%; }
     @keyframes tab-arrive { from { opacity: 0; transform: translateY(7px) scale(.9, .86); } }
     .tab { touch-action: none; }
+    /* A tab in a container carries its colour as a thin line along the bottom edge. */
+    .tab .ctr { position: absolute; left: 12px; right: 12px; bottom: 0; height: 2px; border-radius: 2px 2px 0 0; background: var(--ctr); pointer-events: none; }
+    .tab.pinned .ctr { left: 10px; right: 10px; }
+    .tab[data-group] .ctr { bottom: 5px; }
     .tab.drop-left { outline: 3px solid var(--accent); outline-offset: -3px; clip-path: inset(0 0 0 0); }
     .tab.drop-right { outline: 3px solid var(--accent); outline-offset: -3px; }
     .favicon { width: 18px; height: 18px; border-radius: 4px; flex-shrink: 0; object-fit: contain; }
@@ -1067,7 +1071,8 @@
         split_rects: state.split_rects || [],
         workspaces: incoming.workspaces || [],
         active_workspace_id: incoming.active_workspace_id || 1,
-        inactive_tabs: incoming.inactive_tabs || []
+        inactive_tabs: incoming.inactive_tabs || [],
+        containers: incoming.containers || []
       };
       const state_ = incoming;
       const ws = state.workspaces.find(w => w.id === state.active_workspace_id) || state.workspaces[0];
@@ -1093,6 +1098,7 @@
       const switched = activeTabId !== state_.active_tab_id;
       activeTabId = state_.active_tab_id;
       const groupById = new Map(state.groups.map(g => [g.id, g]));
+      const ctrById = new Map((state.containers || []).map(c => [c.id, c]));
       // Rebuild the strip order: group chips, lone tabs, and one pill per split group.
       const order = [];
       const chipped = new Set();
@@ -1128,6 +1134,15 @@
         const g = tab.group != null ? groupById.get(tab.group) : null;
         if (g) { el.dataset.group = g.id; tintGroup(el, g.color); }
         else { delete el.dataset.group; el.style.removeProperty('--g'); el.style.removeProperty('--g-deep'); el.style.removeProperty('--g-on'); }
+        const ctr = tab.container ? ctrById.get(tab.container) : null;
+        let mark = el.querySelector(':scope > .ctr');
+        if (ctr) {
+          if (!mark) { mark = document.createElement('span'); mark.className = 'ctr'; el.appendChild(mark); }
+          el.style.setProperty('--ctr', ctr.color);
+          el.dataset.container = ctr.name;
+        } else if (mark) {
+          mark.remove(); el.style.removeProperty('--ctr'); delete el.dataset.container;
+        }
         const memb = splitOf.get(tab.id);
         el.classList.toggle('split-pane', !!memb);
         if (memb) el.dataset.split = memb.sp.id; else { delete el.dataset.split; delete el.dataset.pos; }
@@ -1150,7 +1165,8 @@
         const title = (internal && INTERNAL_TITLES[tab.url]) || tab.title || tab.url;
         setText(el.querySelector('.title'), title);
         const shortcut = index < 8 ? index + 1 : (index === state.tabs.length - 1 ? 9 : 0);
-        setAttr(el, 'title', shortcut ? `${title}  (Ctrl+${shortcut})` : title);
+        const tip = ctr ? `${title}  ·  ${ctr.name}` : title;
+        setAttr(el, 'title', shortcut ? `${tip}  (Ctrl+${shortcut})` : tip);
         const icon = (!internal && tab.favicon_uri) || SHOJI_FAVICON;
         const img = el.querySelector('.favicon');
         if (img.dataset.src !== icon) { img.dataset.src = icon; img.src = icon; }
