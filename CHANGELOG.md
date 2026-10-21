@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-10-21
+
+### Added
+- Containers: Work, Personal, Shopping, Banking and temporary ones, each with its own cookies; a site can always open in one.
+- Fingerprinting protection (Standard by default, Strict, Off).
+- Bounce-tracking cleanup: sites that only appear as redirect hops lose their cookies after a week.
+- Crash reports kept on this PC, with an offer to open a prefilled issue.
+- The Byōbu page shows how long a request check takes.
+
+### Changed
+- Byōbu blocks and hides in cross-origin frames and workers too.
+- Byōbu is ready at start: the compiled shield is reused (about 90 ms instead of 950 ms).
+- Third-party cookies are blocked by default.
+- Byōbu's scriptlet data comes from reviewed, pinned uBlock Origin and Brave commits.
+- Internal pages send a strict Content-Security-Policy; page messages are checked more strictly.
+
+### Fixed
+- Private mode now forgets data kept before it was turned on.
+
 ## [0.1.5] - 2026-10-19
 
 ### Added
@@ -89,7 +108,8 @@
 
 First release.
 
-[Unreleased]: https://github.com/KJX469/Shoji/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/KJX469/Shoji/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/KJX469/Shoji/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/KJX469/Shoji/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/KJX469/Shoji/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/KJX469/Shoji/compare/v0.1.2...v0.1.3
