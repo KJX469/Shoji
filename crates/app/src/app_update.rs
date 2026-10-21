@@ -113,6 +113,11 @@ impl BrowserApp {
                 self.update_memo.skip.clear();
                 self.update_memo.save(&self.update_memo_path);
             }
+            "rollback" => self.start_rollback(),
+            "keep-version" => {
+                self.rollback_offer = None;
+                shoji_core::launches::Launches::keep(&self.launches_path);
+            }
             "notes" => {
                 let page = self
                     .update
@@ -249,6 +254,95 @@ impl BrowserApp {
             "actions": actions,
         });
         self.toast(&toast);
+    }
+
+    /// This run has lasted long enough, or is quitting normally: it wasn't an early close.
+    pub(super) fn settle_launch(&mut self) {
+        if self.launch_settles.take().is_some() {
+            shoji_core::launches::Launches::settle(&self.launches_path);
+        }
+    }
+
+    /// This version closed unexpectedly twice just after starting: offer, once per start, to go
+    /// back to the version before it. Returns whether the offer was shown.
+    pub(super) fn offer_rollback(&mut self) -> bool {
+        let Some(previous) = self.rollback_offer.clone() else {
+            return false;
+        };
+        if self.rolling_back || !update::running_installed_copy() {
+            return false;
+        }
+        crash::mark_seen(&self.data_dir);
+        let current = env!("CARGO_PKG_VERSION");
+        self.toast(&serde_json::json!({
+            "title": format!("Shoji {current} keeps closing"),
+            "text": format!("It closed unexpectedly twice just after starting. Shoji {previous} can be put back, with your tabs and settings."),
+            "pose": "bow",
+            "ms": 30000,
+            "actions": [
+                {"label": format!("Go back to {previous}"), "action": "UpdateAction",
+                 "payload": {"choice": "rollback"}, "primary": true},
+                {"label": format!("Keep {current}"), "action": "UpdateAction",
+                 "payload": {"choice": "keep-version"}},
+            ],
+        }));
+        true
+    }
+
+    /// "Go back": skip this version from now on and fetch (or reuse) the earlier installer.
+    fn start_rollback(&mut self) {
+        let Some(previous) = self.rollback_offer.clone() else {
+            return;
+        };
+        if self.rolling_back || !update::running_installed_copy() {
+            return;
+        }
+        self.rolling_back = true;
+        self.update_memo.skip = env!("CARGO_PKG_VERSION").to_string();
+        self.update_memo.installing = None;
+        self.update_memo.save(&self.update_memo_path);
+        self.update_request(update::Request::Rollback(update::release_of(&previous)));
+        self.toast(&serde_json::json!({
+            "title": format!("Going back to Shoji {previous}"),
+            "text": "Shoji restarts with your tabs in a moment.",
+            "pose": "carry",
+            "ms": 8000,
+        }));
+    }
+
+    /// The earlier installer is ready: restart into it, with the open tabs.
+    pub(super) fn rollback_ready(&mut self, version: &str, result: Result<PathBuf, String>) {
+        if !self.rolling_back {
+            return;
+        }
+        let started = result.and_then(|installer| {
+            self.write_session(true);
+            let mut cmd = std::process::Command::new(installer);
+            cmd.args(["--update", "--reopen"]);
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x0000_0008); // DETACHED_PROCESS: outlives this copy
+            }
+            cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
+        });
+        if started.is_ok() {
+            self.update_started = true;
+            return;
+        }
+        self.rolling_back = false;
+        self.toast(&serde_json::json!({
+            "title": format!("Couldn't get Shoji {version}"),
+            "text": "Check the connection and try again, or install it from its release page.",
+            "pose": "bow",
+            "ms": 12000,
+            "actions": [
+                {"label": "Try again", "action": "UpdateAction",
+                 "payload": {"choice": "rollback"}, "primary": true},
+                {"label": "Release page", "action": "CreateTab",
+                 "payload": {"url": update::release_of(version).page_url}},
+            ],
+        }));
     }
 
     /* ----- password manager ----- */

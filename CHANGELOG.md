@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+- "Get beta updates" in Settings offers pre-releases too.
+- A version that closes unexpectedly twice just after starting offers to go back to the one before it.
+
 ## [0.1.6] - 2026-10-21
 
 ### Added
