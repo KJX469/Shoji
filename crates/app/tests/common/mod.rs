@@ -368,7 +368,10 @@ impl Shoji {
         }
 
         let cdp = free_port();
-        let mut args = format!("--remote-debugging-port={cdp} --no-first-run");
+        let mut args = format!(
+            "--remote-debugging-port={cdp} --no-first-run --enable-logging --log-file=\"{}\"",
+            dir.join("engine-debug.log").display()
+        );
         if opts.local_hosts {
             args.push_str(" --host-resolver-rules=\"MAP * 127.0.0.1\"");
         }
@@ -471,6 +474,15 @@ impl Shoji {
     pub fn report(&self) -> String {
         let status = self.child.lock().unwrap().try_wait();
         let mut out = format!("process: {status:?}\n");
+        let engines = Command::new("tasklist")
+            .args(["/FI", "IMAGENAME eq msedgewebview2.exe"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default();
+        out.push_str(&format!("engine processes: {engines}\n"));
+        let debug = std::fs::read_to_string(self.dir.join("engine-debug.log")).unwrap_or_default();
+        let tail: Vec<&str> = debug.lines().rev().take(40).collect();
+        out.push_str(&format!("engine log, newest first:\n{}\n", tail.join("\n")));
         for f in ["out.log", "err.log"] {
             let text = std::fs::read_to_string(self.dir.join(f)).unwrap_or_default();
             out.push_str(&format!("{f}: {text}\n"));
