@@ -21,6 +21,7 @@ mod icons;
 mod import_win;
 mod keys;
 mod pages;
+mod power;
 mod shield;
 mod snapghost;
 mod tabdrag;
@@ -283,6 +284,8 @@ pub(crate) enum BrowserEvent {
         state: &'static str,
     },
     TabSuspended(TabId),
+    /// Windows reported a change in memory pressure or battery saver
+    Power(power::State),
     /// A page could not be found (`offline` false) or the network is down (`offline` true)
     Unreachable {
         tab_id: TabId,
@@ -953,6 +956,8 @@ struct BrowserApp {
     update_started: bool,
     /// The version whose files were already put in place beside this running copy
     update_staged: Option<String>,
+    /// Low memory and battery saver, as Windows last reported them
+    power: power::State,
     /// Tabs from the previous run, waiting for the user's answer (or restored at startup)
     pending_session: Option<shoji_core::userdata::Session>,
     restore_on_start: bool,
@@ -1115,6 +1120,7 @@ impl BrowserApp {
             update_unfold_pending: false,
             update_started: false,
             update_staged: None,
+            power: power::State::default(),
             pending_session,
             restore_on_start,
             session_json: String::new(),
@@ -1897,11 +1903,10 @@ impl BrowserApp {
 
     /// Suspend background tabs that have been hidden long enough; returns the next deadline.
     fn rest_background_tabs(&mut self) -> Option<Instant> {
-        let after = self.settings.performance.sleep_after_secs;
-        if after == 0 {
-            return None;
-        }
-        let after = Duration::from_secs(after);
+        let chosen = self.settings.performance.sleep_after_secs;
+        let after = self
+            .power
+            .rest_after((chosen > 0).then(|| Duration::from_secs(chosen)))?;
         let now = Instant::now();
         let mut next: Option<Instant> = None;
         for win in self.windows.values_mut() {
@@ -1921,6 +1926,19 @@ impl BrowserApp {
             }
         }
         next
+    }
+
+    /// Battery saver changed: the crane holds still in every window and Shoji page (pages
+    /// opened later read it from `pages::set_low_power`).
+    fn push_power(&self) {
+        let on = self.power.saver;
+        pages::set_low_power(on);
+        let js = format!("window.__lowPower && window.__lowPower({on})");
+        for win in self.windows.values() {
+            win.eval_chrome(&js);
+            win.eval_sidebar(&js);
+            win.eval_internal_tabs(&js);
+        }
     }
 
     /// The WebView2 browser process died: every view in this app is gone. Rebuild them.
@@ -2784,6 +2802,13 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                     }
                 });
             }
+            BrowserEvent::Power(state) => {
+                let saver_changed = state.saver != self.power.saver;
+                self.power = state;
+                if saver_changed {
+                    self.push_power();
+                }
+            }
             BrowserEvent::TabSuspended(tab_id) => {
                 if let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) {
                     if !win.tabs.is_tab_visible(tab_id) {
@@ -3275,6 +3300,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = EventLoop::<BrowserEvent>::with_user_event().build()?;
     let update_dir = data_dir.clone();
     let mut app = BrowserApp::new(event_loop.create_proxy(), data_dir, engine_version);
+    power::spawn(event_loop.create_proxy());
     app.tray = tray::Tray::start(event_loop.create_proxy(), &instance);
     // The icon stays in the notification area for as long as Shoji runs.
     if let Some(tray) = &app.tray {
