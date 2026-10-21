@@ -15,6 +15,7 @@ mod cert;
 mod crash;
 mod darkfixes;
 mod default_browser;
+mod dns_win;
 mod extstore;
 mod icons;
 mod import_win;
@@ -1038,6 +1039,7 @@ impl BrowserApp {
             greet_once: std::sync::atomic::AtomicBool::new(true),
         }));
         let shield = shoji_byobu::Shield::new();
+        shield.uncloak_with(shoji_byobu::Uncloaker::spawn(Box::new(dns_win::resolve)));
         shield::init(proxy.clone());
         shield::apply_settings(&settings.shield);
         darkfixes::set_enabled(settings.dark_needed());

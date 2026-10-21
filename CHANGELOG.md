@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- Byōbu uncloaks trackers hidden behind a site's own subdomains (CNAME).
+
 ## [0.1.6] - 2026-10-21
 
 ### Added

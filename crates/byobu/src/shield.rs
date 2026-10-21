@@ -1,5 +1,6 @@
 //! The matcher: network decisions and per-site cosmetic payloads.
 
+use crate::cname::{self, Uncloaker};
 use crate::sources::ListSource;
 use crate::updater::Updater;
 use adblock::lists::{FilterSet, ParseOptions};
@@ -11,7 +12,7 @@ use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 /// The compiled engine kept between runs, and the key of what it was compiled from.
 const SAVED_ENGINE: &str = "engine.dat";
@@ -98,6 +99,8 @@ pub struct Shield {
     generation: Arc<AtomicU64>,
     /// Cosmetic payloads (and their exceptions) by host and mode, for the current engine
     cosmetics: Arc<Mutex<CosmeticCache>>,
+    /// Canonical names of first-party subdomains, once lookups are switched on
+    cname: Arc<OnceLock<Uncloaker>>,
 }
 
 type Exceptions = Arc<HashSet<String>>;
@@ -163,7 +166,21 @@ impl Shield {
             allowed_pages: Arc::new(RwLock::new(HashSet::new())),
             generation: Arc::new(AtomicU64::new(0)),
             cosmetics: Arc::default(),
+            cname: Arc::default(),
         }
+    }
+
+    /// Match first-party subdomains under their canonical names too, looked up by `u`.
+    pub fn uncloak_with(&self, u: Uncloaker) {
+        let _ = self.cname.set(u);
+    }
+
+    /// Changes whenever a request's decision may have changed: a new engine, or a host found
+    /// to be (or no longer be) a CNAME for another site. Caches of decisions check it.
+    pub fn decision_generation(&self) -> u64 {
+        let cname = self.cname.get().map_or(0, |u| u.epoch());
+        self.generation()
+            .wrapping_add(cname.wrapping_mul(0x9e37_79b9_7f4a_7c15))
     }
 
     /// Changes whenever a different engine (new lists, new rules) is in use.
@@ -306,6 +323,11 @@ impl Shield {
         if blocked {
             return (Decision::Block, rule);
         }
+        if r.exception.is_none() && !req.is_third_party {
+            if let Some(answer) = self.uncloaked(&engine, &req, source_url, kind, method) {
+                return answer;
+            }
+        }
         match r.rewritten_url {
             Some(u) if u != url => (Decision::Rewrite(u), rule),
             // Aggressive: tracking parameters leave on every request, not just links.
@@ -316,6 +338,51 @@ impl Shield {
                 }
             }
             _ => (Decision::Allow, None),
+        }
+    }
+
+    /// The decision for a first-party request whose host is a CNAME for another site, matched
+    /// under that site's name. `None` when it isn't cloaked, isn't known yet, or is allowed.
+    fn uncloaked(
+        &self,
+        engine: &Engine,
+        req: &Request,
+        source_url: &str,
+        kind: RequestKind,
+        method: &str,
+    ) -> Option<(Decision, Option<String>)> {
+        let u = self.cname.get()?;
+        let host = req.hostname.as_str();
+        // The page's own host serves the page; only its other subdomains are looked up.
+        if !cname::worth_resolving(host)
+            || url::Url::parse(source_url).ok()?.host_str() == Some(host)
+        {
+            return None;
+        }
+        let canonical = u.canonical(host)?;
+        let replay = cname::origin_with_host(&req.url, &canonical)?;
+        let creq = Request::new(&replay, source_url, kind.name(), method).ok()?;
+        // A CNAME within the same site hides nothing.
+        if !creq.is_third_party {
+            return None;
+        }
+        let r = engine.check_network_request(&creq);
+        // An exception written for the visible name still applies (as in Brave).
+        if r.filter.is_some()
+            && !r.important
+            && engine
+                .check_network_request_subset(req, true, true)
+                .exception
+                .is_some()
+        {
+            return None;
+        }
+        let blocked = r.should_block();
+        let rule = r.filter.and_then(|f| f.raw_line);
+        match r.redirect {
+            Some(redirect) => Some((Decision::Redirect(redirect), rule)),
+            None if blocked => Some((Decision::Block, rule)),
+            None => None,
         }
     }
 
@@ -462,6 +529,54 @@ mod tests {
         let s = Shield::new();
         assert!(s.load(vec![(rules.to_string(), true)], &[]));
         s
+    }
+
+    #[test]
+    fn cloaked_first_party_trackers_are_matched_by_their_real_name() {
+        let s = shield(
+            "||tracker.example^$third-party\n/ads/*\n@@||ok.news.test^\n||news.test/never^\n",
+        );
+        s.uncloak_with(Uncloaker::spawn(Box::new(|h: &str| {
+            let canonical = match h {
+                "metrics.news.test" | "ok.news.test" | "www.news.test" => "eu.tracker.example",
+                "cdn.news.test" => "edge.cdn.example",
+                "img.news.test" => "static.news.test",
+                _ => return None,
+            };
+            Some(crate::Resolution {
+                canonical: Some(canonical.into()),
+                ttl: std::time::Duration::from_secs(600),
+            })
+        })));
+        let page = "https://www.news.test/story";
+        let check = |url: &str| s.check(url, page, RequestKind::Script, Mode::Standard);
+        let g0 = s.decision_generation();
+        // The first request goes through while the name is looked up.
+        assert_eq!(check("https://metrics.news.test/t.js"), Decision::Allow);
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while check("https://metrics.news.test/t.js") == Decision::Allow
+            && std::time::Instant::now() < end
+        {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(check("https://metrics.news.test/t.js"), Decision::Block);
+        assert_ne!(s.decision_generation(), g0, "cached decisions are dropped");
+        // Exceptions on the visible name, the page's own host, CNAMEs within the site and
+        // path rules replayed onto another host all stay allowed.
+        for url in [
+            "https://ok.news.test/t.js",
+            "https://www.news.test/t.js",
+            "https://img.news.test/t.js",
+            "https://cdn.news.test/ads/x.js",
+        ] {
+            check(url);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert_eq!(check("https://ok.news.test/t.js"), Decision::Allow);
+        assert_eq!(check("https://www.news.test/t.js"), Decision::Allow);
+        assert_eq!(check("https://img.news.test/t.js"), Decision::Allow);
+        assert_eq!(check("https://cdn.news.test/ads/x.js"), Decision::Block);
+        assert_eq!(check("https://cdn.news.test/app.js"), Decision::Allow);
     }
 
     #[test]
