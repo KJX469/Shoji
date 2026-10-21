@@ -702,6 +702,7 @@ pub fn attach(
         let blocked_response: std::cell::RefCell<Option<ICoreWebView2WebResourceResponse>> =
             std::cell::RefCell::new(None);
         let handler = WebResourceRequestedEventHandler::create(Box::new(move |_, args| {
+            let _doing = crate::crash::doing("byobu request");
             let started = Instant::now();
             let result = (|| -> windows::core::Result<()> {
                 let Some(args) = args else { return Ok(()) };
@@ -810,6 +811,7 @@ pub fn attach(
         let mode_for = mode_for.clone();
         let tab = tab_id.0;
         let handler = WebMessageReceivedEventHandler::create(Box::new(move |_, args| {
+            let _doing = crate::crash::doing("byobu page message");
             let Some(args) = args else { return Ok(()) };
             let mut msg = PWSTR::null();
             if unsafe { args.TryGetWebMessageAsString(&mut msg) }.is_err() {
@@ -879,6 +881,7 @@ pub fn attach(
         let top_target = top_target.clone();
         let slot: Arc<Mutex<DocScript>> = Arc::default();
         let handler = NavigationStartingEventHandler::create(Box::new(move |_, args| {
+            let _doing = crate::crash::doing("byobu navigation");
             let Some(args) = args else { return Ok(()) };
             let mut uri = PWSTR::null();
             unsafe { args.Uri(&mut uri)? };
@@ -1033,6 +1036,7 @@ fn hook_frame(frame: ICoreWebView2Frame, frames: &Rc<Frames>) {
     {
         let (frames, url) = (frames.clone(), url.clone());
         let handler = FrameNavigationStartingEventHandler::create(Box::new(move |_, args| {
+            let _doing = crate::crash::doing("byobu frame navigation");
             let Some(args) = args else { return Ok(()) };
             let mut uri = PWSTR::null();
             unsafe { args.Uri(&mut uri)? };
@@ -1046,6 +1050,7 @@ fn hook_frame(frame: ICoreWebView2Frame, frames: &Rc<Frames>) {
     {
         let (frames, url) = (frames.clone(), url.clone());
         let handler = FrameDOMContentLoadedEventHandler::create(Box::new(move |sender, _| {
+            let _doing = crate::crash::doing("byobu frame loaded");
             let host = crate::extract_host(&url.borrow());
             let (Some(sender), Some(host)) = (sender, host) else {
                 return Ok(());
@@ -1063,6 +1068,7 @@ fn hook_frame(frame: ICoreWebView2Frame, frames: &Rc<Frames>) {
     {
         let (frames, url) = (frames.clone(), url.clone());
         let handler = FrameWebMessageReceivedEventHandler::create(Box::new(move |sender, args| {
+            let _doing = crate::crash::doing("byobu frame message");
             let (Some(sender), Some(args)) = (sender, args) else {
                 return Ok(());
             };
