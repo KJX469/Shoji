@@ -36,9 +36,43 @@ pub fn crx_payload(bytes: &[u8]) -> Option<&[u8]> {
     bytes.get(start..)
 }
 
+/// Used when the engine's version can't be read: the store withholds extensions that need a
+/// newer Chrome than the one claimed (1Password asks for 140).
+const FALLBACK_VERSION: &str = "140.0.0.0";
+
+/// The engine version as the store wants it: four dotted numbers.
+fn clean_version(raw: &str) -> Option<String> {
+    let v = raw.split_whitespace().next()?;
+    let parts: Vec<&str> = v.split('.').collect();
+    (parts.len() == 4
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())))
+    .then(|| v.to_string())
+}
+
+/// The installed WebView2 runtime's version, which is the Chrome the store should assume.
+fn product_version() -> &'static str {
+    static VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    VERSION.get_or_init(|| {
+        use webview2_com::Microsoft::Web::WebView2::Win32::GetAvailableCoreWebView2BrowserVersionString;
+        let mut out = windows::core::PWSTR::null();
+        // SAFETY: the loader fills `out` with a CoTaskMem string, copied and freed here.
+        let raw = unsafe {
+            GetAvailableCoreWebView2BrowserVersionString(windows::core::PCWSTR::null(), &mut out)
+                .ok()
+                .and_then(|()| out.to_string().ok())
+                .inspect(|_| windows::Win32::System::Com::CoTaskMemFree(Some(out.0 as _)))
+        };
+        raw.and_then(|r| clean_version(&r))
+            .unwrap_or_else(|| FALLBACK_VERSION.to_string())
+    })
+}
+
 fn download(id: &str) -> Result<Vec<u8>, String> {
     let url = format!(
-        "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=130.0.0.0&acceptformat=crx2,crx3&x=id%3D{id}%26installsource%3Dondemand%26uc"
+        "https://clients2.google.com/service/update2/crx?response=redirect&prodversion={}&acceptformat=crx2,crx3&x=id%3D{id}%26installsource%3Dondemand%26uc",
+        product_version()
     );
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(120)))
@@ -178,7 +212,8 @@ pub fn update_check_url(installed: &[(String, String)]) -> String {
         x.push_str(&format!("id%3D{id}%26v%3D{version}%26uc"));
     }
     format!(
-        "https://clients2.google.com/service/update2/crx?response=updatecheck&prodversion=130.0.0.0&acceptformat=crx2,crx3&x={x}"
+        "https://clients2.google.com/service/update2/crx?response=updatecheck&prodversion={}&acceptformat=crx2,crx3&x={x}",
+        product_version()
     )
 }
 
@@ -383,6 +418,16 @@ pub fn find<'a>(pages: &'a [ExtensionPages], id: &str, name: &str) -> Option<&'a
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn engine_versions_are_four_numbers() {
+        assert_eq!(
+            clean_version("130.0.2849.80\n").as_deref(),
+            Some("130.0.2849.80")
+        );
+        assert_eq!(clean_version("130.0.2849"), None);
+        assert_eq!(clean_version("130.0.x.1"), None);
+    }
 
     #[test]
     fn id_comes_out_of_links_and_bare_ids() {
