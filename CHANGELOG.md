@@ -2,12 +2,6 @@
 
 ## [Unreleased]
 
-### Added
-- Byōbu blocks ad popups and popunders (`$popup` rules), counted in the shield.
-- Downloads from sites on the malware and phishing lists are stopped, with "Download anyway".
-- Other sites get only the page's origin as the referrer, and none of its high-entropy client hints.
-- Click-tracking pings (`<a ping>`) are blocked on every site.
-
 ## [0.1.6] - 2026-10-21
 
 ### Added
