@@ -97,7 +97,7 @@ fn sweep() {
         loads[loads.len() * 9 / 10]
     );
     let err = std::fs::read_to_string(shoji.dir.join("err.log")).unwrap_or_default();
-    if let Some(line) = err.lines().filter(|l| l.starts_with("byobu timing")).last() {
+    if let Some(line) = err.lines().rfind(|l| l.starts_with("byobu timing")) {
         eprintln!("{line}");
     }
     let stalls = std::fs::read_to_string(shoji.data_dir().join("logs").join("ui-stalls.log"))
