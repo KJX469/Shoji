@@ -9,9 +9,11 @@ jobs:
     steps:
       - run: |
           set +e
-          for id in nngceckbapebfimnlniiiahkandclblb aeblfdkhhhdcdjpifhhbdiojplfjncoa kbfnbcaeplbcioakkpcpgfkobkghlhen; do
-            for v in 130 140 150 160; do
-              printf '%s %s: ' $id $v
-              curl -sS -m 30 "https://clients2.google.com/service/update2/crx?response=updatecheck&prodversion=$v.0.0.0&acceptformat=crx2,crx3&x=id%3D$id%26v%3D0.0.0.1%26uc" | grep -o 'updatecheck [^>]*' | grep -o 'status="[a-z-]*"\| version="[0-9.]*"' | tr '\n' ' '; echo
-            done
+          id=nngceckbapebfimnlniiiahkandclblb
+          for v in 170 190 220; do
+            printf 'v=0.0.0.1 pv=%s: ' $v
+            curl -sS -m 30 "https://clients2.google.com/service/update2/crx?response=updatecheck&prodversion=$v.0.0.0&acceptformat=crx2,crx3&x=id%3D$id%26v%3D0.0.0.1%26uc" | grep -o 'updatecheck [^>]*' | grep -o 'status="[a-z-]*"\| version="[0-9.]*"' | tr '\n' ' '; echo
           done
+          printf 'no v: '; curl -sS -m 30 "https://clients2.google.com/service/update2/crx?response=updatecheck&prodversion=150.0.0.0&acceptformat=crx2,crx3&x=id%3D$id%26uc" | grep -o 'updatecheck [^>]*' | head -c 300; echo
+          printf 'os=win: '; curl -sS -m 30 "https://clients2.google.com/service/update2/crx?response=updatecheck&os=win&arch=x64&nacl_arch=x86-64&prodversion=150.0.0.0&acceptformat=crx2,crx3&x=id%3D$id%26v%3D0.0.0.1%26uc" | grep -o 'updatecheck [^>]*' | head -c 300; echo
+          printf 'redirect: '; curl -sS -m 30 -o /dev/null -w '%{http_code}\n' "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=150.0.0.0&acceptformat=crx2,crx3&x=id%3D$id%26uc"
