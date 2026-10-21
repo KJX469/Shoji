@@ -666,6 +666,21 @@ pub enum UiToHostMessage {
     RemoveExtension {
         id: String,
     },
+    /// Put an extension on the toolbar or take it off
+    SetExtensionPinned {
+        id: String,
+        pinned: bool,
+    },
+    /// Turn an installed extension on or off
+    SetExtensionEnabled {
+        id: String,
+        enabled: bool,
+    },
+    /// The puzzle button: the list of extensions, to open one or manage them
+    ExtensionsMenu {
+        x: f64,
+        y: f64,
+    },
     /// An extension's toolbar button was clicked; `right` is the button's right edge (logical px)
     ToggleExtensionPopup {
         id: String,

@@ -191,6 +191,7 @@ impl BrowserApp {
         let mut items: Vec<serde_json::Value> = serde_json::from_str(json).unwrap_or_default();
         let mut buttons = Vec::new();
         self.extension_popups.clear();
+        self.extension_menu.clear();
         for item in &mut items {
             let id = item["id"].as_str().unwrap_or("").to_string();
             let name = item["name"].as_str().unwrap_or("").to_string();
@@ -203,18 +204,29 @@ impl BrowserApp {
             let (popup, options) = (url(&p.popup), url(&p.options));
             item["popup"] = serde_json::json!(popup);
             item["options"] = serde_json::json!(options);
+            let pinned = !self.settings.extensions.unpinned.contains(&id);
+            item["pinned"] = serde_json::json!(pinned);
+            item["icon"] = serde_json::json!(p.icon);
             if !enabled {
                 continue;
             }
-            // Every enabled extension gets a button: its popup, else its options page.
+            // Every enabled extension can open: its popup, else its options page. Pinned ones
+            // also get a toolbar button.
             if let Some(target) = popup.clone().or(options) {
-                buttons.push(serde_json::json!({
-                    "id": id, "name": name, "icon": p.icon, "popup": popup.is_some(),
-                }));
+                if pinned {
+                    buttons.push(serde_json::json!({
+                        "id": id, "name": name, "icon": p.icon, "popup": popup.is_some(),
+                    }));
+                }
+                self.extension_menu.push((id.clone(), name.clone()));
                 self.extension_popups.insert(id, (target, popup.is_some()));
             }
         }
-        self.extension_buttons = serde_json::Value::Array(buttons).to_string();
+        self.extension_buttons = serde_json::json!({
+            "buttons": buttons,
+            "any": !self.extension_popups.is_empty(),
+        })
+        .to_string();
         let ids: Vec<WindowId> = self.windows.keys().copied().collect();
         for id in ids {
             self.push_extension_buttons(id);
@@ -367,5 +379,39 @@ impl BrowserApp {
             // Dropping the view closes it.
             win.ext_popup = None;
         }
+    }
+}
+
+impl BrowserApp {
+    /// The puzzle button's menu: every extension that can open, then the manager.
+    pub(super) fn show_extensions_menu(&mut self, win_id: WindowId, x: f64, y: f64) {
+        use shoji_core::ipc::OverlayItem;
+        let item = |value: String, label: String, sub: &str| OverlayItem {
+            kind: "action".into(),
+            value,
+            label,
+            sub: sub.into(),
+            color: None,
+        };
+        let mut items: Vec<OverlayItem> = self
+            .extension_menu
+            .iter()
+            .map(|(id, name)| {
+                let pinned = !self.settings.extensions.unpinned.contains(id);
+                item(
+                    format!("ext-open:{id}"),
+                    name.clone(),
+                    if pinned { "On the toolbar" } else { "" },
+                )
+            })
+            .collect();
+        items.push(item("extensions".into(), "Manage extensions".into(), ""));
+        let Some(win) = self.windows.get(&win_id) else {
+            return;
+        };
+        let w = 280.0f64.min(win.width - 8.0);
+        let x = (x - w / 2.0).clamp(4.0, (win.width - w - 4.0).max(4.0));
+        let h = items.len() as f64 * 46.0 + 10.0;
+        self.show_overlay(win_id, "menu", items, [x, y.max(30.0), w, h], "", "", "");
     }
 }

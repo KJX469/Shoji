@@ -21,6 +21,7 @@ const PET_JS: &str = include_str!("../ui/crane-kit.js");
 const HOME: &str = include_str!("../ui/home.html");
 const WELCOME: &str = include_str!("../ui/welcome.html");
 const PASSWORDS: &str = include_str!("../ui/passwords.html");
+const EXTENSIONS: &str = include_str!("../ui/extensions.html");
 /// Reports login forms and fields to the password manager (see the file's header).
 pub const LOGIN_SCRIPT: &str = include_str!("../ui/login.js");
 const SETTINGS: &str = include_str!("../ui/settings.html");
@@ -646,6 +647,27 @@ pub fn welcome(s: &Settings) -> String {
             (
                 "PRIVATE_MODE",
                 if s.privacy.ephemeral_default {
+                    "true"
+                } else {
+                    "false"
+                },
+            ),
+        ],
+    )
+}
+
+pub fn extensions(s: &Settings) -> String {
+    fill(
+        EXTENSIONS,
+        &[
+            ("THEME_CSS", &theme_css(s)),
+            ("ACCENT", s.accent().id()),
+            ("MODE", &s.appearance.theme),
+            ("FONTS", s.fonts().id),
+            ("CRANE", &theme::crane_svg("c", "")),
+            (
+                "EXTENSIONS_ON",
+                if s.extensions.enabled {
                     "true"
                 } else {
                     "false"
