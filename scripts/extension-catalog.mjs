@@ -56,8 +56,8 @@ const records = (node, out = []) => {
   if (!Array.isArray(node)) return out;
   if (typeof node[0] === 'string' && /^[a-p]{32}$/.test(node[0]) && typeof node[2] === 'string' && typeof node[3] === 'number') {
     out.push(node);
-    return out;
   }
+  // Related extensions are nested inside an extension's own record.
   for (const n of node) records(n, out);
   return out;
 };
