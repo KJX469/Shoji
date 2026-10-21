@@ -6,7 +6,7 @@ on:
   schedule:
     - cron: '17 4 * * 1'
   push:
-    branches: [main]
+    branches: [main, claude/store-probe]
     paths:
       - scripts/extension-catalog.mjs
       - .github/workflows/extension-catalog.yml
