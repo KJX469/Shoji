@@ -6,10 +6,12 @@ use adblock::lists::{FilterSet, ParseOptions};
 use adblock::request::Request;
 use adblock::resources::{PermissionMask, Resource};
 use adblock::Engine;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 
 /// The compiled engine kept between runs, and the key of what it was compiled from.
 const SAVED_ENGINE: &str = "engine.dat";
@@ -17,6 +19,7 @@ const SAVED_KEY: &str = "engine.key";
 
 /// How firmly the shield acts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
 pub enum Mode {
     Off,
     #[default]
@@ -26,7 +29,7 @@ pub enum Mode {
 }
 
 /// What kind of request the browser reports (mapped from the WebView2 resource context).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RequestKind {
     Document,
     Subdocument,
@@ -91,6 +94,27 @@ pub struct Shield {
     exceptions: Arc<RwLock<(String, Arc<HashSet<String>>)>>,
     /// Hosts the user chose to open despite a blocked-page warning (this session only)
     allowed_pages: Arc<RwLock<HashSet<String>>>,
+    /// Bumped whenever a new engine is swapped in; caches of its answers check it
+    generation: Arc<AtomicU64>,
+    /// Cosmetic payloads (and their exceptions) by host and mode, for the current engine
+    cosmetics: Arc<Mutex<CosmeticCache>>,
+}
+
+type Exceptions = Arc<HashSet<String>>;
+
+#[derive(Default)]
+struct CosmeticCache {
+    generation: u64,
+    by_host: HashMap<(String, Mode), (CosmeticPayload, Exceptions)>,
+}
+
+/// How many hosts' cosmetic payloads are kept.
+const COSMETIC_HOSTS: usize = 256;
+
+impl std::hash::Hash for Mode {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (*self as u8).hash(state)
+    }
 }
 
 impl Default for Shield {
@@ -137,7 +161,14 @@ impl Shield {
             engine: Arc::new(RwLock::new(None)),
             exceptions: Arc::new(RwLock::new((String::new(), Arc::new(HashSet::new())))),
             allowed_pages: Arc::new(RwLock::new(HashSet::new())),
+            generation: Arc::new(AtomicU64::new(0)),
+            cosmetics: Arc::default(),
         }
+    }
+
+    /// Changes whenever a different engine (new lists, new rules) is in use.
+    pub fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
     }
 
     pub fn is_ready(&self) -> bool {
@@ -197,6 +228,7 @@ impl Shield {
         if let Ok(mut slot) = self.engine.write() {
             *slot = Some(Arc::new(engine));
         }
+        self.generation.fetch_add(1, Ordering::AcqRel);
         true
     }
 
@@ -338,7 +370,8 @@ impl Shield {
         )
     }
 
-    /// Cosmetic filters and scriptlets for the page at `url`.
+    /// Cosmetic filters and scriptlets for the page at `url`. They depend only on its host, so
+    /// they are worked out once per host for each engine (iframes from the same ad host share them).
     pub fn cosmetic(&self, url: &str, mode: Mode) -> CosmeticPayload {
         if mode == Mode::Off {
             return CosmeticPayload::default();
@@ -346,20 +379,44 @@ impl Shield {
         let Some(engine) = self.current() else {
             return CosmeticPayload::default();
         };
-        let res = engine.url_cosmetic_resources(url);
+        let generation = self.generation();
+        let host = url::Url::parse(url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_ascii_lowercase));
+        let key = host.map(|h| (h, mode));
+        let cached = key.as_ref().and_then(|k| {
+            let c = self.cosmetics.lock().ok()?;
+            (c.generation == generation).then(|| c.by_host.get(k).cloned())?
+        });
+        let (payload, exceptions) = match cached {
+            Some(hit) => hit,
+            None => {
+                let res = engine.url_cosmetic_resources(url);
+                let mut hide: Vec<String> = res.hide_selectors.into_iter().collect();
+                hide.sort_unstable();
+                let mut procedural: Vec<String> = res.procedural_actions.into_iter().collect();
+                procedural.sort_unstable();
+                let payload = CosmeticPayload {
+                    hide,
+                    procedural,
+                    script: res.injected_script,
+                    generichide: res.generichide,
+                };
+                let exceptions = Arc::new(res.exceptions);
+                if let (Some(k), Ok(mut c)) = (key, self.cosmetics.lock()) {
+                    if c.generation != generation || c.by_host.len() >= COSMETIC_HOSTS {
+                        c.by_host.clear();
+                        c.generation = generation;
+                    }
+                    c.by_host.insert(k, (payload.clone(), exceptions.clone()));
+                }
+                (payload, exceptions)
+            }
+        };
         if let Ok(mut slot) = self.exceptions.write() {
-            *slot = (url.to_string(), Arc::new(res.exceptions.clone()));
+            *slot = (url.to_string(), exceptions);
         }
-        let mut hide: Vec<String> = res.hide_selectors.into_iter().collect();
-        hide.sort_unstable();
-        let mut procedural: Vec<String> = res.procedural_actions.into_iter().collect();
-        procedural.sort_unstable();
-        CosmeticPayload {
-            hide,
-            procedural,
-            script: res.injected_script,
-            generichide: res.generichide,
-        }
+        payload
     }
 
     /// Generic selectors that apply to the classes and ids a page at `url` actually uses.
@@ -494,6 +551,30 @@ news.test##.banner
         let s = shield("news.test##.banner\n");
         let p = s.cosmetic("https://news.test/story", Mode::Standard);
         assert!(p.hide.iter().any(|s| s == ".banner"), "{:?}", p.hide);
+    }
+
+    #[test]
+    fn cosmetic_payloads_are_cached_until_the_engine_changes() {
+        let s = shield(
+            "news.test##.banner
+",
+        );
+        let first = s.cosmetic("https://news.test/a", Mode::Standard);
+        assert_eq!(s.cosmetic("https://news.test/b", Mode::Standard), first);
+        let g = s.generation();
+        assert!(s.load(
+            vec![(
+                "news.test##.promo
+"
+                .to_string(),
+                true
+            )],
+            &[]
+        ));
+        assert_ne!(s.generation(), g);
+        let next = s.cosmetic("https://news.test/a", Mode::Standard);
+        assert!(next.hide.contains(&".promo".to_string()), "{:?}", next.hide);
+        assert!(!next.hide.contains(&".banner".to_string()));
     }
 
     #[test]
