@@ -1075,6 +1075,7 @@ impl BrowserApp {
         );
         let away_days = away_days(keepsakes.previous_visit(), now_ms());
 
+        shield::set_runtime_version(&engine_version);
         let pages = Arc::new(RwLock::new(PageContext {
             settings: settings.clone(),
             engine_version,

@@ -351,6 +351,10 @@ impl BrowserApp {
                 }
                 self.close_sidebar(win_id, false);
             }
+            M::ReportBrokenSite => {
+                self.report_broken_site(win_id);
+                self.close_sidebar(win_id, false);
+            }
             M::ShieldState { refresh, log } => {
                 if refresh {
                     shield::hub().refresh(true);

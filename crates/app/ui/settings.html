@@ -315,6 +315,10 @@
             <option value="standard">Standard</option><option value="aggressive">Aggressive</option><option value="off">Off</option>
           </select>
         </div>
+        <div class="row" id="oldRuntime" hidden>
+          <div class="what"><b>WebView2 needs an update</b><small id="oldRuntimeText"></small></div>
+          <button class="btn" onclick="post('CreateTab', { url: 'https://developer.microsoft.com/microsoft-edge/webview2/' })">Get it</button>
+        </div>
         <div class="row stack">
           <div class="what"><b>Paused sites</b><small>Byōbu leaves these alone. Use the shield button in the toolbar to add one</small></div>
           <div class="chips" id="paused"></div>
@@ -744,6 +748,8 @@
         ? `${num(byobu.week)} blocked this week · ${num(byobu.total)} in all`
         : "Blocks ads and trackers using uBlock Origin and Brave's lists";
       $('updateBtn').textContent = byobu.updating ? 'Updating…' : 'Update now';
+      $('oldRuntime').hidden = !byobu.old_runtime;
+      $('oldRuntimeText').textContent = `Your Microsoft Edge WebView2 Runtime (${byobu.runtime || 'unknown version'}) is too old for Byōbu to block ads inside other sites' frames and in workers, so some get through. Windows Update normally keeps it current.`;
     }
     function toggleList(id, on) {
       const off = S.shield.disabled_lists.filter(x => x !== id);

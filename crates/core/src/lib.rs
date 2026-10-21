@@ -11,6 +11,7 @@ pub mod import;
 pub mod ipc;
 pub mod launches;
 pub mod notes;
+pub mod report;
 pub mod settings;
 #[cfg(windows)]
 pub mod shell;

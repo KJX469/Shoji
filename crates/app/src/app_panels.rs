@@ -487,6 +487,37 @@ impl BrowserApp {
         }
     }
 
+    /// "Report a broken site": open the prefilled issue for the active tab in a new tab.
+    pub(super) fn report_broken_site(&mut self, win_id: WindowId) {
+        let Some((tab, url)) = self
+            .windows
+            .get(&win_id)
+            .and_then(|w| w.tabs.active_tab())
+            .map(|t| (t.id.0, t.url.clone()))
+        else {
+            return;
+        };
+        if url.is_empty() || is_internal(&url) {
+            return;
+        }
+        let runtime = self
+            .pages
+            .read()
+            .map(|c| c.engine_version.clone())
+            .unwrap_or_default();
+        let windows = shoji_core::env::windows_version();
+        let (blocked, replaced) = shield::hub().counts(tab);
+        let facts = shoji_core::report::Facts {
+            shoji: env!("CARGO_PKG_VERSION"),
+            runtime: &runtime,
+            windows: &windows,
+            blocked,
+            replaced,
+        };
+        let link = shoji_core::report::broken_site_url(&self.settings, &url, &facts);
+        self.create_tab(win_id, Some(link));
+    }
+
     /// If Shoji crashed since it last said so, offer to open a prefilled bug report.
     pub(super) fn mention_crash(&self) {
         let reports = crash::unseen_reports(&self.data_dir);
