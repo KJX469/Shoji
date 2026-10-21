@@ -298,6 +298,8 @@ pub struct Options {
     pub engine_args: String,
     /// Send every host to the local server (off: the real web)
     pub local_hosts: bool,
+    /// Extra environment for the browser process
+    pub env: Vec<(&'static str, String)>,
 }
 
 impl Default for Options {
@@ -307,6 +309,7 @@ impl Default for Options {
             real_lists: false,
             engine_args: String::new(),
             local_hosts: true,
+            env: Vec::new(),
         }
     }
 }
@@ -354,7 +357,11 @@ impl Shoji {
         std::fs::create_dir_all(&data).unwrap();
         std::fs::create_dir_all(dir.join("local")).unwrap();
         let exe = dir.join("shoji.exe");
-        std::fs::copy(env!("CARGO_BIN_EXE_shoji"), &exe).expect("copy shoji.exe");
+        // `SHOJI_EXE` runs another build (a release build, for timings) instead of this one.
+        let source = std::env::var_os("SHOJI_EXE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_shoji")));
+        std::fs::copy(&source, &exe).expect("copy shoji.exe");
 
         let mut settings = json!({
             "first_run_complete": true,
@@ -386,6 +393,9 @@ impl Shoji {
             .env_remove("WEBVIEW2_USER_DATA_FOLDER")
             .stdout(std::fs::File::create(dir.join("out.log")).unwrap())
             .stderr(std::fs::File::create(dir.join("err.log")).unwrap());
+        for (k, v) in &opts.env {
+            cmd.env(k, v);
+        }
         if !opts.real_lists {
             // The updater honours the proxy variables; a dead proxy keeps it to the test's rules.
             cmd.env("HTTPS_PROXY", "http://127.0.0.1:9")
