@@ -796,6 +796,9 @@ pub enum HostToUiMessage {
         /// Tabs in inactive workspaces (for the workspaces sidebar)
         #[serde(default)]
         inactive_tabs: Vec<TabState>,
+        /// Containers tabs can be in, for their colour marks
+        #[serde(default)]
+        containers: Vec<crate::settings::Container>,
     },
     /// Side panel state
     SidebarStateSync {

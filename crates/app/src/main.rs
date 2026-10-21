@@ -244,6 +244,12 @@ pub(crate) enum BrowserEvent {
         kind: &'static str,
     },
     TabCrashed(TabId, i32),
+    /// A tab navigated to a site that always opens in another container
+    OpenInContainer {
+        tab_id: TabId,
+        url: String,
+        container: Option<String>,
+    },
     CertificateError {
         tab_id: TabId,
         host: String,
@@ -461,6 +467,15 @@ fn is_internal_origin(url: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.')
 }
 
+/// The engine profile behind a container (`c-work`); temporary ones are `c-temp-…`.
+fn container_profile(id: &str) -> String {
+    format!("c-{id}")
+}
+
+fn is_temp_container(id: &str) -> bool {
+    id.starts_with(shoji_core::settings::TEMP_CONTAINER)
+}
+
 fn is_internal(url: &str) -> bool {
     url.starts_with(INTERNAL_SCHEME) || url == "about:blank"
 }
@@ -645,6 +660,8 @@ struct Tab {
     view: WebView,
     /// Cookie partition this view was built with (persistent vs. in-memory)
     persistent: bool,
+    /// Container (engine profile) this view was built in
+    container: Option<String>,
     hidden_since: Option<Instant>,
     suspended: bool,
     /// Registered Dark Reader document script, if any
@@ -2505,6 +2522,7 @@ impl BrowserApp {
     /* ----- tabs ----- */
 
     /// `navigate` is false for a popup: the page that opened it hands the view its address.
+    #[allow(clippy::too_many_arguments)]
     fn build_view(
         &self,
         window: &Window,
@@ -2512,13 +2530,20 @@ impl BrowserApp {
         url: &str,
         rect: Rect,
         navigate: bool,
+        container: Option<String>,
     ) -> Option<Tab> {
         let internal = is_internal(url);
         let private = self
             .windows
             .values()
             .any(|w| w.private && w.window.id() == window.id());
-        let persistent = !internal && !private && self.settings.is_site_persistent(url);
+        // A container keeps its own cookies (outside private windows), for every page in the tab.
+        let persistent = !private
+            && if container.is_some() {
+                true
+            } else {
+                !internal && self.settings.is_site_persistent(url)
+            };
         let dark = self.is_dark(window);
 
         let pages = self.pages.clone();
@@ -2526,6 +2551,7 @@ impl BrowserApp {
         let nav_insecure = self.insecure_hosts.clone();
         let proxy_nav = self.proxy.clone();
         let proxy_ipc = self.proxy.clone();
+        let nav_container = container.clone();
         let mut builder = new_builder()
             .with_bounds(rect)
             .with_incognito(!persistent)
@@ -2561,7 +2587,24 @@ impl BrowserApp {
                         .read()
                         .map(|c| c.settings.is_site_persistent(&nav))
                         .unwrap_or(false);
-                if wants_persistent && !persistent {
+                // A site that always opens in a container goes there from tabs outside containers.
+                // A tab the user put in a container keeps whatever it opens.
+                let ruled = nav_container.is_none() && !nav.starts_with(INTERNAL_ORIGIN);
+                if let Some(host) = extract_host(&nav).filter(|_| ruled) {
+                    let rule = nav_pages
+                        .read()
+                        .ok()
+                        .and_then(|c| c.settings.containers.for_host(&host).map(str::to_owned));
+                    if rule.is_some() && rule != nav_container {
+                        let _ = proxy_nav.send_event(BrowserEvent::OpenInContainer {
+                            tab_id,
+                            url: nav,
+                            container: rule,
+                        });
+                        return false;
+                    }
+                }
+                if wants_persistent && !persistent && nav_container.is_none() {
                     let _ = proxy_nav.send_event(BrowserEvent::TabIpc(
                         tab_id,
                         UiToHostMessage::Navigate { url: nav },
@@ -2615,6 +2658,9 @@ impl BrowserApp {
         builder = builder.with_initialization_script(HIDE_SCROLLBAR_SCRIPT);
         builder = builder.with_initialization_script(SPLIT_DROP_SCRIPT);
         // Built blank, so document scripts are registered before the first navigation.
+        if let Some(c) = &container {
+            builder = builder.with_profile_name(container_profile(c));
+        }
         let view = builder
             .build_as_child(window)
             .map_err(|e| eprintln!("Failed to create tab: {e:?}"))
@@ -2681,6 +2727,7 @@ impl BrowserApp {
         Some(Tab {
             view,
             persistent,
+            container,
             hidden_since: None,
             suspended: false,
             dark_script,
@@ -2693,6 +2740,69 @@ impl BrowserApp {
             painted: false,
             pending_url: None,
         })
+    }
+
+    /// A new temporary container: it lasts until its last tab closes.
+    fn new_temp_container(&mut self) -> String {
+        format!(
+            "{}{}",
+            shoji_core::settings::TEMP_CONTAINER,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis())
+                .unwrap_or(0)
+        )
+    }
+
+    /// Reopen a tab (at `url`, or where it is) in `container`. A view can't change its engine
+    /// profile, so a new tab takes its place and the old one closes.
+    fn reopen_in_container(
+        &mut self,
+        win_id: WindowId,
+        tab_id: TabId,
+        url: Option<String>,
+        container: Option<String>,
+    ) {
+        let Some(state) = self
+            .windows
+            .get(&win_id)
+            .and_then(|w| w.tabs.get_tab_by_id(tab_id).cloned())
+        else {
+            return;
+        };
+        let url = url.unwrap_or(state.url);
+        let Some(new_id) = self.create_tab_in(win_id, url, true, container) else {
+            return;
+        };
+        if let Some(win) = self.windows.get_mut(&win_id) {
+            let pos = |id: TabId| win.tabs.tabs().iter().position(|t| t.id == id);
+            if let (Some(old), Some(new)) = (pos(tab_id), pos(new_id)) {
+                let _ = win.tabs.reorder_tab(new, old);
+            }
+            let _ = win.tabs.close_workspace_tab(tab_id, now_secs());
+            win.ui_dirty = true;
+        }
+        self.sync_window_views(win_id);
+    }
+
+    /// Every container a tab can be in right now, for the tab strip's marks.
+    fn containers_for_ui(&self) -> Vec<shoji_core::settings::Container> {
+        let mut all = self.settings.containers.list.clone();
+        let temps = self
+            .windows
+            .values()
+            .flat_map(|w| w.tabs.all_tabs().filter_map(|t| t.container.clone()))
+            .filter(|c| is_temp_container(c));
+        for id in temps {
+            if !all.iter().any(|c| c.id == id) {
+                all.push(shoji_core::settings::Container {
+                    id,
+                    name: "Temporary".into(),
+                    color: "#8a8a8a".into(),
+                });
+            }
+        }
+        all
     }
 
     fn create_tab(&mut self, win_id: WindowId, url: Option<String>) {
@@ -2731,6 +2841,19 @@ impl BrowserApp {
     }
 
     fn create_tab_at(&mut self, win_id: WindowId, url: String, navigate: bool) -> Option<TabId> {
+        // A site with a container rule opens in that container.
+        let container = extract_host(&url)
+            .and_then(|h| self.settings.containers.for_host(&h).map(str::to_owned));
+        self.create_tab_in(win_id, url, navigate, container)
+    }
+
+    fn create_tab_in(
+        &mut self,
+        win_id: WindowId,
+        url: String,
+        navigate: bool,
+        container: Option<String>,
+    ) -> Option<TabId> {
         let tab_id = TabId(
             self.tab_ids
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst),
@@ -2738,7 +2861,7 @@ impl BrowserApp {
         let win = self.windows.get(&win_id)?;
         let window = win.window.clone();
         let rect = win.content_bounds();
-        let tab = self.build_view(&window, tab_id, &url, rect, navigate)?;
+        let tab = self.build_view(&window, tab_id, &url, rect, navigate, container.clone())?;
         let win = self.windows.get_mut(&win_id)?;
         let title = match url.as_str() {
             "shoji://settings" => "Settings",
@@ -2764,6 +2887,7 @@ impl BrowserApp {
                 group: None,
                 pinned: false,
                 workspace,
+                container,
             },
             None,
         );
@@ -2786,6 +2910,7 @@ impl BrowserApp {
     /// Reconcile `win.views` with `win.tabs`: drop views for removed tabs, build views for any
     /// newly created tabs, hide & suspend tabs in inactive workspaces, and show the active tab(s).
     fn sync_window_views(&mut self, win_id: WindowId) {
+        let mut closing_temp: Vec<Tab> = Vec::new();
         let (window, rect, to_build, removed, inactive_ids, shown) = {
             let Some(win) = self.windows.get_mut(&win_id) else {
                 return;
@@ -2806,7 +2931,11 @@ impl BrowserApp {
                 }
                 win.reader.remove(id);
                 self.last_upgrade.remove(id);
-                win.views.remove(id);
+                if let Some(tab) = win.views.remove(id) {
+                    if tab.container.as_deref().is_some_and(is_temp_container) {
+                        closing_temp.push(tab);
+                    }
+                }
                 shield::hub().forget_tab(id.0);
             }
             let mut to_build = Vec::new();
@@ -2817,7 +2946,7 @@ impl BrowserApp {
                     } else {
                         t.url.clone()
                     };
-                    to_build.push((t.id, url));
+                    to_build.push((t.id, url, t.container.clone()));
                 }
             }
             let inactive_ids: HashSet<TabId> =
@@ -2846,9 +2975,21 @@ impl BrowserApp {
         }
         // Only what is about to show loads now; every other tab loads the first time it is shown,
         // so restoring a long session doesn't fetch every page at once.
-        for (id, url) in to_build {
+        // A temporary container goes with its last tab: its cookies and storage are deleted.
+        for tab in closing_temp {
+            let c = tab.container.clone().unwrap_or_default();
+            let in_use = self.windows.values().any(|w| {
+                w.tabs
+                    .all_tabs()
+                    .any(|t| t.container.as_deref() == Some(c.as_str()))
+            });
+            if !in_use {
+                webview::delete_profile(&tab.view);
+            }
+        }
+        for (id, url, container) in to_build {
             let now = shown.contains(&id);
-            if let Some(mut tab) = self.build_view(&window, id, &url, rect, now) {
+            if let Some(mut tab) = self.build_view(&window, id, &url, rect, now, container) {
                 if !now {
                     tab.pending_url = Some(url.clone());
                 }
@@ -2994,7 +3135,11 @@ impl BrowserApp {
         }
         let window = win.window.clone();
         let rect = win.rect_for(active);
-        if let Some(tab) = self.build_view(&window, active, &target, rect, true) {
+        let container = win
+            .tabs
+            .get_tab_by_id(active)
+            .and_then(|t| t.container.clone());
+        if let Some(tab) = self.build_view(&window, active, &target, rect, true, container) {
             if let Some(win) = self.windows.get_mut(&win_id) {
                 win.views.insert(active, tab);
                 win.show_tab(active);
@@ -3781,6 +3926,49 @@ impl BrowserApp {
                 None,
             ));
         }
+        for c in &self.settings.containers.list {
+            if tab.container.as_deref() != Some(c.id.as_str()) {
+                out.push(item(
+                    format!("ctr:{}:{}", tab_id.0, c.id),
+                    &format!("Open in container: {}", c.name),
+                    Some(c.color.clone()),
+                ));
+            }
+        }
+        out.push(item(
+            format!("ctr:{}:temp", tab_id.0),
+            "Open in a temporary container",
+            None,
+        ));
+        if tab.container.is_some() {
+            out.push(item(
+                format!("ctr:{}:", tab_id.0),
+                "Open outside containers",
+                None,
+            ));
+        }
+        if let (Some(c), Some(host)) = (
+            tab.container
+                .as_deref()
+                .and_then(|c| self.settings.containers.get(c)),
+            extract_host(&tab.url),
+        ) {
+            let site = shoji_core::settings::extract_domain(&host);
+            let site = site.trim_start_matches("www.");
+            if self.settings.containers.for_host(site) == Some(c.id.as_str()) {
+                out.push(item(
+                    format!("ctr-never:{}", tab_id.0),
+                    &format!("Stop always opening {site} in {}", c.name),
+                    None,
+                ));
+            } else {
+                out.push(item(
+                    format!("ctr-always:{}", tab_id.0),
+                    &format!("Always open {site} in {}", c.name),
+                    Some(c.color.clone()),
+                ));
+            }
+        }
         out.push(item(
             format!("pin:{}", tab_id.0),
             if tab.pinned { "Unpin tab" } else { "Pin tab" },
@@ -4194,6 +4382,35 @@ impl BrowserApp {
                         self.bookmark_page(win_id, &t.url, &t.title);
                     }
                 }
+            }
+            "ctr" => {
+                if let Some(t) = tab {
+                    let container = match b {
+                        "" => None,
+                        "temp" => Some(self.new_temp_container()),
+                        id if self.settings.containers.get(id).is_some() => Some(id.to_string()),
+                        _ => return,
+                    };
+                    self.reopen_in_container(win_id, t, None, container);
+                }
+            }
+            "ctr-always" | "ctr-never" => {
+                let Some(state) = tab.and_then(|t| {
+                    self.windows
+                        .get(&win_id)
+                        .and_then(|w| w.tabs.get_tab_by_id(t).cloned())
+                }) else {
+                    return;
+                };
+                let Some(host) = extract_host(&state.url) else {
+                    return;
+                };
+                let site = shoji_core::settings::extract_domain(&host);
+                let rule = (name == "ctr-always")
+                    .then_some(state.container)
+                    .flatten()
+                    .filter(|c| !is_temp_container(c));
+                self.update_settings(|s| s.containers.set_rule(&site, rule.as_deref()));
             }
             "pin" => {
                 if let (Some(t), Some(win)) = (tab, self.windows.get_mut(&win_id)) {
@@ -6879,6 +7096,7 @@ impl BrowserApp {
     fn flush(&mut self) {
         let proxy = &self.proxy;
         let app_event = std::mem::take(&mut self.sync_pending);
+        let containers = self.containers_for_ui();
         for win in self.windows.values_mut() {
             // Page-derived state below only changes through app events or a strip change; a
             // batch of mouse moves skips it.
@@ -6896,6 +7114,7 @@ impl BrowserApp {
                     workspaces: win.tabs.workspaces().to_vec(),
                     active_workspace_id: win.tabs.active_workspace_id(),
                     inactive_tabs: win.tabs.inactive_tabs().to_vec(),
+                    containers: containers.clone(),
                 };
                 let title = match win.tabs.active_tab() {
                     Some(t) if !is_internal(&t.url) && !t.title.is_empty() => {
@@ -7124,12 +7343,12 @@ impl BrowserApp {
             win.overlay_open = false;
             win.overlay_ready = false;
             let window = win.window.clone();
-            let tabs: Vec<(TabId, String)> = win
+            let tabs: Vec<(TabId, String, Option<String>)> = win
                 .tabs
                 .tabs()
                 .iter()
                 .chain(win.tabs.inactive_tabs().iter())
-                .map(|t| (t.id, t.url.clone()))
+                .map(|t| (t.id, t.url.clone(), t.container.clone()))
                 .collect();
             let active = win.tabs.active_tab_id();
             let shown: HashSet<TabId> = active
@@ -7140,9 +7359,9 @@ impl BrowserApp {
             win.chrome = None;
             let rect = win.content_bounds();
             // As on restore: only the tabs on screen load now, the rest when first shown.
-            for (id, url) in tabs {
+            for (id, url, container) in tabs {
                 let now = shown.contains(&id);
-                if let Some(mut tab) = self.build_view(&window, id, &url, rect, now) {
+                if let Some(mut tab) = self.build_view(&window, id, &url, rect, now, container) {
                     if !now {
                         tab.pending_url = Some(url);
                     }
@@ -7545,6 +7764,26 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                     ));
                 }
             },
+            BrowserEvent::OpenInContainer {
+                tab_id,
+                url,
+                container,
+            } => {
+                let Some(win_id) = self.owner(tab_id) else {
+                    return;
+                };
+                // A fresh tab (nothing to go back to) moves; otherwise the site opens beside it.
+                let fresh = self
+                    .windows
+                    .get(&win_id)
+                    .and_then(|w| w.tabs.get_tab_by_id(tab_id))
+                    .is_some_and(|t| !t.can_go_back);
+                if fresh {
+                    self.reopen_in_container(win_id, tab_id, Some(url), container);
+                } else {
+                    self.create_tab_in(win_id, url, true, container);
+                }
+            }
             BrowserEvent::TabCrashed(tab_id, kind) => {
                 let runtime = self
                     .pages
@@ -8334,6 +8573,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let _ = std::fs::create_dir_all(&webview_data);
+    // Temporary containers left behind by a crash: their data was never meant to outlive them.
+    {
+        let dir = webview_data.join("EBWebView");
+        for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            // The engine keeps profile "<name>" in a folder named "WV2Profile_<name>".
+            if e.file_name()
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .trim_start_matches("wv2profile_")
+                .starts_with(&container_profile(shoji_core::settings::TEMP_CONTAINER))
+            {
+                let _ = std::fs::remove_dir_all(e.path());
+            }
+        }
+    }
     // SAFETY: set before any other thread exists.
     unsafe { std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &webview_data) };
     let startup_settings = Settings::load_from_path(&data_dir.join("settings.json"));
