@@ -3,7 +3,7 @@ use shoji_brand::{theme::TypeProfile, Accent};
 use std::path::{Path, PathBuf};
 
 /// The newest set of default choices; see `Settings::load_from_path`.
-const CURRENT_DEFAULTS_REV: u32 = 2;
+const CURRENT_DEFAULTS_REV: u32 = 3;
 
 /// A file with no `defaults_rev` predates them all.
 fn unset_rev() -> u32 {
@@ -292,6 +292,9 @@ pub struct PrivacySettings {
     pub strict_tracking_prevention: bool,
     /// Refuse cookies that a page's embedded sites try to set (read when the engine starts)
     pub block_third_party_cookies: bool,
+    /// Fingerprinting protection: "off", "standard" (noise in canvas, WebGL and audio reads,
+    /// fewer hardware details) or "strict" (also hides the GPU's name and caps memory)
+    pub fingerprinting: String,
     /// Offer to save and fill passwords (stored by the engine, encrypted for this Windows user)
     pub save_passwords: bool,
     /// What to do with open tabs after a crash or force close: "ask", "always" or "never"
@@ -395,7 +398,8 @@ impl Default for PrivacySettings {
             persistent_sites: Vec::new(),
             https_only: true,
             strict_tracking_prevention: true,
-            block_third_party_cookies: false,
+            block_third_party_cookies: true,
+            fingerprinting: "standard".to_string(),
             save_passwords: true,
             restore_session: "ask".to_string(),
         }
@@ -509,6 +513,15 @@ impl Settings {
     }
 
     /// The shield mode for a page on `host`: its configured mode, or "off" for paused sites.
+    /// The fingerprinting protection that applies on `host`: none where the shield is paused.
+    pub fn fingerprint_mode_for(&self, host: &str) -> &str {
+        if self.shield_mode_for(host) == "off" && self.shield.mode != "off" {
+            "off"
+        } else {
+            self.privacy.fingerprinting.as_str()
+        }
+    }
+
     pub fn shield_mode_for(&self, host: &str) -> &str {
         let host = extract_domain(host);
         let paused = self.shield.paused_sites.iter().any(|p| {
@@ -594,6 +607,12 @@ impl Settings {
             "ask" | "always" | "never"
         ) {
             self.privacy.restore_session = "ask".to_string();
+        }
+        if !matches!(
+            self.privacy.fingerprinting.as_str(),
+            "off" | "standard" | "strict"
+        ) {
+            self.privacy.fingerprinting = "standard".to_string();
         }
         if !matches!(self.shield.mode.as_str(), "off" | "standard" | "aggressive") {
             self.shield.mode = "standard".to_string();
@@ -715,13 +734,17 @@ impl Settings {
         // Files written before these defaults changed carry the old values, which nobody chose:
         // downloads go straight to the Downloads folder, search suggestions are on (unless
         // Private mode was picked in setup) and extensions are available.
-        if settings.defaults_rev < CURRENT_DEFAULTS_REV {
+        if settings.defaults_rev < 2 {
             settings.downloads.ask_where_to_save = false;
             settings.appearance.search_suggestions =
                 !(settings.privacy.mode_chosen && settings.privacy.ephemeral_default);
             settings.extensions.enabled = true;
-            settings.defaults_rev = CURRENT_DEFAULTS_REV;
         }
+        // 0.1.6: third-party cookies are blocked, as in Brave, now that the switch is measured.
+        if settings.defaults_rev < 3 {
+            settings.privacy.block_third_party_cookies = true;
+        }
+        settings.defaults_rev = CURRENT_DEFAULTS_REV;
         settings.normalize();
         settings
     }

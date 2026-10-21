@@ -23,6 +23,25 @@ use wry::{WebView, WebViewExtWindows};
 /// Looks up the shield mode that applies to a page URL (reads the live settings).
 pub type ModeFor = Arc<dyn Fn(&str) -> Mode + Send + Sync>;
 
+/// Fingerprinting protection for a page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fp {
+    Off,
+    Standard,
+    Strict,
+}
+
+pub fn parse_fp(s: &str) -> Fp {
+    match s {
+        "off" => Fp::Off,
+        "strict" => Fp::Strict,
+        _ => Fp::Standard,
+    }
+}
+
+/// Looks up the fingerprinting protection that applies to a page URL.
+pub type FpFor = Arc<dyn Fn(&str) -> Fp + Send + Sync>;
+
 pub fn parse_mode(s: &str) -> Mode {
     match s {
         "off" => Mode::Off,
@@ -651,7 +670,13 @@ fn decode_data_url(url: &str) -> Option<(String, Vec<u8>)> {
 
 /// Subscribe a tab to the shield: block requests, and register the page's cosmetic filters
 /// and scriptlets before each navigation commits. Returns whether requests are hooked now.
-pub fn attach(webview: &WebView, shield: Shield, mode_for: ModeFor, tab_id: TabId) -> bool {
+pub fn attach(
+    webview: &WebView,
+    shield: Shield,
+    mode_for: ModeFor,
+    fp_for: FpFor,
+    tab_id: TabId,
+) -> bool {
     let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
         return false;
     };
@@ -893,6 +918,14 @@ pub fn attach(webview: &WebView, shield: Shield, mode_for: ModeFor, tab_id: TabI
                 hub().reset_tab(tab_id.0);
             }
             let mut script = cosmetic_script(&shield, &mode_for, &url);
+            if let Some(fp) = fingerprint_script(&url, fp_for(&url)) {
+                // First, so pages read the protected values from their very first script.
+                script = Some(format!(
+                    "{fp}
+{}",
+                    script.as_deref().unwrap_or("")
+                ));
+            }
             if let Some(fix) = crate::darkfixes::script_for(&url) {
                 // The site's dark-mode fix rides along with the page's own scripts.
                 script = Some(format!(
@@ -1151,6 +1184,44 @@ fn js_data(v: &serde_json::Value) -> String {
         .replace('\u{2028}', "\\u2028")
         .replace('\u{2029}', "\\u2029")
 }
+/// The in-page fingerprinting protection (see `ui/fingerprint.js`).
+const FINGERPRINT: &str = include_str!("../ui/fingerprint.js");
+
+/// A random key for this run of Shoji: fingerprinting noise is stable for a site until Shoji
+/// restarts, and never the same between sites.
+fn session_key() -> u64 {
+    static KEY: OnceLock<u64> = OnceLock::new();
+    *KEY.get_or_init(|| {
+        let mut b = [0u8; 8];
+        let _ = ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut b);
+        u64::from_le_bytes(b)
+    })
+}
+
+/// The seed a page's noise comes from: its site (registrable domain) and the session key, so
+/// `a.example.com` and `b.example.com` agree and `other.com` differs.
+fn fingerprint_seed(host: &str, key: u64) -> u32 {
+    use std::hash::{Hash, Hasher};
+    let site = psl::domain_str(host).unwrap_or(host);
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (key, site).hash(&mut h);
+    h.finish() as u32
+}
+
+/// Document-start script that adds fingerprinting noise on `url` (runs in every frame, seeded
+/// from the top page's site, as Brave does).
+fn fingerprint_script(url: &str, fp: Fp) -> Option<String> {
+    if fp == Fp::Off || !is_web(url) {
+        return None;
+    }
+    let host = crate::extract_host(url)?;
+    let data = serde_json::json!({
+        "seed": fingerprint_seed(&host, session_key()),
+        "strict": fp == Fp::Strict,
+    });
+    Some(FINGERPRINT.replace("__SHOJI_FP__", &js_data(&data)))
+}
+
 /// Global Privacy Control as a page-visible signal (the `Sec-GPC` header is sent separately).
 const GPC_SCRIPT: &str = "try{Object.defineProperty(Navigator.prototype,'globalPrivacyControl',{get:function(){return true},configurable:true,enumerable:true})}catch(e){}";
 
