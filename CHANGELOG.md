@@ -2,18 +2,6 @@
 
 ## [Unreleased]
 
-### Added
-- Cookie notices are answered with "Reject all" where a site offers it (Consent-O-Matic's rules).
-- Facebook, X and LinkedIn embeds are blocked; their sign-in buttons still work.
-- The shield dropdown has per-site switches for trackers and ads, fingerprinting, cookie notices and popups, with counts.
-- "Lower shields for this site?" after a page is reloaded twice in a minute with something blocked.
-- Forget a site when its tabs close, from the "This site" dropdown.
-- Clear cookies and site data when Shoji closes, except kept sites.
-- Notification requests made before you click anything are refused quietly, with a mark in the address bar to allow them.
-
-### Changed
-- Fingerprinting protection also covers battery status, device names and speech voices; Strict also rounds screen sizes, limits font checks and generalises client hints.
-
 ## [0.1.6] - 2026-10-21
 
 ### Added
