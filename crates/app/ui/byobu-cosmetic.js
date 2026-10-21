@@ -1,8 +1,10 @@
 // Byobu page runtime: applies a site's cosmetic filters. Injected at document start with the
-// payload below, only in frames whose hostname matches the page it was computed for.
+// payload below, only in frames whose hostname matches the payload's host, and once per frame
+// (a frame may get it at document start and again as a fallback once its DOM is ready).
 (function (P) {
   'use strict';
-  if (location.hostname !== P.host) return;
+  if (!P || location.hostname !== P.host || window.__byobu) return;
+  Object.defineProperty(window, '__byobu', { value: true });
   var doc = document;
   var done = new WeakSet();
 

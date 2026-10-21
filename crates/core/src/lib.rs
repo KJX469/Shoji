@@ -4,6 +4,7 @@
 //! environment detection, and (on Windows) shell integration helpers shared by the
 //! browser and its installer.
 
+pub mod bounce;
 pub mod env;
 pub mod import;
 pub mod ipc;

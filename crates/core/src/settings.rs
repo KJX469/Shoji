@@ -3,7 +3,7 @@ use shoji_brand::{theme::TypeProfile, Accent};
 use std::path::{Path, PathBuf};
 
 /// The newest set of default choices; see `Settings::load_from_path`.
-const CURRENT_DEFAULTS_REV: u32 = 2;
+const CURRENT_DEFAULTS_REV: u32 = 3;
 
 /// A file with no `defaults_rev` predates them all.
 fn unset_rev() -> u32 {
@@ -32,6 +32,114 @@ pub struct Settings {
     pub permissions: PermissionSettings,
     pub shield: ShieldSettings,
     pub extensions: ExtensionSettings,
+    pub containers: ContainerSettings,
+}
+
+/// Containers: named sets of cookies and storage, so a site in one can't see the others (signed in
+/// to work in one, personal in another). Each container is its own engine profile.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ContainerSettings {
+    pub list: Vec<Container>,
+    /// Sites that always open in a container
+    pub sites: Vec<SiteContainer>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Container {
+    /// Stable id; also names the engine profile, so it is never reused for another container
+    pub id: String,
+    pub name: String,
+    /// `#rrggbb`
+    pub color: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SiteContainer {
+    /// Registrable domain or host, e.g. `github.com`
+    pub site: String,
+    pub container: String,
+}
+
+/// Temporary containers are made per tab and thrown away with it; their ids start with this.
+pub const TEMP_CONTAINER: &str = "temp-";
+
+impl Default for ContainerSettings {
+    fn default() -> Self {
+        let c = |id: &str, name: &str, color: &str| Container {
+            id: id.into(),
+            name: name.into(),
+            color: color.into(),
+        };
+        Self {
+            list: vec![
+                c("work", "Work", "#5b8cc4"),
+                c("personal", "Personal", "#6aa37a"),
+                c("shopping", "Shopping", "#d29b55"),
+                c("banking", "Banking", "#c46a6a"),
+            ],
+            sites: Vec::new(),
+        }
+    }
+}
+
+impl ContainerSettings {
+    pub fn get(&self, id: &str) -> Option<&Container> {
+        self.list.iter().find(|c| c.id == id)
+    }
+
+    /// The container `host` always opens in, if a rule covers it (the host or a parent domain).
+    pub fn for_host(&self, host: &str) -> Option<&str> {
+        let host = host.trim_start_matches("www.");
+        self.sites
+            .iter()
+            .filter(|r| self.get(&r.container).is_some())
+            .find(|r| {
+                host == r.site
+                    || host
+                        .strip_suffix(r.site.as_str())
+                        .is_some_and(|rest| rest.ends_with('.'))
+            })
+            .map(|r| r.container.as_str())
+    }
+
+    /// Always open `site` in `container` (`None` removes the rule).
+    pub fn set_rule(&mut self, site: &str, container: Option<&str>) {
+        let site = site.trim_start_matches("www.").to_string();
+        self.sites.retain(|r| r.site != site);
+        if let Some(c) = container {
+            self.sites.push(SiteContainer {
+                site,
+                container: c.to_string(),
+            });
+        }
+    }
+
+    /// Keep ids unique and safe as profile names, and colours well-formed.
+    fn normalize(&mut self) {
+        let mut seen = std::collections::HashSet::new();
+        self.list.retain(|c| {
+            !c.id.is_empty()
+                && c.id.len() <= 40
+                && !c.id.starts_with(TEMP_CONTAINER)
+                && c.id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+                && seen.insert(c.id.clone())
+        });
+        for c in &mut self.list {
+            let ok = c.color.len() == 7
+                && c.color.starts_with('#')
+                && c.color[1..].bytes().all(|b| b.is_ascii_hexdigit());
+            if !ok {
+                c.color = "#8a8a8a".into();
+            }
+            if c.name.trim().is_empty() {
+                c.name = c.id.clone();
+            }
+            c.name = c.name.chars().take(40).collect();
+        }
+    }
 }
 
 /// Browser extensions (unpacked Chromium extensions loaded through the engine). Read when the
@@ -292,6 +400,9 @@ pub struct PrivacySettings {
     pub strict_tracking_prevention: bool,
     /// Refuse cookies that a page's embedded sites try to set (read when the engine starts)
     pub block_third_party_cookies: bool,
+    /// Fingerprinting protection: "off", "standard" (noise in canvas, WebGL and audio reads,
+    /// fewer hardware details) or "strict" (also hides the GPU's name and caps memory)
+    pub fingerprinting: String,
     /// Offer to save and fill passwords (stored by the engine, encrypted for this Windows user)
     pub save_passwords: bool,
     /// What to do with open tabs after a crash or force close: "ask", "always" or "never"
@@ -354,6 +465,7 @@ impl Default for Settings {
             permissions: PermissionSettings::default(),
             shield: ShieldSettings::default(),
             extensions: ExtensionSettings::default(),
+            containers: ContainerSettings::default(),
         }
     }
 }
@@ -395,7 +507,8 @@ impl Default for PrivacySettings {
             persistent_sites: Vec::new(),
             https_only: true,
             strict_tracking_prevention: true,
-            block_third_party_cookies: false,
+            block_third_party_cookies: true,
+            fingerprinting: "standard".to_string(),
             save_passwords: true,
             restore_session: "ask".to_string(),
         }
@@ -509,6 +622,15 @@ impl Settings {
     }
 
     /// The shield mode for a page on `host`: its configured mode, or "off" for paused sites.
+    /// The fingerprinting protection that applies on `host`: none where the shield is paused.
+    pub fn fingerprint_mode_for(&self, host: &str) -> &str {
+        if self.shield_mode_for(host) == "off" && self.shield.mode != "off" {
+            "off"
+        } else {
+            self.privacy.fingerprinting.as_str()
+        }
+    }
+
     pub fn shield_mode_for(&self, host: &str) -> &str {
         let host = extract_domain(host);
         let paused = self.shield.paused_sites.iter().any(|p| {
@@ -594,6 +716,13 @@ impl Settings {
             "ask" | "always" | "never"
         ) {
             self.privacy.restore_session = "ask".to_string();
+        }
+        self.containers.normalize();
+        if !matches!(
+            self.privacy.fingerprinting.as_str(),
+            "off" | "standard" | "strict"
+        ) {
+            self.privacy.fingerprinting = "standard".to_string();
         }
         if !matches!(self.shield.mode.as_str(), "off" | "standard" | "aggressive") {
             self.shield.mode = "standard".to_string();
@@ -715,13 +844,17 @@ impl Settings {
         // Files written before these defaults changed carry the old values, which nobody chose:
         // downloads go straight to the Downloads folder, search suggestions are on (unless
         // Private mode was picked in setup) and extensions are available.
-        if settings.defaults_rev < CURRENT_DEFAULTS_REV {
+        if settings.defaults_rev < 2 {
             settings.downloads.ask_where_to_save = false;
             settings.appearance.search_suggestions =
                 !(settings.privacy.mode_chosen && settings.privacy.ephemeral_default);
             settings.extensions.enabled = true;
-            settings.defaults_rev = CURRENT_DEFAULTS_REV;
         }
+        // 0.1.6: third-party cookies are blocked, as in Brave, now that the switch is measured.
+        if settings.defaults_rev < 3 {
+            settings.privacy.block_third_party_cookies = true;
+        }
+        settings.defaults_rev = CURRENT_DEFAULTS_REV;
         settings.normalize();
         settings
     }

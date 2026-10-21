@@ -1,6 +1,6 @@
 [package]
 name = "shoji"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 authors = ["Shoji Contributors"]
 description = "A paper-thin, privacy-first desktop browser for Windows"
@@ -17,6 +17,7 @@ wry = { version = "0.57", features = ["devtools"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
 ring = "0.17"
+psl = "2"
 zip = { version = "9", default-features = false, features = ["deflate"] }
 ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }
 
@@ -40,6 +41,9 @@ windows = { version = "0.62.2", features = [
     "Win32_Foundation",
     "Win32_System_Memory",
     "Win32_Security_Cryptography",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Kernel",
+    "Win32_Storage_FileSystem",
 ] }
 
 [build-dependencies]

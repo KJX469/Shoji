@@ -442,6 +442,7 @@ fn test_ipc_serde_roundtrip() {
         workspaces: vec![],
         active_workspace_id: 1,
         inactive_tabs: vec![],
+        containers: vec![],
     };
     let json = serde_json::to_string(&sync).unwrap();
     assert_eq!(
@@ -1284,6 +1285,71 @@ fn test_new_defaults_apply_to_old_files_but_not_to_private_setup() {
     assert!(!back.appearance.search_suggestions);
     assert!(back.downloads.ask_where_to_save);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_third_party_cookies_and_fingerprinting_default_on_once() {
+    let dir = std::env::temp_dir().join(format!("shoji_rev3_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("settings.json");
+    let fresh = Settings::default();
+    assert!(fresh.privacy.block_third_party_cookies);
+    assert_eq!(fresh.privacy.fingerprinting, "standard");
+
+    // A 0.1.5 file carries the old "off"; it is turned on once.
+    std::fs::write(
+        &path,
+        r#"{"defaults_rev":2,"privacy":{"block_third_party_cookies":false}}"#,
+    )
+    .unwrap();
+    let mut s = Settings::load_from_path(&path);
+    assert!(s.privacy.block_third_party_cookies);
+    assert_eq!(s.privacy.fingerprinting, "standard");
+
+    // Turned off after that, it stays off.
+    s.privacy.block_third_party_cookies = false;
+    s.privacy.fingerprinting = "nonsense".into();
+    s.save_to_path(&path).unwrap();
+    let back = Settings::load_from_path(&path);
+    assert!(!back.privacy.block_third_party_cookies);
+    assert_eq!(back.privacy.fingerprinting, "standard");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_container_rules_cover_subdomains_and_skip_unknown_containers() {
+    let mut s = Settings::default();
+    s.containers.set_rule("www.github.com", Some("work"));
+    assert_eq!(s.containers.for_host("github.com"), Some("work"));
+    assert_eq!(s.containers.for_host("gist.github.com"), Some("work"));
+    assert_eq!(s.containers.for_host("notgithub.com"), None);
+    s.containers.set_rule("bank.example", Some("gone"));
+    assert_eq!(s.containers.for_host("bank.example"), None);
+    s.containers.set_rule("github.com", None);
+    assert_eq!(s.containers.for_host("github.com"), None);
+    // Ids become engine profile names: odd or duplicate ones are dropped on load.
+    s.containers.list.push(shoji_core::settings::Container {
+        id: "../evil".into(),
+        name: "x".into(),
+        color: "red".into(),
+    });
+    s.containers.list.push(s.containers.list[0].clone());
+    let path = std::env::temp_dir().join(format!("shoji_ctr_{}.json", std::process::id()));
+    s.save_to_path(&path).unwrap();
+    let back = Settings::load_from_path(&path);
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(back.containers.list.len(), 4);
+}
+
+#[test]
+fn test_fingerprinting_follows_a_paused_shield_only() {
+    let mut s = Settings::default();
+    s.privacy.fingerprinting = "strict".into();
+    s.shield.paused_sites = vec!["bank.example".into()];
+    assert_eq!(s.fingerprint_mode_for("www.bank.example"), "off");
+    assert_eq!(s.fingerprint_mode_for("news.example"), "strict");
+    s.shield.mode = "off".into();
+    assert_eq!(s.fingerprint_mode_for("news.example"), "strict");
 }
 
 #[test]

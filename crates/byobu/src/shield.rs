@@ -7,7 +7,13 @@ use adblock::request::Request;
 use adblock::resources::{PermissionMask, Resource};
 use adblock::Engine;
 use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
+use std::path::Path;
 use std::sync::{Arc, RwLock};
+
+/// The compiled engine kept between runs, and the key of what it was compiled from.
+const SAVED_ENGINE: &str = "engine.dat";
+const SAVED_KEY: &str = "engine.key";
 
 /// How firmly the shield acts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -93,6 +99,38 @@ impl Default for Shield {
     }
 }
 
+/// Compile list texts (`(text, trusted)`) into a matcher.
+fn compile(lists: Vec<(String, bool)>) -> Engine {
+    let mut set = FilterSet::new(true);
+    for (text, trusted) in lists {
+        let permissions = if trusted {
+            PermissionMask::from_bits(1)
+        } else {
+            PermissionMask::default()
+        };
+        set.add_filter_list(
+            text,
+            ParseOptions {
+                permissions,
+                ..ParseOptions::default()
+            },
+        );
+    }
+    Engine::new_with_filter_set(set)
+}
+
+/// Identifies a set of lists, and the build of Shoji that compiled them.
+fn engine_key(lists: &[(String, bool)]) -> String {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    lists.hash(&mut h);
+    format!(
+        "{} {:016x} {}",
+        env!("CARGO_PKG_VERSION"),
+        h.finish(),
+        lists.len()
+    )
+}
+
 impl Shield {
     pub fn new() -> Self {
         Self {
@@ -109,25 +147,43 @@ impl Shield {
     /// Swap in an engine built from raw list texts. Heavy: call off the UI thread.
     /// `lists` is `(text, trusted)`. Returns false when there was nothing to load.
     pub fn load(&self, lists: Vec<(String, bool)>, resource_jsons: &[String]) -> bool {
+        self.load_saved(lists, resource_jsons, None)
+    }
+
+    /// [`Shield::load`], reusing the engine compiled from the same lists last time when `dir`
+    /// holds one, and saving it there otherwise. Loading a saved engine takes milliseconds where
+    /// compiling takes seconds, so pages opened right after start are protected.
+    pub fn load_saved(
+        &self,
+        lists: Vec<(String, bool)>,
+        resource_jsons: &[String],
+        dir: Option<&Path>,
+    ) -> bool {
         if lists.is_empty() {
             return false;
         }
-        let mut set = FilterSet::new(true);
-        for (text, trusted) in lists {
-            let permissions = if trusted {
-                PermissionMask::from_bits(1)
-            } else {
-                PermissionMask::default()
-            };
-            set.add_filter_list(
-                text,
-                ParseOptions {
-                    permissions,
-                    ..ParseOptions::default()
-                },
-            );
-        }
-        let mut engine = Engine::new_with_filter_set(set);
+        let key = engine_key(&lists);
+        let saved = dir.and_then(|d| {
+            let same = std::fs::read_to_string(d.join(SAVED_KEY)).ok()? == key;
+            let data = std::fs::read(d.join(SAVED_ENGINE)).ok().filter(|_| same)?;
+            let mut engine = Engine::default();
+            engine.deserialize(&data).ok()?;
+            Some(engine)
+        });
+        let mut engine = match saved {
+            Some(engine) => engine,
+            None => {
+                let engine = compile(lists);
+                if let Some(d) = dir {
+                    // Key last, so a half-written engine is never taken for a good one.
+                    let _ = std::fs::remove_file(d.join(SAVED_KEY));
+                    if std::fs::write(d.join(SAVED_ENGINE), engine.serialize()).is_ok() {
+                        let _ = std::fs::write(d.join(SAVED_KEY), &key);
+                    }
+                }
+                engine
+            }
+        };
         let mut seen = std::collections::HashSet::new();
         let mut resources: Vec<Resource> = Vec::new();
         for json in resource_jsons {
@@ -164,7 +220,7 @@ impl Shield {
             lists.push((own_rules.to_string(), true));
         }
         let n = lists.len();
-        if self.load(lists, &updater.resource_jsons()) {
+        if self.load_saved(lists, &updater.resource_jsons(), Some(updater.dir())) {
             n
         } else {
             0
@@ -382,6 +438,55 @@ mod tests {
             ),
             Decision::Allow
         );
+    }
+
+    #[test]
+    fn a_saved_engine_is_reused_until_the_lists_change() {
+        let dir = std::env::temp_dir().join(format!("byobu-saved-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let lists = || {
+            vec![(
+                "||ads.example^
+news.test##.banner
+"
+                .to_string(),
+                false,
+            )]
+        };
+        let blocks = |s: &Shield| {
+            s.check(
+                "https://ads.example/x.js",
+                "https://news.test/",
+                RequestKind::Script,
+                Mode::Standard,
+            ) == Decision::Block
+        };
+        assert!(Shield::new().load_saved(lists(), &[], Some(&dir)));
+        let key = std::fs::read_to_string(dir.join(SAVED_KEY)).unwrap();
+        let saved = std::fs::read(dir.join(SAVED_ENGINE)).unwrap();
+        // The same lists load the saved engine, which matches like a fresh one.
+        let s = Shield::new();
+        assert!(s.load_saved(lists(), &[], Some(&dir)));
+        assert!(blocks(&s));
+        assert!(s
+            .cosmetic("https://news.test/", Mode::Standard)
+            .hide
+            .contains(&".banner".into()));
+        assert_eq!(std::fs::read(dir.join(SAVED_ENGINE)).unwrap(), saved);
+        // A damaged file is compiled over, not trusted.
+        std::fs::write(dir.join(SAVED_ENGINE), b"junk").unwrap();
+        let s = Shield::new();
+        assert!(s.load_saved(lists(), &[], Some(&dir)));
+        assert!(blocks(&s));
+        // Different lists get a new key.
+        assert!(Shield::new().load_saved(
+            vec![("||other.example^".into(), false)],
+            &[],
+            Some(&dir)
+        ));
+        assert_ne!(std::fs::read_to_string(dir.join(SAVED_KEY)).unwrap(), key);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
