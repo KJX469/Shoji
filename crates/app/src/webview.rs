@@ -1102,6 +1102,22 @@ pub fn set_tracking_prevention(webview: &WebView, tracking: Tracking) {
     }
 }
 
+/// Delete the view's engine profile with all its data (a temporary container's). The engine
+/// closes the profile's views as it does.
+pub fn delete_profile(webview: &WebView) -> bool {
+    let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
+        return false;
+    };
+    let Ok(profile) = core
+        .cast::<ICoreWebView2_13>()
+        .and_then(|c| unsafe { c.Profile() })
+        .and_then(|p| p.cast::<ICoreWebView2Profile8>())
+    else {
+        return false;
+    };
+    unsafe { profile.Delete() }.is_ok()
+}
+
 /// Delete every saved login and autofill entry from the profile. The engine offers no way to
 /// list them, so this is the management Shoji can honestly provide.
 pub fn clear_saved_logins(webview: &WebView) -> bool {

@@ -32,6 +32,114 @@ pub struct Settings {
     pub permissions: PermissionSettings,
     pub shield: ShieldSettings,
     pub extensions: ExtensionSettings,
+    pub containers: ContainerSettings,
+}
+
+/// Containers: named sets of cookies and storage, so a site in one can't see the others (signed in
+/// to work in one, personal in another). Each container is its own engine profile.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ContainerSettings {
+    pub list: Vec<Container>,
+    /// Sites that always open in a container
+    pub sites: Vec<SiteContainer>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Container {
+    /// Stable id; also names the engine profile, so it is never reused for another container
+    pub id: String,
+    pub name: String,
+    /// `#rrggbb`
+    pub color: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SiteContainer {
+    /// Registrable domain or host, e.g. `github.com`
+    pub site: String,
+    pub container: String,
+}
+
+/// Temporary containers are made per tab and thrown away with it; their ids start with this.
+pub const TEMP_CONTAINER: &str = "temp-";
+
+impl Default for ContainerSettings {
+    fn default() -> Self {
+        let c = |id: &str, name: &str, color: &str| Container {
+            id: id.into(),
+            name: name.into(),
+            color: color.into(),
+        };
+        Self {
+            list: vec![
+                c("work", "Work", "#5b8cc4"),
+                c("personal", "Personal", "#6aa37a"),
+                c("shopping", "Shopping", "#d29b55"),
+                c("banking", "Banking", "#c46a6a"),
+            ],
+            sites: Vec::new(),
+        }
+    }
+}
+
+impl ContainerSettings {
+    pub fn get(&self, id: &str) -> Option<&Container> {
+        self.list.iter().find(|c| c.id == id)
+    }
+
+    /// The container `host` always opens in, if a rule covers it (the host or a parent domain).
+    pub fn for_host(&self, host: &str) -> Option<&str> {
+        let host = host.trim_start_matches("www.");
+        self.sites
+            .iter()
+            .filter(|r| self.get(&r.container).is_some())
+            .find(|r| {
+                host == r.site
+                    || host
+                        .strip_suffix(r.site.as_str())
+                        .is_some_and(|rest| rest.ends_with('.'))
+            })
+            .map(|r| r.container.as_str())
+    }
+
+    /// Always open `site` in `container` (`None` removes the rule).
+    pub fn set_rule(&mut self, site: &str, container: Option<&str>) {
+        let site = site.trim_start_matches("www.").to_string();
+        self.sites.retain(|r| r.site != site);
+        if let Some(c) = container {
+            self.sites.push(SiteContainer {
+                site,
+                container: c.to_string(),
+            });
+        }
+    }
+
+    /// Keep ids unique and safe as profile names, and colours well-formed.
+    fn normalize(&mut self) {
+        let mut seen = std::collections::HashSet::new();
+        self.list.retain(|c| {
+            !c.id.is_empty()
+                && c.id.len() <= 40
+                && !c.id.starts_with(TEMP_CONTAINER)
+                && c.id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+                && seen.insert(c.id.clone())
+        });
+        for c in &mut self.list {
+            let ok = c.color.len() == 7
+                && c.color.starts_with('#')
+                && c.color[1..].bytes().all(|b| b.is_ascii_hexdigit());
+            if !ok {
+                c.color = "#8a8a8a".into();
+            }
+            if c.name.trim().is_empty() {
+                c.name = c.id.clone();
+            }
+            c.name = c.name.chars().take(40).collect();
+        }
+    }
 }
 
 /// Browser extensions (unpacked Chromium extensions loaded through the engine). Read when the
@@ -357,6 +465,7 @@ impl Default for Settings {
             permissions: PermissionSettings::default(),
             shield: ShieldSettings::default(),
             extensions: ExtensionSettings::default(),
+            containers: ContainerSettings::default(),
         }
     }
 }
@@ -608,6 +717,7 @@ impl Settings {
         ) {
             self.privacy.restore_session = "ask".to_string();
         }
+        self.containers.normalize();
         if !matches!(
             self.privacy.fingerprinting.as_str(),
             "off" | "standard" | "strict"

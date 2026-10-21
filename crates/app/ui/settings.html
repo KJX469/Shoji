@@ -75,6 +75,7 @@
     .seg button[aria-checked="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px var(--line-strong); }
 
     .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 9px; }
     .chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 6px 0 10px; border-radius: 7px; background: var(--tint-soft); border: 1px solid var(--line); font-size: 12px; }
     .chip button { display: grid; place-items: center; width: 18px; height: 18px; border: 0; border-radius: 5px; background: none; color: var(--ink-3); cursor: pointer; }
     .chip button:hover { background: var(--press); color: var(--danger); }
@@ -250,6 +251,14 @@
             <option value="strict">Strict</option>
             <option value="off">Off</option>
           </select>
+        </div>
+        <div class="row stack">
+          <div class="what"><b>Containers</b><small>Each keeps its own cookies and storage, so sites in one can't see the others. Open a tab in one from the tab's right-click menu, where you can also have a site always open there. A temporary container is deleted with its last tab</small></div>
+          <div class="chips" id="containers"></div>
+        </div>
+        <div class="row stack">
+          <div class="what"><b>Sites that open in a container</b></div>
+          <div class="chips" id="containerSites"></div>
         </div>
         <div class="row">
           <div class="what"><b>Block third-party cookies</b><small>Embedded sites can't set cookies on the pages you visit. Some sign-in and payment flows need them. Applies after a restart</small></div>
@@ -688,6 +697,17 @@
     };
     post('UpdateAction', { choice: 'state' });
     const num = n => Number(n).toLocaleString();
+    function renderContainers() {
+      const c = S.containers || { list: [], sites: [] };
+      const name = id => (c.list.find(x => x.id === id) || {}).name || id;
+      $('containers').innerHTML = c.list.map(x =>
+        `<span class="chip"><span class="dot" style="background:${esc(x.color)}"></span>${esc(x.name)}</span>`).join('');
+      $('containerSites').innerHTML = c.sites.length
+        ? c.sites.map((r, i) => `<span class="chip">${esc(r.site)} → ${esc(name(r.container))}<button onclick="removeContainerSite(${i})" aria-label="Stop opening ${esc(r.site)} in ${esc(name(r.container))}">×</button></span>`).join('')
+        : '<span class="hint">None yet.</span>';
+    }
+    function removeContainerSite(i) { S.containers.sites.splice(i, 1); save('containers.sites', S.containers.sites); renderContainers(); }
+    renderContainers();
     function renderPaused() {
       const sites = S.shield.paused_sites;
       $('paused').innerHTML = sites.length

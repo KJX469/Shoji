@@ -442,6 +442,7 @@ fn test_ipc_serde_roundtrip() {
         workspaces: vec![],
         active_workspace_id: 1,
         inactive_tabs: vec![],
+        containers: vec![],
     };
     let json = serde_json::to_string(&sync).unwrap();
     assert_eq!(
@@ -1313,6 +1314,31 @@ fn test_third_party_cookies_and_fingerprinting_default_on_once() {
     assert!(!back.privacy.block_third_party_cookies);
     assert_eq!(back.privacy.fingerprinting, "standard");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_container_rules_cover_subdomains_and_skip_unknown_containers() {
+    let mut s = Settings::default();
+    s.containers.set_rule("www.github.com", Some("work"));
+    assert_eq!(s.containers.for_host("github.com"), Some("work"));
+    assert_eq!(s.containers.for_host("gist.github.com"), Some("work"));
+    assert_eq!(s.containers.for_host("notgithub.com"), None);
+    s.containers.set_rule("bank.example", Some("gone"));
+    assert_eq!(s.containers.for_host("bank.example"), None);
+    s.containers.set_rule("github.com", None);
+    assert_eq!(s.containers.for_host("github.com"), None);
+    // Ids become engine profile names: odd or duplicate ones are dropped on load.
+    s.containers.list.push(shoji_core::settings::Container {
+        id: "../evil".into(),
+        name: "x".into(),
+        color: "red".into(),
+    });
+    s.containers.list.push(s.containers.list[0].clone());
+    let path = std::env::temp_dir().join(format!("shoji_ctr_{}.json", std::process::id()));
+    s.save_to_path(&path).unwrap();
+    let back = Settings::load_from_path(&path);
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(back.containers.list.len(), 4);
 }
 
 #[test]

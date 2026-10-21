@@ -43,6 +43,9 @@ pub struct TabState {
     /// Workspace this tab belongs to (1-based).
     #[serde(default = "default_workspace_id")]
     pub workspace: u32,
+    /// Container the tab's cookies and storage live in (`None`: the default one)
+    #[serde(default)]
+    pub container: Option<String>,
 }
 
 pub const fn default_workspace_id() -> u32 {
@@ -542,6 +545,7 @@ impl TabManager {
             group: None,
             pinned: false,
             workspace: self.active_workspace_id,
+            container: None,
         };
 
         // If another tab was active, mark it inactive
@@ -642,6 +646,7 @@ impl TabManager {
                         group: None,
                         pinned: false,
                         workspace: ws_id,
+                        container: None,
                     });
                     if let Some(ws) = self.workspaces.iter_mut().find(|w| w.id == ws_id) {
                         ws.active_tab = Some(blank_id);
@@ -1967,6 +1972,7 @@ impl TabManager {
                     group: st.group,
                     pinned: st.pinned,
                     workspace: sw.id,
+                    container: None,
                 });
             }
 
@@ -1989,6 +1995,7 @@ impl TabManager {
                     group: None,
                     pinned: false,
                     workspace: sw.id,
+                    container: None,
                 });
             }
 
