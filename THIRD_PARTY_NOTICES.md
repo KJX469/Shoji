@@ -30,8 +30,8 @@ Shoji is MIT licensed. It includes, links or downloads the following, each under
 | [EasyList and EasyPrivacy](https://easylist.to) | GPL-3.0 / CC BY-SA 3.0 |
 | [Brave lists and resources](https://github.com/brave/adblock-resources) | MPL-2.0 |
 
-These are never compiled into `shoji.exe`. The `byobu-data` release asset is a build of uBlock
-Origin's scriptlets and stays GPL-3.0.
+These are never compiled into `shoji.exe`. The `byobu-data` release carries a build of uBlock
+Origin's scriptlets (GPL-3.0) and an unmodified copy of Brave's resources (MPL-2.0).
 
 ## Trademarks
 
