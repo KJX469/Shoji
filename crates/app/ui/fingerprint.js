@@ -60,14 +60,20 @@
     } catch (x) { /* not here */ }
   }
 
-  /* ---- canvas: flip the low bit of a few pixels, chosen by the seed ---- */
+  /* ---- canvas: flip the low bit of a few drawn pixels, chosen by the seed ---- */
+  // Only opaque pixels: a change to a transparent one is lost when the canvas is exported, and
+  // text drawn on a clear background leaves most pixels transparent.
   function noisePixels(data, w, h) {
     if (!data || data.length < 4) return;
     var r = rng(w * 7919 + h);
-    var n = Math.max(1, Math.min(32, (data.length >> 2) >> 9));
+    var count = data.length >> 2;
+    var n = Math.max(1, Math.min(32, count >> 9));
     for (var i = 0; i < n; i++) {
-      var p = (Math.floor(r() * (data.length >> 2)) << 2) + Math.floor(r() * 3);
-      data[p] ^= 1;
+      var start = Math.floor(r() * count), channel = Math.floor(r() * 3);
+      for (var k = 0; k < count; k++) {
+        var p = ((start + k) % count) << 2;
+        if (data[p + 3] === 255) { data[p + channel] ^= 1; break; }
+      }
     }
   }
   var C2D = window.CanvasRenderingContext2D && CanvasRenderingContext2D.prototype;
