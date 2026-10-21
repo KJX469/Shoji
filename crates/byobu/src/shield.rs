@@ -1,6 +1,7 @@
 //! The matcher: network decisions and per-site cosmetic payloads.
 
 use crate::cname::{self, Uncloaker};
+use crate::navigation::NavigationRules;
 use crate::popups::Popups;
 use crate::sources::ListSource;
 use crate::updater::Updater;
@@ -110,6 +111,8 @@ pub struct Shield {
     popups: Arc<RwLock<Option<Arc<Popups>>>>,
     /// Canonical names of first-party subdomains, once lookups are switched on
     cname: Arc<OnceLock<Uncloaker>>,
+    /// Brave's debounce and URL-cleaning rules
+    navigation: Arc<RwLock<Arc<NavigationRules>>>,
 }
 
 type Exceptions = Arc<HashSet<String>>;
@@ -177,6 +180,7 @@ impl Shield {
             cosmetics: Arc::default(),
             popups: Arc::default(),
             cname: Arc::default(),
+            navigation: Arc::default(),
         }
     }
 
@@ -283,6 +287,10 @@ impl Shield {
             lists.push((own_rules.to_string(), true));
         }
         let n = lists.len();
+        let navigation = updater.navigation_rules();
+        if let Ok(mut slot) = self.navigation.write() {
+            *slot = Arc::new(navigation);
+        }
         if self.load_saved(lists, &updater.resource_jsons(), Some(updater.dir())) {
             n
         } else {
@@ -430,6 +438,36 @@ impl Shield {
             .split(',')
             .any(|o| matches!(o.trim(), "document" | "doc" | "all"))
             .then_some(line)
+    }
+
+    /// Where a navigation to `url` should go instead: tracker redirects skipped, and tracking
+    /// parameters dropped by the built-in list, Brave's per-site rules and the lists'
+    /// `$removeparam` rules. `amp`: AMP viewer links go to the publisher's page. `None` when
+    /// nothing changes.
+    pub fn clean_link(&self, url: &str, mode: Mode, amp: bool) -> Option<String> {
+        if mode == Mode::Off {
+            return None;
+        }
+        let rules = self
+            .navigation
+            .read()
+            .map(|r| r.clone())
+            .unwrap_or_default();
+        let cleaned = crate::links::clean_with(url, &rules, amp);
+        let cur = cleaned.as_deref().unwrap_or(url);
+        let removed = self.removeparam_document(cur);
+        removed.or(cleaned).filter(|c| c != url)
+    }
+
+    /// `url` as a page, with the lists' `$removeparam` rules applied.
+    fn removeparam_document(&self, url: &str) -> Option<String> {
+        if !url.contains('?') {
+            return None;
+        }
+        let engine = self.current()?;
+        let req = Request::new(url, url, "main_frame", "GET").ok()?;
+        let r = engine.check_network_request(&req);
+        r.rewritten_url.filter(|u| u != url)
     }
 
     /// The rule that stops the page at `opener` opening `url` in a new window (a `$popup` rule:
@@ -798,6 +836,28 @@ news.test##.banner
                 Mode::Standard
             ),
             Decision::Allow
+        );
+    }
+
+    #[test]
+    fn removeparam_rules_clean_links_too() {
+        let s = shield("$removeparam=pjclid\n||news.test^$removeparam=ref_src\n");
+        assert_eq!(
+            s.clean_link(
+                "https://news.test/a?id=1&pjclid=x&ref_src=y&utm_source=z",
+                Mode::Standard,
+                false
+            )
+            .as_deref(),
+            Some("https://news.test/a?id=1")
+        );
+        assert_eq!(
+            s.clean_link("https://news.test/a?id=1", Mode::Standard, false),
+            None
+        );
+        assert_eq!(
+            s.clean_link("https://news.test/a?pjclid=x", Mode::Off, false),
+            None
         );
     }
 

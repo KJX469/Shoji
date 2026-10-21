@@ -416,3 +416,43 @@ fn downloads_from_dangerous_sites_are_stopped() {
         "no blocked-download notice"
     );
 }
+
+#[test]
+fn removeparam_rules_and_amp_pages_clean_where_you_land() {
+    if !can_run() {
+        return;
+    }
+    let server = site(vec![
+        ("/", "<p>start</p>".into()),
+        ("/story", "<p>story</p>".into()),
+        (
+            "/amp",
+            "<html amp><head><link rel=canonical href=\"http://publisher.test:{P}/story\"></head><body>amp</body></html>"
+                .into(),
+        ),
+    ]);
+    let url = server.url("start.test", "/");
+    let shoji = Shoji::start(
+        "removeparam",
+        &url,
+        Options {
+            settings: shield_settings(&["$removeparam=pjclid"]),
+            ..Default::default()
+        },
+    );
+    let mut page = shoji.page("start.test");
+    wait_for_shield(&server, &mut page, &url, ("probe.test", "/p.gif"));
+    page.goto(&server.url("news.test", "/story?id=7&pjclid=abc"));
+    let hit = server
+        .wait_for("news.test", "/story", Duration::from_secs(10))
+        .unwrap();
+    assert_eq!(hit.target, "/story?id=7");
+    server.clear();
+    page.goto(&server.url("amp-cache.test", "/amp"));
+    assert!(
+        server
+            .wait_for("publisher.test", "/story", Duration::from_secs(10))
+            .is_some(),
+        "the AMP page didn't go to its canonical page"
+    );
+}

@@ -45,6 +45,7 @@ windows = { version = "0.62.2", features = [
     "Win32_System_Kernel",
     "Win32_Storage_FileSystem",
     "Win32_NetworkManagement_Dns",
+    "Win32_Globalization",
 ] }
 
 [build-dependencies]
