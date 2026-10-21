@@ -3,7 +3,7 @@
 
 use crate::BrowserEvent;
 use base64::Engine as _;
-use shoji_byobu::{Decision, Mode, RequestKind, Shield, Updater};
+use shoji_byobu::{Answer, Decision, Matcher, Mode, Query, RequestKind, Shield, Updater};
 use shoji_core::settings::ShieldSettings;
 use shoji_core::tabs::TabId;
 use std::cell::RefCell;
@@ -124,6 +124,73 @@ fn note_check_time(d: Duration) {
             t.pop_front();
         }
         t.push_back(d.as_micros().min(u32::MAX as u128) as u32);
+    }
+}
+
+/// With `SHOJI_BYOBU_TIMING` set, where request checks spend their time is printed to stderr.
+fn timing_on() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("SHOJI_BYOBU_TIMING").is_some())
+}
+
+/// Phase marks of one request check, in the order they were reached.
+#[derive(Default)]
+struct Phases {
+    start: Option<Instant>,
+    marks: Vec<(&'static str, Instant)>,
+}
+
+impl Phases {
+    fn begin() -> Self {
+        Self {
+            start: timing_on().then(Instant::now),
+            marks: Vec::new(),
+        }
+    }
+
+    fn mark(&mut self, name: &'static str) {
+        if self.start.is_some() {
+            self.marks.push((name, Instant::now()));
+        }
+    }
+
+    fn finish(self) {
+        let Some(mut last) = self.start else { return };
+        static SAMPLES: Mutex<Vec<(&'static str, u32)>> = Mutex::new(Vec::new());
+        static COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let total = last.elapsed();
+        let Ok(mut all) = SAMPLES.lock() else { return };
+        for (name, at) in self.marks {
+            all.push((name, at.duration_since(last).as_micros() as u32));
+            last = at;
+        }
+        all.push(("total", total.as_micros() as u32));
+        if COUNT.fetch_add(1, Ordering::Relaxed) % 2000 == 1999 {
+            let mut by: BTreeMap<&str, Vec<u32>> = BTreeMap::new();
+            for (n, v) in all.iter() {
+                by.entry(n).or_default().push(*v);
+            }
+            if all.len() > 2_000_000 {
+                all.clear();
+            }
+            let mut line = String::from("byobu timing (us, all so far):");
+            for (n, mut v) in by {
+                v.sort_unstable();
+                let at = |q: f64| v[((v.len() - 1) as f64 * q).round() as usize];
+                line.push_str(&format!(
+                    " {n} n={} p50={} p90={} p99={} max={};",
+                    v.len(),
+                    at(0.5),
+                    at(0.9),
+                    at(0.99),
+                    v[v.len() - 1]
+                ));
+            }
+            if let Some((p50, p99, n)) = shoji_byobu::matcher::decide_times() {
+                line.push_str(&format!(" matcher-thread n={n} p50={p50} p99={p99};"));
+            }
+            eprintln!("{line}");
+        }
     }
 }
 
@@ -311,6 +378,11 @@ impl Hub {
                 })
             })
             .collect();
+        if with_log {
+            if let Some(m) = MATCHER.get() {
+                m.want_rules(60_000);
+            }
+        }
         let log: Vec<_> = if with_log {
             h.log
                 .iter()
@@ -541,6 +613,7 @@ const UPDATE_RETRY_SECS: u64 = 600;
 /// and rebuild whenever a list, a setting or the user's own rules change.
 /// Runs on its own thread; a rebuilt engine is swapped in atomically.
 pub fn spawn_updater(shield: Shield, dir: PathBuf) {
+    start_matcher(&shield);
     let (tx, rx) = mpsc::channel::<bool>();
     if let Ok(mut w) = hub().wake.lock() {
         *w = Some(tx);
@@ -688,23 +761,22 @@ pub fn attach(
     // The page as of its last top-level navigation. WebView2 reports iframes as DOCUMENT too;
     // the main frame's request is the one for this URL. Requests from every frame and worker
     // are matched against it, which is what third-party rules expect.
-    let top_target: Arc<Mutex<String>> = Arc::default();
+    let top_target: Rc<RefCell<TabPage>> = Rc::default();
     let page_scripts: Rc<RefCell<PageScripts>> = Rc::default();
 
     // Network: every http(s)/ws request goes through the matcher.
     {
         let shield = shield.clone();
-        let mode_for = mode_for.clone();
-        let core_env = core2.clone();
         let top_target = top_target.clone();
         let tab = tab_id.0;
-        // One empty 403 serves every blocked request: building a response is several calls to
-        // the browser process, and a page that retries blocked requests makes thousands.
-        let blocked_response: std::cell::RefCell<Option<ICoreWebView2WebResourceResponse>> =
-            std::cell::RefCell::new(None);
+        let net = Rc::new(TabNet {
+            env: core2.clone(),
+            blocked: RefCell::new(None),
+        });
         let handler = WebResourceRequestedEventHandler::create(Box::new(move |_, args| {
             let _doing = crate::crash::doing("byobu request");
             let started = Instant::now();
+            let mut phases = Phases::begin();
             let result = (|| -> windows::core::Result<()> {
                 let Some(args) = args else { return Ok(()) };
                 let request = unsafe { args.Request()? };
@@ -729,71 +801,96 @@ pub fn attach(
                 let mut ctx = COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL;
                 unsafe { args.ResourceContext(&mut ctx)? };
                 let mut kind = kind_of(ctx);
-                let page = top_target.lock().map(|t| t.clone()).unwrap_or_default();
-                if kind == RequestKind::Document {
-                    if url == page {
-                        return Ok(());
+                let mode = {
+                    let page = top_target.borrow();
+                    if kind == RequestKind::Document {
+                        if url == page.url {
+                            return Ok(());
+                        }
+                        kind = RequestKind::Subdocument;
                     }
-                    kind = RequestKind::Subdocument;
-                }
-                let mode = mode_for(&page);
+                    page.mode
+                };
                 if mode == Mode::Off {
                     return Ok(());
                 }
                 let mut method = PWSTR::null();
                 unsafe { request.Method(&mut method)? };
                 let method = take(method);
-                let (decision, rule) = shield.check_request(&url, &page, kind, mode, &method);
-                if decision == Decision::Allow {
+                phases.mark("read");
+                let generation = shield.generation();
+                let key = (url, kind, method == "GET");
+                let cached = top_target.borrow_mut().decisions.get(&key, generation);
+                let query = |url: String| Query {
+                    url,
+                    source: top_target.borrow().url.clone(),
+                    kind,
+                    mode,
+                    method: method.clone(),
+                    tab,
+                };
+                let Some(m) = MATCHER.get() else {
+                    // Before the matcher runs (it starts with the updater), match here.
+                    let (decision, rule) =
+                        shield.check_request(&key.0, &top_target.borrow().url, kind, mode, &method);
+                    let answer = Answer { decision, rule };
+                    if answer.decision != Decision::Allow {
+                        hub().record(
+                            tab,
+                            &top_target.borrow().url,
+                            &key.0,
+                            kind,
+                            &answer.decision,
+                            None,
+                        );
+                    }
+                    return net.respond(&args, &request, &answer);
+                };
+                if let Some(answer) = cached {
+                    phases.mark("cache");
+                    if answer.decision != Decision::Allow {
+                        m.record(query(key.0.clone()), answer.clone());
+                    }
+                    return net.respond(&args, &request, &answer);
+                }
+                if handoff() == Handoff::Defer {
+                    // Held until the matcher answers; the answer is applied from the event loop.
+                    let deferral = unsafe { args.GetDeferral()? };
+                    let ticket = NEXT_TICKET.with(|t| {
+                        let n = t.get() + 1;
+                        t.set(n);
+                        n
+                    });
+                    PENDING.with(|p| {
+                        p.borrow_mut().insert(
+                            ticket,
+                            Pending {
+                                args: args.clone(),
+                                request: request.clone(),
+                                deferral,
+                                net: net.clone(),
+                                page: top_target.clone(),
+                                key: (key.0.clone(), kind, key.2),
+                                generation,
+                            },
+                        )
+                    });
+                    m.submit(query(key.0), ticket);
+                    phases.mark("defer");
                     return Ok(());
                 }
-                hub().record(tab, &page, &url, kind, &decision, rule);
-                match decision {
-                    Decision::Allow => {}
-                    Decision::Block => {
-                        let mut cached = blocked_response.borrow_mut();
-                        if cached.is_none() {
-                            let env = unsafe { core_env.Environment()? };
-                            let reason = wide("Blocked");
-                            let headers = wide("");
-                            *cached = Some(unsafe {
-                                env.CreateWebResourceResponse(
-                                    None,
-                                    403,
-                                    PCWSTR(reason.as_ptr()),
-                                    PCWSTR(headers.as_ptr()),
-                                )?
-                            });
-                        }
-                        if let Some(resp) = cached.as_ref() {
-                            unsafe { args.SetResponse(resp)? };
-                        }
-                    }
-                    Decision::Redirect(data) => {
-                        if let Some((mime, bytes)) = decode_data_url(&data) {
-                            let env = unsafe { core_env.Environment()? };
-                            let stream = unsafe { SHCreateMemStream(Some(&bytes)) };
-                            let reason = wide("OK");
-                            let headers = wide(&format!("Content-Type: {mime}"));
-                            let resp = unsafe {
-                                env.CreateWebResourceResponse(
-                                    stream.as_ref(),
-                                    200,
-                                    PCWSTR(reason.as_ptr()),
-                                    PCWSTR(headers.as_ptr()),
-                                )?
-                            };
-                            unsafe { args.SetResponse(&resp)? };
-                        }
-                    }
-                    Decision::Rewrite(new_url) => {
-                        let w = wide(&new_url);
-                        unsafe { request.SetUri(PCWSTR(w.as_ptr()))? };
-                    }
-                }
+                let answer = m.check(query(key.0.clone()));
+                phases.mark("match");
+                top_target
+                    .borrow_mut()
+                    .decisions
+                    .put(key, generation, answer.clone());
+                net.respond(&args, &request, &answer)?;
+                phases.mark("answer");
                 Ok(())
             })();
             note_check_time(started.elapsed());
+            phases.finish();
             result
         }));
         unsafe {
@@ -845,12 +942,13 @@ pub fn attach(
     {
         let core_src = core.clone();
         let top_target = top_target.clone();
+        let mode_for = mode_for.clone();
         let handler = SourceChangedEventHandler::create(Box::new(move |_, _| {
             let mut src = PWSTR::null();
             unsafe { core_src.Source(&mut src)? };
-            if let Ok(mut t) = top_target.lock() {
-                *t = take(src);
-            }
+            let src = take(src);
+            let mode = mode_for(&src);
+            top_target.borrow_mut().set(src, mode);
             Ok(())
         }));
         let _ = unsafe { core.add_SourceChanged(&handler, &mut token) };
@@ -917,9 +1015,7 @@ pub fn attach(
                     return Ok(());
                 }
             }
-            if let Ok(mut t) = top_target.lock() {
-                *t = url.clone();
-            }
+            top_target.borrow_mut().set(url.clone(), mode_for(&url));
             if url.starts_with("http://") || url.starts_with("https://") {
                 hub().reset_tab(tab_id.0);
             }
@@ -1149,7 +1245,7 @@ struct Frames {
     core: ICoreWebView2,
     shield: Shield,
     mode_for: ModeFor,
-    top_target: Arc<Mutex<String>>,
+    top_target: Rc<RefCell<TabPage>>,
     /// Hosts seen in iframes, oldest first
     hosts: RefCell<VecDeque<String>>,
     slot: Arc<Mutex<DocScript>>,
@@ -1157,10 +1253,7 @@ struct Frames {
 
 impl Frames {
     fn page(&self) -> String {
-        self.top_target
-            .lock()
-            .map(|t| t.clone())
-            .unwrap_or_default()
+        self.top_target.borrow().url.clone()
     }
 
     fn rebuild(&self) {
@@ -1554,5 +1647,220 @@ fn accept_rule(core: &ICoreWebView2, tab: u64, body: &str) {
                 selector: selector.to_string(),
             });
         }
+    }
+}
+
+/* ---------------------------------------------------------------- matching */
+
+/// The one matcher thread every tab hands its requests to (see `shoji_byobu::matcher`).
+static MATCHER: OnceLock<Matcher> = OnceLock::new();
+
+fn start_matcher(shield: &Shield) {
+    MATCHER.get_or_init(|| {
+        Matcher::spawn(
+            shield.clone(),
+            // Counters and the log are kept on the matcher thread, not the UI thread.
+            Some(Box::new(|q: &Query, a: &Answer| {
+                hub().record(
+                    q.tab,
+                    &q.source,
+                    &q.url,
+                    q.kind,
+                    &a.decision,
+                    a.rule.clone(),
+                )
+            })),
+            Some(Box::new(|| {
+                if let Ok(p) = hub().proxy.lock() {
+                    if let Some(p) = p.as_ref() {
+                        let _ = p.send_event(BrowserEvent::ShieldAnswers);
+                    }
+                }
+            })),
+        )
+    });
+}
+
+/// How a request waits for the matcher.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Handoff {
+    /// The UI thread waits for the answer
+    Wait,
+    /// The request is held and answered from the event loop
+    Defer,
+}
+
+fn handoff() -> Handoff {
+    static H: OnceLock<Handoff> = OnceLock::new();
+    *H.get_or_init(|| match std::env::var("SHOJI_BYOBU_HANDOFF").as_deref() {
+        Ok("defer") => Handoff::Defer,
+        _ => Handoff::Wait,
+    })
+}
+
+/// What a tab's request handler knows about its page, kept on the UI thread: the page's
+/// address (requests from every frame and worker are matched against it), the shield mode
+/// that applies there, and the decisions made for it.
+#[derive(Default)]
+struct TabPage {
+    url: String,
+    mode: Mode,
+    decisions: DecisionCache,
+}
+
+impl TabPage {
+    /// The tab is on `url` now (a navigation, or an in-page address change).
+    fn set(&mut self, url: String, mode: Mode) {
+        if crate::extract_host(&url) != crate::extract_host(&self.url) || mode != self.mode {
+            self.decisions.clear();
+        }
+        self.url = url;
+        self.mode = mode;
+    }
+}
+
+type DecisionKey = (String, RequestKind, bool);
+
+/// How many decisions a tab remembers for its page.
+const DECISIONS: usize = 512;
+
+/// The last few hundred decisions for a tab's page, so a page that asks for the same thing
+/// again (polling, retries, repeated pixels) isn't matched again. Cleared when the tab goes to
+/// another site and when the engine changes.
+#[derive(Default)]
+struct DecisionCache {
+    generation: u64,
+    map: HashMap<DecisionKey, Answer>,
+    order: VecDeque<DecisionKey>,
+}
+
+impl DecisionCache {
+    fn clear(&mut self) {
+        self.map.clear();
+        self.order.clear();
+    }
+
+    fn get(&mut self, key: &DecisionKey, generation: u64) -> Option<Answer> {
+        if generation != self.generation {
+            self.clear();
+            self.generation = generation;
+            return None;
+        }
+        self.map.get(key).cloned()
+    }
+
+    fn put(&mut self, key: DecisionKey, generation: u64, answer: Answer) {
+        if generation != self.generation {
+            self.clear();
+            self.generation = generation;
+        }
+        if self.map.len() >= DECISIONS {
+            if let Some(old) = self.order.pop_front() {
+                self.map.remove(&old);
+            }
+        }
+        if self.map.insert(key.clone(), answer).is_none() {
+            self.order.push_back(key);
+        }
+    }
+}
+
+/// A tab's means of answering a request.
+struct TabNet {
+    env: ICoreWebView2_2,
+    /// One empty 403 serves every blocked request: building a response is several calls to
+    /// the browser process, and a page that retries blocked requests makes thousands.
+    blocked: RefCell<Option<ICoreWebView2WebResourceResponse>>,
+}
+
+impl TabNet {
+    fn respond(
+        &self,
+        args: &ICoreWebView2WebResourceRequestedEventArgs,
+        request: &ICoreWebView2WebResourceRequest,
+        answer: &Answer,
+    ) -> windows::core::Result<()> {
+        match &answer.decision {
+            Decision::Allow => {}
+            Decision::Block => {
+                let mut cached = self.blocked.borrow_mut();
+                if cached.is_none() {
+                    let env = unsafe { self.env.Environment()? };
+                    let reason = wide("Blocked");
+                    let headers = wide("");
+                    *cached = Some(unsafe {
+                        env.CreateWebResourceResponse(
+                            None,
+                            403,
+                            PCWSTR(reason.as_ptr()),
+                            PCWSTR(headers.as_ptr()),
+                        )?
+                    });
+                }
+                if let Some(resp) = cached.as_ref() {
+                    unsafe { args.SetResponse(resp)? };
+                }
+            }
+            Decision::Redirect(data) => {
+                if let Some((mime, bytes)) = decode_data_url(data) {
+                    let env = unsafe { self.env.Environment()? };
+                    let stream = unsafe { SHCreateMemStream(Some(&bytes)) };
+                    let reason = wide("OK");
+                    let headers = wide(&format!("Content-Type: {mime}"));
+                    let resp = unsafe {
+                        env.CreateWebResourceResponse(
+                            stream.as_ref(),
+                            200,
+                            PCWSTR(reason.as_ptr()),
+                            PCWSTR(headers.as_ptr()),
+                        )?
+                    };
+                    unsafe { args.SetResponse(&resp)? };
+                }
+            }
+            Decision::Rewrite(new_url) => {
+                let w = wide(new_url);
+                unsafe { request.SetUri(PCWSTR(w.as_ptr()))? };
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A request held for the matcher's answer.
+struct Pending {
+    args: ICoreWebView2WebResourceRequestedEventArgs,
+    request: ICoreWebView2WebResourceRequest,
+    deferral: ICoreWebView2Deferral,
+    net: Rc<TabNet>,
+    page: Rc<RefCell<TabPage>>,
+    key: DecisionKey,
+    generation: u64,
+}
+
+thread_local! {
+    static PENDING: RefCell<HashMap<u64, Pending>> = RefCell::default();
+    static NEXT_TICKET: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Answer the requests whose decisions have arrived (from the event loop).
+pub fn apply_answers() {
+    let _doing = crate::crash::doing("byobu answers");
+    let Some(m) = MATCHER.get() else { return };
+    for (ticket, answer) in m.take_answers() {
+        let started = Instant::now();
+        let mut phases = Phases::begin();
+        let Some(p) = PENDING.with(|q| q.borrow_mut().remove(&ticket)) else {
+            continue;
+        };
+        let _ = p.net.respond(&p.args, &p.request, &answer);
+        let _ = unsafe { p.deferral.Complete() };
+        p.page
+            .borrow_mut()
+            .decisions
+            .put(p.key, p.generation, answer);
+        phases.mark("apply");
+        note_check_time(started.elapsed());
+        phases.finish();
     }
 }

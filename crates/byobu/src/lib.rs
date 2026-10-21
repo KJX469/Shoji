@@ -5,9 +5,11 @@
 //! fresh with conditional requests, so upstream fixes reach Shoji within hours.
 
 pub mod links;
+pub mod matcher;
 pub mod shield;
 pub mod sources;
 pub mod updater;
 
+pub use matcher::{Answer, Matcher, Query};
 pub use shield::{CosmeticPayload, Decision, Mode, RequestKind, Shield};
 pub use updater::Updater;
