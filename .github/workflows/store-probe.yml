@@ -12,6 +12,6 @@ jobs:
           for id in nngceckbapebfimnlniiiahkandclblb aeblfdkhhhdcdjpifhhbdiojplfjncoa kbfnbcaeplbcioakkpcpgfkobkghlhen; do
             for v in 130 140 150 160; do
               printf '%s %s: ' $id $v
-              curl -sS -m 30 "https://clients2.google.com/service/update2/crx?response=updatecheck&prodversion=$v.0.0.0&acceptformat=crx2,crx3&x=id%3D$id%26v%3D0.0.0.1%26uc" | grep -o 'status="noupdate"\|version="[0-9.]*"' | head -1
+              curl -sS -m 30 "https://clients2.google.com/service/update2/crx?response=updatecheck&prodversion=$v.0.0.0&acceptformat=crx2,crx3&x=id%3D$id%26v%3D0.0.0.1%26uc" | grep -o 'updatecheck [^>]*' | grep -o 'status="[a-z-]*"\| version="[0-9.]*"' | tr '\n' ' '; echo
             done
           done
