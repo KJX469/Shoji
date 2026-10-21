@@ -7,13 +7,23 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - run: |
-          set +e
-          id=nngceckbapebfimnlniiiahkandclblb
-          for v in 170 190 220; do
-            printf 'v=0.0.0.1 pv=%s: ' $v
-            curl -sS -m 30 "https://clients2.google.com/service/update2/crx?response=updatecheck&prodversion=$v.0.0.0&acceptformat=crx2,crx3&x=id%3D$id%26v%3D0.0.0.1%26uc" | grep -o 'updatecheck [^>]*' | grep -o 'status="[a-z-]*"\| version="[0-9.]*"' | tr '\n' ' '; echo
-          done
-          printf 'no v: '; curl -sS -m 30 "https://clients2.google.com/service/update2/crx?response=updatecheck&prodversion=150.0.0.0&acceptformat=crx2,crx3&x=id%3D$id%26uc" | grep -o 'updatecheck [^>]*' | head -c 300; echo
-          printf 'os=win: '; curl -sS -m 30 "https://clients2.google.com/service/update2/crx?response=updatecheck&os=win&arch=x64&nacl_arch=x86-64&prodversion=150.0.0.0&acceptformat=crx2,crx3&x=id%3D$id%26v%3D0.0.0.1%26uc" | grep -o 'updatecheck [^>]*' | head -c 300; echo
-          printf 'redirect: '; curl -sS -m 30 -o /dev/null -w '%{http_code}\n' "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=150.0.0.0&acceptformat=crx2,crx3&x=id%3D$id%26uc"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: dump
+        shell: node {0}
+        run: |
+          const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+          const slugs = ['productivity/communication','productivity/developer','productivity/education','productivity/tools','productivity/workflow','lifestyle/art','lifestyle/entertainment','lifestyle/games','lifestyle/household','lifestyle/fun','lifestyle/news','lifestyle/shopping','lifestyle/social','lifestyle/travel','lifestyle/well_being','make_chrome_yours/accessibility','make_chrome_yours/functionality','make_chrome_yours/privacy'];
+          for (const s of slugs) {
+            const r = await fetch('https://chromewebstore.google.com/category/extensions/' + s, { headers: { 'user-agent': UA } });
+            const t = await r.text();
+            const n = new Set([...t.matchAll(/data-item-id="([a-p]{32})"/g)].map(m => m[1])).size;
+            console.log(s, r.status, t.length, n);
+            if (s === 'lifestyle/shopping') {
+              const chunks = t.split('data-item-id="').slice(1, 3);
+              for (const c of chunks) console.log('--- CHUNK\n' + c.slice(0, 3500).replace(/https:\/\/lh3[^"\s]*/g, 'IMG'));
+              const ds = t.match(/AF_initDataCallback\(\{key: 'ds:1'[\s\S]{0,1500}/);
+              console.log('--- DS1\n' + (ds ? ds[0] : 'none'));
+            }
+          }
