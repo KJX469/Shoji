@@ -1,6 +1,8 @@
 // Builds the extension store's catalog: the most-installed Manifest V3 extensions of each
-// Chrome Web Store category, with their icons embedded so the store page makes no requests of its
-// own. Usage: node scripts/extension-catalog.mjs out.json
+// Chrome Web Store category, widened by following the related extensions each page lists. Only
+// pages robots.txt allows are read, a few at a time. The most-used extensions have their icons
+// embedded so the store page makes no requests of its own.
+// Usage: node scripts/extension-catalog.mjs out.json
 import { writeFileSync } from 'node:fs';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
@@ -66,39 +68,70 @@ const manifestOf = r => {
 };
 
 const found = new Map();
-for (const [slug, label] of Object.entries(CATEGORIES)) {
-  const html = await (await get(`${BASE}/category/extensions/${slug}`)).text();
-  const data = embedded(html);
-  const list = data ? records(data) : [];
+const labelOf = slug => CATEGORIES[slug] ?? (slug ? slug.split('/').pop().replace(/_/g, ' ').replace(/^./, c => c.toUpperCase()) : 'Other');
+
+/** Add the Manifest V3 extensions among `list`; returns how many were new. */
+const collect = (list, label) => {
   let kept = 0;
   for (const r of list) {
     const manifest = manifestOf(r);
     // The engine only runs Manifest V3.
     if (!manifest || manifest.manifest_version !== 3 || found.has(r[0])) continue;
-    const users = r.slice(8).find(v => typeof v === 'number' && v > 1) ?? 0;
+    const slug = Array.isArray(r[11]) ? r[11][0] : '';
     found.set(r[0], {
       id: r[0],
       name: r[2].trim(),
-      cat: label,
-      text: typeof r[6] === 'string' ? r[6].trim() : '',
+      cat: label ?? labelOf(slug),
+      text: typeof r[6] === 'string' ? r[6].trim().slice(0, 200) : '',
       rating: Math.round(r[3] * 10) / 10,
       ratings: typeof r[4] === 'number' ? r[4] : 0,
-      users,
+      users: typeof r[14] === 'number' ? r[14] : (r.slice(8).find(v => typeof v === 'number' && v > 1) ?? 0),
       icon: r[1],
     });
     kept++;
   }
+  return kept;
+};
+
+for (const [slug, label] of Object.entries(CATEGORIES)) {
+  const html = await (await get(`${BASE}/category/extensions/${slug}`)).text();
+  const data = embedded(html);
+  const list = data ? records(data) : [];
+  const kept = collect(list, label);
   console.log(`${slug}: ${list.length} listed, ${kept} new Manifest V3`);
 }
 
-// Icons are fetched here and embedded, so opening the store contacts no one.
-const items = [...found.values()];
+// Widen: read the most-used extensions' pages, which list related extensions, again and again.
+const PAGES = 1500;
+const seen = new Set();
+let crawled = 0;
+while (crawled < PAGES) {
+  const batch = [...found.values()].filter(e => !seen.has(e.id)).sort((a, b) => b.users - a.users).slice(0, 4);
+  if (!batch.length) break;
+  await Promise.all(batch.map(async e => {
+    seen.add(e.id);
+    try {
+      const data = embedded(await (await get(`${BASE}/detail/${e.id}`, 2)).text());
+      if (data) collect(records(data));
+    } catch (err) {
+      console.warn(`skipped ${e.id}: ${err.message}`);
+    }
+  }));
+  crawled += batch.length;
+  await new Promise(r => setTimeout(r, 250));
+}
+console.log(`read ${crawled} pages; ${found.size} Manifest V3 extensions`);
+
+// Icons of the most-used ones are fetched here and embedded; the rest show a letter.
+const ICONS = 1000;
+const items = [...found.values()].sort((a, b) => b.users - a.users);
+items.slice(ICONS).forEach(it => { it.icon = ''; });
 let next = 0;
 await Promise.all(Array.from({ length: 8 }, async () => {
-  while (next < items.length) {
+  while (next < Math.min(ICONS, items.length)) {
     const it = items[next++];
     try {
-      const r = await get(`${it.icon}=s64-rw`);
+      const r = await get(`${it.icon}=s48-rw`);
       const type = r.headers.get('content-type') || 'image/webp';
       it.icon = `data:${type};base64,${Buffer.from(await r.arrayBuffer()).toString('base64')}`;
     } catch (e) {
@@ -108,7 +141,6 @@ await Promise.all(Array.from({ length: 8 }, async () => {
   }
 }));
 
-items.sort((a, b) => b.users - a.users);
 if (items.length < 200) throw new Error(`only ${items.length} extensions found; the page layout probably changed`);
 writeFileSync(process.argv[2], JSON.stringify(items));
 console.log(`${items.length} extensions`);
