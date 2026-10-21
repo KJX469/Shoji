@@ -1,0 +1,102 @@
+/* The crane as a small living character, shared by every Shoji page.
+   Put class "pet" on a crane svg (add "live" to let it breathe and bob) and set data-pose.
+   Four paths: [1] tail, [2] upright wing, [3] wing's reverse side, [4] neck and head.
+   Wings fold about the body line, the head nods about the neck, so a pose is a few small
+   rotations and squashes. */
+.pet { overflow: visible; }
+.pet path { transform-box: fill-box; }
+.pet path:nth-of-type(1) { transform-origin: 100% 100%; }
+.pet path:nth-of-type(2), .pet path:nth-of-type(3) { transform-origin: 0% 55%; }
+.pet path:nth-of-type(4) { transform-origin: 8% 82%; }
+
+.pet.live { animation: pet-bob 6s ease-in-out infinite alternate; }
+.pet.live path:nth-of-type(2), .pet.live path:nth-of-type(3) { animation: pet-breathe 3.4s ease-in-out infinite alternate; }
+@keyframes pet-bob { from { transform: translateY(0); } to { transform: translateY(-4px); } }
+@keyframes pet-breathe { from { transform: scaleX(1); } to { transform: scaleX(.93); } }
+
+/* cheer: a small hop, wings thrown wide, head up */
+.pet[data-pose="cheer"] { animation: pet-hop .9s cubic-bezier(.3, 1.3, .5, 1) both; }
+.pet[data-pose="cheer"] path:nth-of-type(2), .pet[data-pose="cheer"] path:nth-of-type(3) { animation: pet-wide .9s ease-in-out both; }
+.pet[data-pose="cheer"] path:nth-of-type(4) { animation: pet-head-high .9s ease-in-out both; }
+@keyframes pet-hop { 40% { transform: translateY(-16px) rotate(-3deg); } 70% { transform: translateY(1px); } }
+@keyframes pet-wide { 40% { transform: scaleX(1.09); } }
+@keyframes pet-head-high { 40% { transform: rotate(-12deg); } }
+
+/* nod: two nods, "yes" */
+.pet[data-pose="nod"] path:nth-of-type(4) { animation: pet-nod 1.2s ease-in-out both; }
+@keyframes pet-nod { 0%, 100% { transform: none; } 20%, 60% { transform: rotate(16deg); } 40%, 80% { transform: rotate(-2deg); } }
+
+/* look: glances left, then right */
+.pet[data-pose="look"] { animation: pet-look 1.6s ease-in-out both; }
+.pet[data-pose="look"] path:nth-of-type(4) { animation: pet-scan 1.6s ease-in-out both; }
+@keyframes pet-look { 25% { transform: translateX(-6px); } 70% { transform: translateX(6px); } 100% { transform: none; } }
+@keyframes pet-scan { 25% { transform: rotate(-12deg); } 70% { transform: rotate(14deg); } }
+
+/* peck: three quick pecks */
+.pet[data-pose="peck"] path:nth-of-type(4) { animation: pet-peck 1.1s ease-in-out both; }
+@keyframes pet-peck { 0%, 100% { transform: none; } 15%, 45%, 75% { transform: rotate(15deg); } 30%, 60%, 90% { transform: rotate(2deg); } }
+
+/* tilt: weighs it up, one way then the other */
+.pet[data-pose="tilt"] { animation: pet-tilt 1.5s ease-in-out both; }
+.pet[data-pose="tilt"] path:nth-of-type(4) { animation: pet-head-tilt 1.5s ease-in-out both; }
+@keyframes pet-tilt { 25% { transform: rotate(-7deg); } 65% { transform: rotate(6deg); } 100% { transform: none; } }
+@keyframes pet-head-tilt { 25% { transform: rotate(-10deg); } 65% { transform: rotate(12deg); } }
+
+/* shelter: wings fold across and cover it, then open again */
+.pet[data-pose="shelter"] path:nth-of-type(2), .pet[data-pose="shelter"] path:nth-of-type(3) { animation: pet-close 1.5s ease-in-out both; }
+.pet[data-pose="shelter"] path:nth-of-type(4) { animation: pet-tuck 1.5s ease-in-out both; }
+@keyframes pet-close { 35%, 65% { transform: scaleX(.18); } }
+@keyframes pet-tuck { 35%, 65% { transform: rotate(26deg); } }
+
+/* guard: stands tall and still, head up, wings half open (looping) */
+.pet[data-pose="guard"] { animation: pet-guard 2.8s ease-in-out infinite alternate; }
+.pet[data-pose="guard"] path:nth-of-type(2), .pet[data-pose="guard"] path:nth-of-type(3) { transform: scaleX(1.06); }
+.pet[data-pose="guard"] path:nth-of-type(4) { animation: pet-watch 3.6s ease-in-out infinite; }
+@keyframes pet-guard { from { transform: translateY(0); } to { transform: translateY(-2px); } }
+@keyframes pet-watch { 0%, 100% { transform: rotate(-4deg); } 30% { transform: rotate(-9deg); } 62% { transform: rotate(2deg); } }
+
+/* carry: a purposeful waddle with soft wingbeats (looping) */
+.pet[data-pose="carry"] { animation: pet-waddle .9s ease-in-out infinite alternate; }
+.pet[data-pose="carry"] path:nth-of-type(2), .pet[data-pose="carry"] path:nth-of-type(3) { animation: pet-flap .45s ease-in-out infinite alternate; }
+.pet[data-pose="carry"] path:nth-of-type(4) { transform: rotate(10deg); }
+@keyframes pet-waddle { from { transform: translateX(-3px) rotate(-3deg); } to { transform: translateX(3px) rotate(3deg); } }
+@keyframes pet-flap { to { transform: scaleX(.45); } }
+
+/* bow: dips forward politely and rises again */
+.pet[data-pose="bow"] { animation: pet-bow 1.3s ease-in-out both; }
+.pet[data-pose="bow"] path:nth-of-type(4) { animation: pet-bow-head 1.3s ease-in-out both; }
+@keyframes pet-bow { 30%, 60% { transform: rotate(8deg) translateY(2px); } 100% { transform: none; } }
+@keyframes pet-bow-head { 30%, 60% { transform: rotate(30deg); } 100% { transform: none; } }
+
+/* sleep: head tucked, wings drawn in, slow breathing (looping) */
+.pet[data-pose="sleep"] { animation: pet-snooze 4s ease-in-out infinite alternate; }
+.pet[data-pose="sleep"] path:nth-of-type(2), .pet[data-pose="sleep"] path:nth-of-type(3) { transform: scaleX(.6); }
+.pet[data-pose="sleep"] path:nth-of-type(4) { transform: rotate(38deg); }
+@keyframes pet-snooze { from { transform: scale(1); } to { transform: scale(1.025, .985); } }
+
+/* startle: a quick jump with wings wide */
+.pet[data-pose="startle"] { animation: pet-startle .55s cubic-bezier(.3, 1.6, .5, 1) both; }
+.pet[data-pose="startle"] path:nth-of-type(2), .pet[data-pose="startle"] path:nth-of-type(3) { animation: pet-wide .55s ease-out both; }
+@keyframes pet-startle { 30% { transform: translateY(-12px) scale(1.06); } 100% { transform: none; } }
+
+/* unfold: folds itself out of a closed crane, then settles */
+.pet[data-pose="unfold"] { animation: pet-rise 1s var(--ease) both; }
+.pet[data-pose="unfold"] path:nth-of-type(2), .pet[data-pose="unfold"] path:nth-of-type(3) { animation: pet-open 1.1s .1s cubic-bezier(.3, 1.5, .6, 1) both; }
+.pet[data-pose="unfold"] path:nth-of-type(4) { animation: pet-head-up 1s .3s cubic-bezier(.3, 1.4, .6, 1) both; }
+.pet[data-pose="unfold"] path:nth-of-type(1) { animation: pet-tail-in .9s .2s var(--ease) both; }
+@keyframes pet-rise { from { opacity: 0; transform: translateY(14px) scale(.82); } }
+@keyframes pet-open { from { transform: scaleX(.08); } }
+@keyframes pet-head-up { from { transform: rotate(34deg); } }
+@keyframes pet-tail-in { from { transform: rotate(-24deg); opacity: 0; } }
+
+/* Little companions that go with a pose */
+.zzz { position: absolute; font-family: var(--font-display); font-style: italic; color: var(--ink-3); pointer-events: none; opacity: 0; animation: zzz 3.2s ease-in-out infinite; }
+.zzz:nth-of-type(2) { animation-delay: 1.1s; font-size: .8em; }
+@keyframes zzz { 0% { opacity: 0; transform: translate(0, 4px); } 30% { opacity: .9; } 100% { opacity: 0; transform: translate(10px, -16px); } }
+
+/* A page left alone rests (Pet.rest): everything that loops holds still until it is touched. */
+body.resting .pet, body.resting .pet path, body.resting .zzz { animation-play-state: paused !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pet, .pet path, .zzz { animation: none !important; }
+}

@@ -1,8 +1,4 @@
-# Assembles uBlock Origin's scriptlets and redirect stubs into the JSON that Byobu's engine
-# loads, and publishes it as a release asset the browser downloads at runtime.
-#
-# uBlock Origin is GPLv3. The data lives in this separate release asset (never in the MIT
-# browser binary), and is a build of https://github.com/gorhill/uBlock/tree/master/src/js/resources.
+# Builds uBlock Origin's scriptlets (GPL-3.0) into the byobu-data release asset Shoji downloads.
 name: byobu-resources
 
 on:
