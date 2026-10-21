@@ -44,6 +44,8 @@ pub enum RequestKind {
     Websocket,
     /// A new window (`window.open`, `target="_blank"`), matched with `$popup` rules
     Popup,
+    /// A file download, matched with page (`$document`) rules
+    Download,
     Other,
 }
 
@@ -61,6 +63,7 @@ impl RequestKind {
             RequestKind::Ping => "ping",
             RequestKind::Websocket => "websocket",
             RequestKind::Popup => "popup",
+            RequestKind::Download => "other",
             RequestKind::Other => "other",
         }
     }

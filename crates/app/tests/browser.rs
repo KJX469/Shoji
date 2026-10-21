@@ -369,3 +369,50 @@ fn popup_rules_stop_ad_windows_and_popunders() {
     );
     assert!(!server.saw("popads.test", "/late"), "the popunder opened");
 }
+
+#[test]
+fn downloads_from_dangerous_sites_are_stopped() {
+    if !can_run() {
+        return;
+    }
+    let port = Arc::new(std::sync::OnceLock::<u16>::new());
+    let p2 = port.clone();
+    let server = Arc::new(Server::start(move |hit| {
+        let port = *p2.get().unwrap_or(&0);
+        match hit.path() {
+            "/" => Reply::html(format!(
+                "<p>files</p>{PROBE}<a id=get download href=\"/setup.exe\">get</a>"
+            )),
+            "/probe-img" => Reply::new(302, "text/plain", "")
+                .header("Location", &format!("http://probe.test:{port}/p.gif")),
+            "/setup.exe" => Reply::new(200, "application/octet-stream", "MZ")
+                .header("Content-Disposition", "attachment; filename=setup.exe"),
+            _ => Reply::empty(),
+        }
+    }));
+    let _ = port.set(server.port);
+    let url = server.url("files.test", "/");
+    let shoji = Shoji::start(
+        "downloads",
+        &url,
+        Options {
+            settings: shield_settings(&["||files.test/setup.exe$document"]),
+            ..Default::default()
+        },
+    );
+    let mut page = shoji.page("files.test");
+    wait_for_shield(&server, &mut page, &url, ("probe.test", "/p.gif"));
+    page.goto(&url);
+    page.call(
+        "Runtime.evaluate",
+        json!({ "expression": "document.getElementById('get').click()", "userGesture": true }),
+    );
+    let mut chrome = shoji.chrome();
+    assert!(
+        chrome.wait_for(
+            "document.getElementById('toastTitle').textContent==='Download blocked'",
+            Duration::from_secs(10)
+        ),
+        "no blocked-download notice"
+    );
+}
