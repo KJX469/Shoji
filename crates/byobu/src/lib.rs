@@ -7,6 +7,7 @@
 pub mod links;
 pub mod matcher;
 pub mod shield;
+pub mod social;
 pub mod sources;
 pub mod updater;
 

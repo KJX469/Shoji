@@ -110,6 +110,8 @@
     .big { font-size: 34px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; }
     .sub { color: var(--ink-3); font-size: 12px; }
     .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 2px; font-size: 13px; }
+    #shCats .switch-row { padding: 6px 2px; }
+    #shCats .switch-row small { display: block; margin-top: 1px; }
     .sw { width: 34px; height: 20px; border-radius: 10px; background: var(--line-strong); position: relative; flex-shrink: 0; transition: background .15s; }
     .sw::after { content: ""; position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); transition: transform .18s cubic-bezier(.3, 1.4, .5, 1); }
     .sw[aria-checked="true"] { background: var(--accent); }
@@ -398,6 +400,7 @@
         <div class="card">
           <div class="row"><span>Cookies &amp; storage</span><span id="pStorage"></span></div>
           <div class="row" id="cookieRow"><span>Cookies in use</span><span id="pCookies">…</span></div>
+          <div class="switch-row" id="forgetRow"><span>Forget this site when its tabs close</span><button class="sw" id="forgetSwitch" role="switch" aria-checked="false" aria-label="Forget this site when its tabs close"></button></div>
         </div>
         <button class="wide-btn" id="clearCookiesBtn" onclick="clearCookies()">Clear cookies and site data…</button>
       </section>
@@ -413,8 +416,7 @@
         </div>
         <div class="card">
           <div class="switch-row"><span>Shield on this site</span><button class="sw" id="shSwitch" role="switch" aria-checked="true" aria-label="Shield on this site"></button></div>
-          <div class="row"><span>Ads and trackers</span><span id="shBlocked">0</span></div>
-          <div class="row"><span>Scripts replaced or cleaned</span><span id="shReplaced">0</span></div>
+          <div id="shCats"></div>
         </div>
         <div class="group">
           <button class="item" onclick="act('ShieldPickElement')"><svg class="i" viewBox="0 0 24 24"><path d="M5 5l6 14 2-6 6-2z"/></svg><span>Hide an element…</span></button>
@@ -990,8 +992,7 @@
       shieldHost = d.host; shieldPaused = paused || []; shieldState = d.state;
       $('shHost').textContent = d.host || 'This page';
       $('shCount').textContent = d.blocked + d.replaced;
-      $('shBlocked').textContent = d.blocked;
-      $('shReplaced').textContent = d.replaced;
+      renderShieldCats(d);
       $('shWeek').textContent = Number(d.week).toLocaleString();
       $('shSwitch').setAttribute('aria-checked', String(d.state === 'on'));
       $('shSwitch').disabled = d.state === 'off' || d.state === 'none';
@@ -1002,6 +1003,38 @@
       const pet = document.querySelector('.guard-card .crane');
       if (pet) pet.dataset.pose = d.state === 'on' ? 'guard' : 'sleep';
     };
+    // Each protection can be turned off for this site alone, with what it did on this page.
+    const SH_CATS = [
+      ['trackers', 'Trackers and ads', n => `${n} blocked`],
+      ['fingerprinting', 'Fingerprinting', n => n ? `${n} protected` : 'Nothing read'],
+      ['cookie_notices', 'Cookie notices', n => n ? `${n} rejected` : 'None answered'],
+      ['popups', 'Popups', n => `${n} blocked`],
+    ];
+    function renderShieldCats(d) {
+      const box = $('shCats');
+      if (!box.children.length) {
+        SH_CATS.forEach(([id, label]) => {
+          const row = document.createElement('div');
+          row.className = 'switch-row';
+          row.innerHTML = `<span>${label}<small class="sub" id="shN-${id}"></small></span><button class="sw" id="shC-${id}" role="switch" aria-label="${label} on this site"></button>`;
+          box.appendChild(row);
+          row.querySelector('button').onclick = e => {
+            const on = e.currentTarget.getAttribute('aria-checked') !== 'true';
+            e.currentTarget.setAttribute('aria-checked', String(on));
+            post('SetShieldCategory', { category: id, on });
+          };
+        });
+      }
+      const on = d.on || {}, counts = d.counts || {};
+      SH_CATS.forEach(([id, , text]) => {
+        const sw = $('shC-' + id), v = on[id];
+        sw.setAttribute('aria-checked', String(v === true));
+        sw.disabled = d.state !== 'on' || v === 'off';
+        sw.title = v === 'off' ? 'Turned off in Settings' : '';
+        $('shN-' + id).textContent = v === true ? text(counts[id] || 0) : '';
+      });
+      $('shN-trackers').textContent += on.trackers === true && d.replaced ? ` · ${d.replaced} replaced` : '';
+    }
     $('shSwitch').onclick = () => {
       if (!shieldHost) return;
       const bare = shieldHost.replace(/^www\./, '');
@@ -1041,8 +1074,12 @@
       $('pValid').textContent = s.valid_from ? `${s.valid_from} → ${s.valid_to}` : pending;
       $('pAlg').textContent = s.signature_algorithm || pending;
       $('pThumb').textContent = s.thumbprint || pending;
-      $('pStorage').textContent = s.is_internal ? '—' : (s.is_persistent ? 'Kept across sessions' : 'Cleared on exit');
+      $('pStorage').textContent = s.is_internal ? '—'
+        : !s.is_persistent || s.clear_on_exit ? 'Cleared when Shoji closes'
+        : s.forget_on_close ? 'Cleared when its tabs close' : 'Kept across sessions';
       $('cookieRow').hidden = $('clearCookiesBtn').hidden = !!s.is_internal;
+      $('forgetRow').hidden = !!s.is_internal || !s.is_persistent;
+      $('forgetSwitch').setAttribute('aria-checked', String(!!s.forget_on_close));
       if (!s.is_internal) { $('pCookies').textContent = '…'; resetClearBtn(); post('SiteCookies'); }
     };
 
@@ -1061,6 +1098,11 @@
       b.textContent = 'Clearing…';
       post('ClearSiteCookies');
     }
+    $('forgetSwitch').onclick = () => {
+      const on = $('forgetSwitch').getAttribute('aria-checked') !== 'true';
+      $('forgetSwitch').setAttribute('aria-checked', String(on));
+      post('SetForgetOnClose', { on });
+    };
     window.__siteCookies = d => {
       $('pCookies').textContent = d.cleared ? 'None' : String(d.n);
       if (d.cleared) { $('clearCookiesBtn').textContent = 'Cleared. The page was reloaded.'; setTimeout(resetClearBtn, 2500); }

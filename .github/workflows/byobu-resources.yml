@@ -1,5 +1,5 @@
 # Builds the signed Byobu data release from the upstream commits pinned in byobu-pins.json:
-# uBlock Origin's scriptlets (GPL-3.0) and Brave's resources.
+# uBlock Origin's scriptlets (GPL-3.0), Brave's resources and Consent-O-Matic's rules (MIT).
 name: byobu-resources
 
 on:
@@ -29,6 +29,12 @@ jobs:
           node scripts/byobu-assemble.mjs out/ubo-resources.json "$RUNNER_TEMP/ubo" "$(jq -r .ublock .github/byobu-pins.json)"
           curl -fsSL -o out/brave-resources.json \
             "https://raw.githubusercontent.com/brave/adblock-resources/$(jq -r .brave .github/byobu-pins.json)/dist/resources.json"
+          # Consent-O-Matic keeps one file per consent platform; Shoji reads them as one.
+          com="$RUNNER_TEMP/consent"
+          git init -q "$com"
+          git -C "$com" fetch -q --depth 1 https://github.com/cavi-au/Consent-O-Matic.git "$(jq -r .consentomatic .github/byobu-pins.json)"
+          git -C "$com" checkout -q FETCH_HEAD
+          jq -cs 'map(del(."$schema")) | add' "$com"/rules/*.json > out/consent-rules.json
       - name: Sanity check
         run: |
           # uBlock ships ~200 resources, Brave's own bundle ~20.
@@ -37,6 +43,10 @@ jobs:
             jq -e --argjson min "${check##*:}" 'type == "array" and length >= $min' "$f" >/dev/null
             echo "$f: $(jq length "$f") resources"
           done
+          # ~200 consent platforms, each with detectors and steps.
+          jq -e 'type == "object" and length >= 100 and all(.[]; (.detectors | type) == "array" and (.methods | type) == "array")' \
+            out/consent-rules.json >/dev/null
+          echo "out/consent-rules.json: $(jq length out/consent-rules.json) consent platforms"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: byobu-data
@@ -60,5 +70,5 @@ jobs:
         run: |
           gh release view byobu-data >/dev/null 2>&1 || gh release create byobu-data \
             --title "Byobu data" --prerelease \
-            --notes "uBlock Origin scriptlets and redirect resources (https://github.com/gorhill/uBlock, GPL-3.0) and Brave's resources (https://github.com/brave/adblock-resources, MPL-2.0). Downloaded by Shoji at runtime; not part of the MIT browser binary."
+            --notes "uBlock Origin scriptlets and redirect resources (https://github.com/gorhill/uBlock, GPL-3.0), Brave's resources (https://github.com/brave/adblock-resources, MPL-2.0) and Consent-O-Matic's cookie-notice rules (https://github.com/cavi-au/Consent-O-Matic, MIT). Downloaded by Shoji at runtime; not part of the MIT browser binary."
           gh release upload byobu-data out/* --clobber

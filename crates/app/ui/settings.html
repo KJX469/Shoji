@@ -220,6 +220,10 @@
           <div class="what"><b>Private mode</b><small>Off: Shoji remembers logins, history and cache like any browser. On: everything is forgotten when Shoji closes</small></div>
           <label class="switch"><input type="checkbox" id="privateMode" data-path="privacy.ephemeral_default"><span></span></label>
         </div>
+        <div class="row">
+          <div class="what"><b>Clear cookies and site data when Shoji closes</b><small>Every site is signed out and forgotten when the last window closes, except the sites you keep. History, bookmarks and passwords stay</small></div>
+          <label class="switch"><input type="checkbox" id="clearOnExit" data-path="privacy.clear_on_exit"><span></span></label>
+        </div>
         <div class="row stack" id="keepRow">
           <div class="what"><b>Sites to keep</b><small>These sites remember cookies, so you stay signed in</small></div>
           <div class="add">
@@ -227,6 +231,10 @@
             <button class="btn" onclick="addSite()">Add</button>
           </div>
           <div class="chips" id="sites"></div>
+        </div>
+        <div class="row stack" id="forgetRow">
+          <div class="what"><b>Sites forgotten when their tabs close</b><small>Their cookies and data are deleted when the last tab on the site closes. Add one from the lock in the address bar</small></div>
+          <div class="chips" id="forgetSites"></div>
         </div>
         <div class="row">
           <div class="what"><b>HTTPS only</b><small>Upgrade http:// pages to https://, and ask before using plain HTTP. Local addresses are left alone</small></div>
@@ -310,6 +318,22 @@
             <option value="standard">Standard</option><option value="aggressive">Aggressive</option><option value="off">Off</option>
           </select>
         </div>
+        <div class="row">
+          <div class="what"><b>Reject cookie notices</b><small>Answers a site's cookie notice with "Reject all" where it offers one, using Consent-O-Matic's rules. Never "Accept"</small></div>
+          <label class="switch"><input type="checkbox" data-path="shield.reject_cookie_notices"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="what"><b>Block Facebook embeds</b><small>Embedded posts, like buttons and comments follow you across sites. Signing in with Facebook still works</small></div>
+          <label class="switch"><input type="checkbox" data-path="shield.block_facebook_embeds"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="what"><b>Block X embeds</b><small>Embedded posts show as plain text instead</small></div>
+          <label class="switch"><input type="checkbox" data-path="shield.block_x_embeds"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="what"><b>Block LinkedIn embeds</b><small>Embedded posts and profile badges</small></div>
+          <label class="switch"><input type="checkbox" data-path="shield.block_linkedin_embeds"><span></span></label>
+        </div>
         <div class="row stack">
           <div class="what"><b>Paused sites</b><small>Byōbu leaves these alone. Use the shield button in the toolbar to add one</small></div>
           <div class="chips" id="paused"></div>
@@ -340,6 +364,10 @@
         <div class="row"><div class="what"><b>Camera</b></div><select data-path="permissions.camera"><option value="ask">Ask</option><option value="allow">Allow</option><option value="block">Block</option></select></div>
         <div class="row"><div class="what"><b>Microphone</b></div><select data-path="permissions.microphone"><option value="ask">Ask</option><option value="allow">Allow</option><option value="block">Block</option></select></div>
         <div class="row"><div class="what"><b>Notifications</b></div><select data-path="permissions.notifications"><option value="ask">Ask</option><option value="allow">Allow</option><option value="block">Block</option></select></div>
+        <div class="row">
+          <div class="what"><b>Quiet notification requests</b><small>A site that asks before you've clicked anything gets no prompt, only a crossed-out bell in the address bar that allows it</small></div>
+          <label class="switch"><input type="checkbox" data-path="permissions.quiet_notifications"><span></span></label>
+        </div>
       </div>
     </section>
 
@@ -587,10 +615,18 @@
       });
     };
     const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    // The keep list only applies in private mode.
-    function showKeepRow() { $('keepRow').hidden = !$('privateMode').checked; }
+    // The keep list applies in Private mode and to clearing when Shoji closes.
+    function showKeepRow() { $('keepRow').hidden = !$('privateMode').checked && !$('clearOnExit').checked; }
     $('privateMode').addEventListener('change', showKeepRow);
+    $('clearOnExit').addEventListener('change', showKeepRow);
     showKeepRow();
+    function renderForget() {
+      const sites = S.privacy.forget_on_close;
+      $('forgetRow').hidden = !sites.length;
+      $('forgetSites').innerHTML = sites.map((s, i) => `<span class="chip">${esc(s)}<button onclick="removeForget(${i})" aria-label="Stop forgetting ${esc(s)}">×</button></span>`).join('');
+    }
+    function removeForget(i) { S.privacy.forget_on_close.splice(i, 1); save('privacy.forget_on_close', S.privacy.forget_on_close); renderForget(); }
+    renderForget();
     function renderSites() {
       const sites = S.privacy.persistent_sites;
       $('sites').innerHTML = sites.length
