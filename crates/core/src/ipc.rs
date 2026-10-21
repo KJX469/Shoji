@@ -74,6 +74,8 @@ pub enum UiToHostMessage {
     ToggleWorkspacesSidebar,
     /// Start the "hide an element" picker in the active tab
     ShieldPickElement,
+    /// Open a prefilled "Broken site" issue for the active tab
+    ReportBrokenSite,
     /// A Byobu surface asks for fresh state (lists, counters, optionally the request log);
     /// `refresh` also re-checks every filter list now
     ShieldState {
