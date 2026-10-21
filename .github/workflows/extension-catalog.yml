@@ -1,51 +1,28 @@
-# Builds the extension store's catalog from the Chrome Web Store's category listings and adds it
-# to the Byobu data release, weekly.
 name: extension-catalog
-
 on:
-  schedule:
-    - cron: '17 4 * * 1'
   push:
-    branches: [main, claude/store-probe]
-    paths:
-      - scripts/extension-catalog.mjs
-      - .github/workflows/extension-catalog.yml
-  workflow_dispatch:
-
+    branches: [claude/store-probe]
 permissions: {}
-
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-      - run: |
-          mkdir out
-          node scripts/extension-catalog.mjs out/extension-catalog.json
-          ls -l out
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: extension-catalog
-          path: out/
-
-  # Runs no catalog code; only this job can write to the repository.
-  publish:
-    needs: build
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: extension-catalog
-          path: out
-      - env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: gh release upload byobu-data out/extension-catalog.json --clobber
+      - shell: node {0}
+        run: |
+          const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
+          const html = await (await fetch('https://chromewebstore.google.com/detail/nngceckbapebfimnlniiiahkandclblb', { headers: { 'user-agent': UA } })).text();
+          console.log('len', html.length);
+          const keys = [...html.matchAll(/AF_initDataCallback\(\{key: '(ds:\d+)'/g)].map(m => m[1]);
+          console.log('keys', keys.join(' '));
+          const ids = new Set([...html.matchAll(/[a-p]{32}/g)].map(m => m[0]));
+          console.log('distinct ids in page', ids.size);
+          const rec = html.match(/\["[a-p]{32}","https:\/\/lh3[^\]]{0,400}/g) || [];
+          console.log('records', rec.length); console.log(rec.slice(0, 4).join('\n---\n'));
+          const det = [...html.matchAll(/href="\.\/detail\/[a-z0-9-]*\/([a-p]{32})/g)].length;
+          console.log('detail links', det);
+          const t0 = Date.now(); let ok = 0;
+          for (let i = 0; i < 8; i++) { const r = await fetch('https://chromewebstore.google.com/detail/nngceckbapebfimnlniiiahkandclblb', { headers: { 'user-agent': UA } }); ok += r.ok; await r.arrayBuffer(); }
+          console.log('8 sequential detail fetches', ok, Date.now() - t0, 'ms');
