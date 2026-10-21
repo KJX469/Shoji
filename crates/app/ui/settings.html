@@ -244,6 +244,14 @@
           <label class="switch"><input type="checkbox" data-path="privacy.strict_tracking_prevention"><span></span></label>
         </div>
         <div class="row">
+          <div class="what"><b>Fingerprinting protection</b><small>Adds small, per-site noise to what pages can read about your canvas, graphics and audio, so sites can't recognise you by them. Strict also hides your graphics card. Off on sites where you lower the shield</small></div>
+          <select data-path="privacy.fingerprinting">
+            <option value="standard">Standard</option>
+            <option value="strict">Strict</option>
+            <option value="off">Off</option>
+          </select>
+        </div>
+        <div class="row">
           <div class="what"><b>Block third-party cookies</b><small>Embedded sites can't set cookies on the pages you visit. Some sign-in and payment flows need them. Applies after a restart</small></div>
           <label class="switch"><input type="checkbox" data-path="privacy.block_third_party_cookies"><span></span></label>
         </div>

@@ -1287,6 +1287,46 @@ fn test_new_defaults_apply_to_old_files_but_not_to_private_setup() {
 }
 
 #[test]
+fn test_third_party_cookies_and_fingerprinting_default_on_once() {
+    let dir = std::env::temp_dir().join(format!("shoji_rev3_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("settings.json");
+    let fresh = Settings::default();
+    assert!(fresh.privacy.block_third_party_cookies);
+    assert_eq!(fresh.privacy.fingerprinting, "standard");
+
+    // A 0.1.5 file carries the old "off"; it is turned on once.
+    std::fs::write(
+        &path,
+        r#"{"defaults_rev":2,"privacy":{"block_third_party_cookies":false}}"#,
+    )
+    .unwrap();
+    let mut s = Settings::load_from_path(&path);
+    assert!(s.privacy.block_third_party_cookies);
+    assert_eq!(s.privacy.fingerprinting, "standard");
+
+    // Turned off after that, it stays off.
+    s.privacy.block_third_party_cookies = false;
+    s.privacy.fingerprinting = "nonsense".into();
+    s.save_to_path(&path).unwrap();
+    let back = Settings::load_from_path(&path);
+    assert!(!back.privacy.block_third_party_cookies);
+    assert_eq!(back.privacy.fingerprinting, "standard");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_fingerprinting_follows_a_paused_shield_only() {
+    let mut s = Settings::default();
+    s.privacy.fingerprinting = "strict".into();
+    s.shield.paused_sites = vec!["bank.example".into()];
+    assert_eq!(s.fingerprint_mode_for("www.bank.example"), "off");
+    assert_eq!(s.fingerprint_mode_for("news.example"), "strict");
+    s.shield.mode = "off".into();
+    assert_eq!(s.fingerprint_mode_for("news.example"), "strict");
+}
+
+#[test]
 fn test_dark_mode_per_site_always_never_and_follow() {
     let mut s = Settings::default();
     // Dark mode off: only a site set to "always" is dark.

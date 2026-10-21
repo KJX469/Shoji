@@ -2617,7 +2617,14 @@ impl BrowserApp {
                     .map(|c| shield::parse_mode(c.settings.shield_mode_for(page)))
                     .unwrap_or(shoji_byobu::Mode::Standard)
             });
-            request_hook = shield::attach(&view, self.shield.clone(), mode_for, tab_id);
+            let pages_fp = self.pages.clone();
+            let fp_for: shield::FpFor = Arc::new(move |page: &str| {
+                pages_fp
+                    .read()
+                    .map(|c| shield::parse_fp(c.settings.fingerprint_mode_for(page)))
+                    .unwrap_or(shield::Fp::Standard)
+            });
+            request_hook = shield::attach(&view, self.shield.clone(), mode_for, fp_for, tab_id);
             let pages = self.pages.clone();
             emulated = darkfixes::attach(
                 &view,
