@@ -689,6 +689,7 @@ pub fn attach(
     // the main frame's request is the one for this URL. Requests from every frame and worker
     // are matched against it, which is what third-party rules expect.
     let top_target: Arc<Mutex<String>> = Arc::default();
+    let page_scripts: Rc<RefCell<PageScripts>> = Rc::default();
 
     // Network: every http(s)/ws request goes through the matcher.
     {
@@ -879,7 +880,9 @@ pub fn attach(
     {
         let core_nav = core.clone();
         let top_target = top_target.clone();
-        let slot: Arc<Mutex<DocScript>> = Arc::default();
+        let page_scripts = page_scripts.clone();
+        let started = std::cell::Cell::new(false);
+        let dark_slot: Arc<Mutex<DocScript>> = Arc::default();
         let handler = NavigationStartingEventHandler::create(Box::new(move |_, args| {
             let _doing = crate::crash::doing("byobu navigation");
             let Some(args) = args else { return Ok(()) };
@@ -929,26 +932,210 @@ pub fn attach(
                     script.as_deref().unwrap_or("")
                 ));
             }
-            if let Some(fix) = crate::darkfixes::script_for(&url) {
-                // The site's dark-mode fix rides along with the page's own scripts.
-                script = Some(format!(
-                    "{fix}
-{}",
-                    script.as_deref().unwrap_or("")
-                ));
-            }
+            // The site's dark-mode fix depends on the path, so it has a slot of its own.
+            register(
+                &core_nav,
+                &dark_slot,
+                crate::darkfixes::script_for(&url).as_deref(),
+            );
             if web && SEND_GPC.load(Ordering::Relaxed) {
                 // The header alone is not enough: consent scripts read the property.
                 let gpc = format!("{GPC_SCRIPT}\n{}", script.as_deref().unwrap_or(""));
                 script = Some(gpc);
             }
-            register(&core_nav, &slot, script.as_deref());
+            if let Some(host) = crate::extract_host(&url) {
+                // A new tab's first page would otherwise race its script's registration (and
+                // usually win); it is cancelled and opened again once the script is in place.
+                let first = !started.replace(true);
+                let resume = first.then(|| url.clone());
+                if PageScripts::ensure(&page_scripts, &core_nav, &host, script, resume) {
+                    unsafe { args.SetCancel(true)? };
+                    return Ok(());
+                }
+            }
             frames.page_changed();
             Ok(())
         }));
         let _ = unsafe { core.add_NavigationStarting(&handler, &mut token) };
     }
+
+    // A document that started without its scripts (a cached page, or a redirect to another
+    // site) gets them as soon as it starts loading; they skip themselves where they already ran.
+    {
+        let core_load = core.clone();
+        let handler = ContentLoadingEventHandler::create(Box::new(move |_, _| {
+            let _doing = crate::crash::doing("byobu content loading");
+            let mut src = PWSTR::null();
+            unsafe { core_load.Source(&mut src)? };
+            let Some(host) = crate::extract_host(&take(src)) else {
+                return Ok(());
+            };
+            let js = page_scripts.borrow().text(&host);
+            if let Some(js) = js {
+                let w = wide(&js);
+                let done = ExecuteScriptCompletedHandler::create(Box::new(|_, _| Ok(())));
+                let _ = unsafe { core_load.ExecuteScript(PCWSTR(w.as_ptr()), &done) };
+            }
+            Ok(())
+        }));
+        let _ = unsafe { core.add_ContentLoading(&handler, &mut token) };
+    }
     hooked
+}
+
+/// How many sites a tab keeps document-start scripts registered for.
+const PAGE_SCRIPT_SITES: usize = 8;
+
+/// One registered page script, for pages on `host`.
+struct PageScript {
+    host: String,
+    hash: u64,
+    text: String,
+    /// Set once the engine has registered it
+    id: Option<String>,
+    serial: u64,
+    /// A cancelled navigation to start again once it is registered
+    resume: Option<String>,
+    /// The script this one replaces, removed once this one is in place
+    retire: Option<String>,
+}
+
+/// A tab's document-start scripts (fingerprinting, GPC, dark-mode fixes, cosmetics), one per
+/// recently visited site. Registration is asynchronous, so swapping one script per navigation
+/// let fast pages commit before their script existed; each site keeps its own instead, and each
+/// runs only on its own site.
+#[derive(Default)]
+struct PageScripts {
+    /// Least recently used first
+    entries: Vec<PageScript>,
+    serial: u64,
+}
+
+impl PageScripts {
+    /// The script registered for `host`.
+    fn text(&self, host: &str) -> Option<String> {
+        self.entries
+            .iter()
+            .find(|e| e.host == host)
+            .map(|e| e.text.clone())
+    }
+
+    /// Make `script` the one registered for `host` (`None`: nothing for it). With `resume`, a
+    /// newly added script navigates there once registered; returns true when it will, so the
+    /// caller cancels the navigation under way.
+    fn ensure(
+        state: &Rc<RefCell<Self>>,
+        core: &ICoreWebView2,
+        host: &str,
+        script: Option<String>,
+        resume: Option<String>,
+    ) -> bool {
+        let remove = |id: &str| {
+            let w = wide(id);
+            let _ = unsafe { core.RemoveScriptToExecuteOnDocumentCreated(PCWSTR(w.as_ptr())) };
+        };
+        let text = script.map(|s| page_guard(host, &s));
+        let hash = text.as_deref().map(|s| {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            s.hash(&mut h);
+            h.finish()
+        });
+        let (serial, text) = {
+            let mut st = state.borrow_mut();
+            // A changed script (new lists, a setting) replaces the old one only once it is
+            // registered itself: a page that loads meanwhile still gets the previous one.
+            let mut retire = None;
+            if let Some(i) = st.entries.iter().position(|e| e.host == host) {
+                if Some(st.entries[i].hash) == hash {
+                    let e = st.entries.remove(i);
+                    st.entries.push(e);
+                    return false;
+                }
+                let old = st.entries.remove(i);
+                if let Some(id) = &old.retire {
+                    remove(id);
+                }
+                retire = old.id;
+            }
+            let (Some(text), Some(hash)) = (text, hash) else {
+                if let Some(id) = &retire {
+                    remove(id);
+                }
+                return false;
+            };
+            st.serial += 1;
+            let serial = st.serial;
+            st.entries.push(PageScript {
+                host: host.to_string(),
+                hash,
+                text: text.clone(),
+                id: None,
+                serial,
+                resume: resume.clone(),
+                retire,
+            });
+            while st.entries.len() > PAGE_SCRIPT_SITES {
+                let old = st.entries.remove(0);
+                for id in old.id.iter().chain(&old.retire) {
+                    remove(id);
+                }
+            }
+            (serial, text)
+        };
+        let (st, core_done) = (state.clone(), core.clone());
+        let handler = AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(
+            move |result, id| {
+                let ok = result.is_ok();
+                let found = st
+                    .borrow_mut()
+                    .entries
+                    .iter_mut()
+                    .find(|e| e.serial == serial)
+                    .map(|e| {
+                        e.id = ok.then(|| id.clone());
+                        (e.resume.take(), e.retire.take())
+                    });
+                match found {
+                    Some((resume, retire)) => {
+                        if let Some(old) = retire {
+                            let w = wide(&old);
+                            let _ = unsafe {
+                                core_done.RemoveScriptToExecuteOnDocumentCreated(PCWSTR(w.as_ptr()))
+                            };
+                        }
+                        if let Some(url) = resume {
+                            let w = wide(&url);
+                            let _ = unsafe { core_done.Navigate(PCWSTR(w.as_ptr())) };
+                        }
+                    }
+                    // Replaced or dropped while it was being registered.
+                    None if ok => {
+                        let w = wide(&id);
+                        let _ = unsafe {
+                            core_done.RemoveScriptToExecuteOnDocumentCreated(PCWSTR(w.as_ptr()))
+                        };
+                    }
+                    None => {}
+                }
+                Ok(())
+            },
+        ));
+        let w = wide(&text);
+        unsafe { core.AddScriptToExecuteOnDocumentCreated(PCWSTR(w.as_ptr()), &handler) }.is_ok()
+            && resume.is_some()
+    }
+}
+
+/// Wrap a page script so it runs only in documents whose top-level page is on `host` (the top
+/// frame and the frames inside it), and once per document.
+fn page_guard(host: &str, script: &str) -> String {
+    let h = serde_json::to_string(host).unwrap_or_default();
+    format!(
+        "(function(){{if(window.__shojiPage)return;var a=location.ancestorOrigins,t=location.hostname;\
+if(a&&a.length){{try{{t=new URL(a[a.length-1]).hostname}}catch(e){{}}}}if(t!=={h})return;\
+Object.defineProperty(window,'__shojiPage',{{value:true}});\n{script}\n}})();"
+    )
 }
 
 /// How many iframe hosts a tab keeps document-start cosmetics for.
