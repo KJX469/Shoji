@@ -31,8 +31,10 @@ jobs:
             "https://raw.githubusercontent.com/brave/adblock-resources/$(jq -r .brave .github/byobu-pins.json)/dist/resources.json"
       - name: Sanity check
         run: |
-          for f in out/*.json; do
-            jq -e 'type == "array" and length >= 50' "$f" >/dev/null
+          # uBlock ships ~200 resources, Brave's own bundle ~20.
+          for check in ubo-resources:100 brave-resources:5; do
+            f=out/${check%%:*}.json
+            jq -e --argjson min "${check##*:}" 'type == "array" and length >= $min' "$f" >/dev/null
             echo "$f: $(jq length "$f") resources"
           done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
