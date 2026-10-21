@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en" data-accent="{{ACCENT}}" data-mode="{{MODE}}" data-fonts="{{FONTS}}">
+<head>
+  <meta charset="UTF-8">
+  <title>History</title>
+  <style>
+{{THEME_CSS}}
+    html, body { min-height: 100%; }
+    body { font-size: 13.5px; overflow-y: auto; }
+    button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+    input { font: inherit; color: inherit; }
+    /* Kumiko lattice, very faint, behind the list */
+    body::before { content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .45;
+      background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+      background-size: 132px 196px; background-position: center -40px;
+      -webkit-mask-image: linear-gradient(90deg, #000, transparent 18%, transparent 82%, #000); mask-image: linear-gradient(90deg, #000, transparent 18%, transparent 82%, #000); }
+    .page { position: relative; width: min(860px, 100% - 48px); margin: 0 auto; padding: 28px 0 120px; }
+
+    .top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+    .brand { display: flex; align-items: center; gap: 12px; margin-right: auto; }
+    .brand .crane { width: 40px; height: 40px; }
+    h1 { font-family: var(--font-display); font-size: 26px; font-weight: 400; letter-spacing: -.01em; }
+    .tabs { display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface-2); }
+    .tabs button { height: 30px; padding: 0 16px; border-radius: 8px; color: var(--ink-2); font-size: 13px; transition: background .15s, color .15s; }
+    .tabs button:hover { color: var(--ink); }
+    .tabs button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px var(--line-strong); }
+
+    .tools { display: flex; align-items: center; gap: 10px; margin-top: 20px; }
+    .search { position: relative; flex: 1; }
+    .search svg.i { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--ink-3); }
+    .search input { width: 100%; height: 42px; padding: 0 16px 0 40px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); outline: none; }
+    .search input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--tint-soft); }
+    .btn { height: 42px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+    .btn:hover { background: var(--hover); border-color: var(--line-strong); }
+    .btn.primary { background: var(--tone); border-color: transparent; color: var(--on-tone); font-weight: 600; }
+    .btn.primary:hover { filter: brightness(.97); }
+    .btn.danger { color: var(--danger); }
+
+    /* The list, drawn like a hand scroll: a thin rule down the left with a mark for each day */
+    #list { position: relative; margin-top: 26px; padding-left: 22px; }
+    #list::before { content: ""; position: absolute; left: 5px; top: 8px; bottom: 0; width: 1px; background: linear-gradient(var(--line-strong), var(--line-strong) 92%, transparent); }
+    .day { position: relative; padding: 18px 0 8px; font-family: var(--font-display); font-size: 15px; color: var(--ink-2); }
+    .day::before { content: ""; position: absolute; left: -22px; top: 22px; width: 11px; height: 11px; border-radius: 50%; background: var(--bg); border: 2px solid var(--tone); }
+    .day small { margin-left: 8px; font: 12px var(--font); color: var(--ink-3); }
+    .row { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 6px 10px 6px 8px; border-radius: 10px; cursor: pointer; animation: row-in .24s var(--ease) both; }
+    @keyframes row-in { from { opacity: 0; transform: translateY(6px); } }
+    .row:hover { background: var(--hover); }
+    .row.sel { background: var(--tint-soft); }
+    .check { width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--line-strong); display: grid; place-items: center; flex-shrink: 0; opacity: 0; transition: opacity .12s; }
+    .row:hover .check, body.selecting .check { opacity: 1; }
+    .row.sel .check { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+    .check svg { width: 12px; height: 12px; opacity: 0; }
+    .row.sel .check svg { opacity: 1; }
+    .tile { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; flex-shrink: 0; background: var(--tint); font: 600 13px var(--font-display); color: var(--ink-2); text-transform: uppercase; }
+    .main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .s { font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+    .s.bad { color: var(--warn); }
+    .when { font-size: 12px; color: var(--ink-3); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+    .acts { display: none; gap: 2px; flex-shrink: 0; }
+    .row:hover .acts { display: flex; }
+    .row:hover .when { display: none; }
+    .ib { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; color: var(--ink-3); }
+    .ib:hover { background: var(--press); color: var(--ink); }
+    .bar { height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; margin-top: 4px; }
+    .bar div { height: 100%; background: var(--accent); transition: width .2s linear; }
+
+    .empty { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 70px 0; color: var(--ink-3); text-align: center; line-height: 1.6; }
+    .empty .crane { width: 78px; height: 78px; margin-bottom: 10px; }
+    .empty b { color: var(--ink-2); font-family: var(--font-display); font-weight: 400; font-size: 18px; }
+    .empty .zzz { top: 48px; left: calc(50% + 34px); font-size: 18px; }
+    .empty .zzz:nth-of-type(2) { top: 36px; left: calc(50% + 48px); }
+    #more { height: 1px; }
+
+    /* Selection bar */
+    #selbar { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 24px); opacity: 0; pointer-events: none; display: flex; align-items: center; gap: 14px; padding: 8px 8px 8px 18px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line-strong); box-shadow: var(--shadow); transition: opacity .18s, transform .22s var(--ease); z-index: 5; }
+    #selbar.on { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
+    #selbar .btn { height: 34px; border-radius: 9px; }
+
+    /* Clear browsing data */
+    #veil { position: fixed; inset: 0; z-index: 9; display: none; place-items: center; background: color-mix(in srgb, var(--bg) 70%, transparent); backdrop-filter: blur(3px); }
+    #veil.on { display: grid; animation: fade .18s ease both; }
+    @keyframes fade { from { opacity: 0; } }
+    .card { width: min(440px, 100% - 32px); padding: 24px; border-radius: 18px; background: var(--surface); border: 1px solid var(--line-strong); box-shadow: var(--shadow); animation: rise .26s var(--ease) both; }
+    @keyframes rise { from { opacity: 0; transform: translateY(14px) scale(.98); } }
+    .card h2 { font-family: var(--font-display); font-size: 20px; font-weight: 400; }
+    .card p { color: var(--ink-2); margin-top: 6px; line-height: 1.55; font-size: 13px; }
+    .card .hero { display: flex; align-items: center; gap: 14px; }
+    .card .hero .crane { width: 46px; height: 46px; }
+    .opts { display: flex; flex-direction: column; margin: 18px 0 8px; }
+    .opt { display: flex; align-items: center; gap: 12px; padding: 9px 4px; cursor: pointer; border-radius: 8px; }
+    .opt:hover { background: var(--hover); }
+    .opt input { width: 16px; height: 16px; accent-color: var(--accent); }
+    .opt small { color: var(--ink-3); display: block; font-size: 11.5px; }
+    select { width: 100%; height: 38px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); outline: none; }
+    .card .go { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+    .done-msg { display: none; flex-direction: column; align-items: center; text-align: center; gap: 6px; padding: 10px 0 4px; }
+    .done-msg .crane { width: 64px; height: 64px; margin-bottom: 6px; }
+    .card.done .form { display: none; }
+    .card.done .done-msg { display: flex; }
+  </style>
+</head>
+<body data-tab="{{TAB}}">
+  <div class="page">
+    <div class="top">
+      <div class="brand">{{CRANE}}<h1 id="heading">History</h1></div>
+      <div class="tabs" role="tablist">
+        <button role="tab" id="tabHistory" aria-selected="true" onclick="setTab('history')">History</button>
+        <button role="tab" id="tabDownloads" aria-selected="false" onclick="setTab('downloads')">Downloads</button>
+      </div>
+    </div>
+
+    <div class="tools">
+      <label class="search">
+        <svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>
+        <input id="q" type="search" autocomplete="off" spellcheck="false" placeholder="Search history" aria-label="Search">
+      </label>
+      <button class="btn" onclick="showClear()"><svg class="i" viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg>Clear browsing data</button>
+    </div>
+
+    <div id="list" role="list"></div>
+    <div id="more"></div>
+  </div>
+
+  <div id="selbar" role="status">
+    <span id="selCount"></span>
+    <button class="btn" onclick="clearSelection()">Cancel</button>
+    <button class="btn primary" onclick="deleteSelected()">Remove</button>
+  </div>
+
+  <div id="veil" onclick="if (event.target === this) hideClear()">
+    <div class="card" id="clearCard" role="dialog" aria-label="Clear browsing data">
+      <div class="form">
+        <div class="hero">{{CRANE_B}}<div><h2>Clear browsing data</h2><p>Choose what to let go of.</p></div></div>
+        <div class="opts">
+          <select id="range" aria-label="Time range">
+            <option value="hour">Last hour</option>
+            <option value="day">Last 24 hours</option>
+            <option value="week">Last 7 days</option>
+            <option value="month">Last 30 days</option>
+            <option value="all" selected>All time</option>
+          </select>
+          <label class="opt"><input type="checkbox" id="cHistory" checked><span>Browsing history<small>The pages you visited</small></span></label>
+          <label class="opt"><input type="checkbox" id="cDownloads" checked><span>Download list<small>The files stay on your computer</small></span></label>
+          <label class="opt"><input type="checkbox" id="cCookies"><span>Cookies and site data<small>You will be signed out of most sites</small></span></label>
+          <label class="opt"><input type="checkbox" id="cCache"><span>Cached images and files<small>Pages may load a little slower once</small></span></label>
+        </div>
+        <div class="go"><button class="btn" onclick="hideClear()">Cancel</button><button class="btn primary" onclick="doClear()">Clear data</button></div>
+      </div>
+      <div class="done-msg">{{CRANE_C}}<h2>All tidy.</h2><p id="doneText">Fresh paper.</p><div class="go"><button class="btn primary" onclick="hideClear()">Done</button></div></div>
+    </div>
+  </div>
+
+  <script>
+{{PET_JS}}
+    const $ = id => document.getElementById(id);
+    function post(action, payload = null) {
+      if (window.ipc) window.ipc.postMessage(JSON.stringify({ action, payload }));
+    }
+    const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const hostOf = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
+    const CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg>';
+    const ICON = {
+      x: '<svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+      folder: '<svg class="i" viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg>',
+      trash: '<svg class="i" viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg>',
+      open: '<svg class="i" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5H5V6h5"/></svg>',
+    };
+    const calm = Pet.calm;
+    const heroPet = document.querySelector('.brand .crane');
+    heroPet.classList.add('pet', 'live');
+
+    let tab = document.body.dataset.tab === 'downloads' ? 'downloads' : 'history';
+    let query = '', items = [], total = 0, loading = false, isPrivate = false;
+    let seq = Date.now() * 1000, expected = 0;
+    const selected = new Set();
+    let downloads = [];
+    const live = new Map();
+
+    /* ---- shared helpers ---- */
+    function dayLabel(ms) {
+      const d = new Date(ms), now = new Date();
+      const start = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+      const diff = Math.round((start(now) - start(d)) / 86400000);
+      if (diff === 0) return 'Today';
+      if (diff === 1) return 'Yesterday';
+      const opt = { weekday: 'long', month: 'long', day: 'numeric' };
+      if (d.getFullYear() !== now.getFullYear()) opt.year = 'numeric';
+      return d.toLocaleDateString(undefined, opt);
+    }
+    // One letter for the tile: the site's own name, not its "www" or "en".
+    const mark = host => {
+      const p = host.split('.');
+      let i = Math.max(0, p.length - 2);
+      if (p.length > 2 && p[p.length - 1].length <= 3 && p[p.length - 2].length <= 3) i = p.length - 3;
+      return (p[i] || '?')[0];
+    };
+    const timeOf = ms => new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    const size = b => {
+      if (!(b > 0)) return '';
+      const u = ['B', 'KB', 'MB', 'GB'];
+      let i = 0;
+      while (b >= 1024 && i < 3) { b /= 1024; i++; }
+      return (i > 1 ? b.toFixed(1) : Math.round(b)) + ' ' + u[i];
+    };
+
+    function emptyState(pose, title, text, zzz) {
+      return `<div class="empty">${document.getElementById('petSource').innerHTML.replace(/class="crane[^"]*"/, 'class="crane pet" data-pose="' + pose + '"')}`
+        + (zzz ? '<span class="zzz">z</span><span class="zzz">z</span>' : '') + `<b>${esc(title)}</b><span>${esc(text)}</span></div>`;
+    }
+
+    /* ---- tabs ---- */
+    function setTab(next) {
+      tab = next;
+      $('tabHistory').setAttribute('aria-selected', String(tab === 'history'));
+      $('tabDownloads').setAttribute('aria-selected', String(tab === 'downloads'));
+      $('heading').textContent = tab === 'history' ? 'History' : 'Downloads';
+      document.title = $('heading').textContent;
+      $('q').placeholder = tab === 'history' ? 'Search history' : 'Search downloads';
+      clearSelection();
+      Pet.pose(heroPet, 'nod');
+      if (tab === 'history') { load(true); } else { post('DownloadsQuery'); renderDownloads(); }
+    }
+
+    /* ---- history ---- */
+    function load(reset) {
+      if (tab !== 'history' || loading && !reset) return;
+      if (reset) { items = []; total = 0; }
+      loading = true;
+      expected = ++seq;
+      post('HistoryQuery', { query, offset: items.length, limit: 100, seq: expected });
+    }
+    window.__historyPage = (s, d) => {
+      if (s !== expected) return;
+      loading = false;
+      isPrivate = d.private;
+      items = items.concat(d.items);
+      total = d.total;
+      renderHistory();
+      if (d.clear) showClear();
+    };
+    window.__historyChanged = () => { selected.clear(); updateSelbar(); if (tab === 'history') load(true); else post('DownloadsQuery'); };
+
+    function renderHistory() {
+      const list = $('list');
+      if (!items.length) {
+        list.innerHTML = isPrivate
+          ? emptyState('shelter', 'Private mode keeps no history', 'Pages you visit are forgotten as you go.', false)
+          : query
+            ? emptyState('look', 'Nothing matches', 'Try fewer words, or part of the address.', false)
+            : emptyState('sleep', 'Nothing here yet', 'Pages you visit will be remembered here.', true);
+        return;
+      }
+      let html = '', lastDay = '';
+      let dayCount = 0;
+      items.forEach((h, i) => {
+        const day = dayLabel(h.last);
+        if (day !== lastDay) { lastDay = day; html += `<div class="day">${esc(day)}</div>`; }
+        const host = hostOf(h.url);
+        html += `<div class="row${selected.has(h.url) ? ' sel' : ''}" role="listitem" data-i="${i}" style="animation-delay:${Math.min(i, 12) * 14}ms">`
+          + `<span class="check">${CHECK}</span>`
+          + `<span class="tile">${esc(mark(host))}</span>`
+          + `<span class="main"><span class="t">${esc(h.title || h.url)}</span><span class="s">${esc(host)}${h.visits > 1 ? ' · ' + h.visits + ' visits' : ''}</span></span>`
+          + `<span class="when">${esc(timeOf(h.last))}</span>`
+          + `<span class="acts"><button class="ib" data-a="remove" title="Remove from history" aria-label="Remove from history">${ICON.x}</button></span>`
+          + `</div>`;
+      });
+      list.innerHTML = html;
+      document.body.classList.toggle('selecting', selected.size > 0);
+    }
+
+    $('list').addEventListener('click', e => {
+      const row = e.target.closest('.row');
+      if (!row) return;
+      if (tab === 'history') {
+        const h = items[+row.dataset.i];
+        if (!h) return;
+        if (e.target.closest('.check') || e.ctrlKey || e.metaKey || (selected.size && !e.target.closest('.ib'))) {
+          toggleSelect(h.url, row);
+        } else if (e.target.closest('[data-a="remove"]')) {
+          post('HistoryRemove', { urls: [h.url] });
+        } else {
+          post('Navigate', { url: h.url });
+        }
+      } else {
+        const d = downloads.find(x => x.key === +row.dataset.key);
+        if (!d) return;
+        const btn = e.target.closest('[data-a]');
+        if (btn) {
+          if (btn.dataset.a === 'cancel') { const l = live.get(d.key); if (l) post('CancelDownload', { download_id: l.download_id }); }
+          else post('DownloadAction', { key: d.key, action: btn.dataset.a });
+        } else if (d.state === 'done') {
+          post('DownloadAction', { key: d.key, action: 'open' });
+        }
+      }
+    });
+    function toggleSelect(url, row) {
+      if (selected.has(url)) selected.delete(url); else selected.add(url);
+      row.classList.toggle('sel', selected.has(url));
+      document.body.classList.toggle('selecting', selected.size > 0);
+      updateSelbar();
+    }
+    function updateSelbar() {
+      $('selbar').classList.toggle('on', selected.size > 0);
+      $('selCount').textContent = selected.size + (selected.size === 1 ? ' page selected' : ' pages selected');
+    }
+    function clearSelection() { selected.clear(); document.querySelectorAll('.row.sel').forEach(r => r.classList.remove('sel')); document.body.classList.remove('selecting'); updateSelbar(); }
+    function deleteSelected() { if (selected.size) post('HistoryRemove', { urls: [...selected] }); }
+
+    // More rows as you reach the end of the list.
+    new IntersectionObserver(es => {
+      if (es[0].isIntersecting && tab === 'history' && items.length < total) load(false);
+    }, { rootMargin: '400px' }).observe($('more'));
+
+    let searchTimer = 0;
+    $('q').addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        query = $('q').value.trim();
+        if (tab === 'history') load(true); else renderDownloads();
+      }, 140);
+    });
+    addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        if ($('veil').classList.contains('on')) hideClear();
+        else if (selected.size) clearSelection();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault(); $('q').focus(); $('q').select();
+      } else if (e.key === 'Delete' && selected.size) {
+        deleteSelected();
+      }
+    });
+
+    /* ---- downloads ---- */
+    window.__downloadsList = list => { downloads = list || []; if (tab === 'downloads') renderDownloads(); };
+    window.__syncDownloads = d => { live.set(d.key, d); if (tab === 'downloads') renderDownloads(); };
+    const ago = ms => {
+      const s = Math.max(0, (Date.now() - ms) / 1000);
+      if (s < 60) return 'just now';
+      if (s < 3600) return Math.floor(s / 60) + ' min ago';
+      if (s < 86400) return Math.floor(s / 3600) + ' h ago';
+      return dayLabel(ms) + ', ' + timeOf(ms);
+    };
+    function renderDownloads() {
+      const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+      const rows = downloads.filter(d => words.every(w => (d.name + ' ' + d.source).toLowerCase().includes(w)));
+      const list = $('list');
+      if (!rows.length) {
+        list.innerHTML = query
+          ? emptyState('look', 'Nothing matches', 'Try another word.', false)
+          : emptyState('sleep', 'No downloads yet', 'Files you save will be listed here.', true);
+        return;
+      }
+      list.innerHTML = rows.map((d, i) => {
+        const l = live.get(d.key);
+        const running = l ? l.state === 'InProgress' : d.state === 'downloading';
+        const done = l ? l.state === 'Completed' : d.state === 'done';
+        const pct = l && l.total_bytes > 0 ? Math.min(100, Math.round(l.received_bytes / l.total_bytes * 100)) : 0;
+        const ext = (d.name.split('.').pop() || '').slice(0, 4);
+        const meta = running ? `${pct}% · ${size(l ? l.received_bytes : 0)}${l && l.total_bytes > 0 ? ' of ' + size(l.total_bytes) : ''}`
+          : done ? [size(d.bytes), d.source, ago(d.started)].filter(Boolean).join(' · ')
+          : 'Stopped · ' + ago(d.started);
+        const acts = running ? `<button class="ib" data-a="cancel" title="Cancel" aria-label="Cancel">${ICON.x}</button>`
+          : (done ? `<button class="ib" data-a="open" title="Open" aria-label="Open">${ICON.open}</button><button class="ib" data-a="show" title="Show in folder" aria-label="Show in folder">${ICON.folder}</button>` : '')
+            + `<button class="ib" data-a="remove" title="Remove from list" aria-label="Remove from list">${ICON.trash}</button>`;
+        return `<div class="row" role="listitem" data-key="${d.key}" title="${esc(d.path)}" style="animation-delay:${Math.min(i, 12) * 14}ms">`
+          + `<span class="tile">${esc(ext || 'file')}</span>`
+          + `<span class="main"><span class="t">${esc(d.name)}</span><span class="s${!running && !done ? ' bad' : ''}">${esc(meta)}</span>`
+          + (running ? `<span class="bar"><div style="width:${pct}%"></div></span>` : '') + `</span>`
+          + `<span class="acts" style="display:flex">${acts}</span></div>`;
+      }).join('');
+    }
+
+    /* ---- clear browsing data ---- */
+    function showClear() {
+      $('clearCard').classList.remove('done');
+      $('veil').classList.add('on');
+      Pet.pose(document.querySelector('#clearCard .hero .crane'), 'tilt');
+    }
+    function hideClear() { $('veil').classList.remove('on'); }
+    function doClear() {
+      post('ClearBrowsingData', {
+        range: $('range').value, history: $('cHistory').checked, downloads: $('cDownloads').checked,
+        cookies: $('cCookies').checked, cache: $('cCache').checked,
+      });
+    }
+    window.__showClear = showClear;
+    window.__dataCleared = d => {
+      if (!$('veil').classList.contains('on')) return;
+      const parts = [];
+      if ($('cHistory').checked) parts.push(d.history ? `${d.history} page${d.history === 1 ? '' : 's'} forgotten` : 'history clear');
+      if ($('cCookies').checked) parts.push('cookies and site data cleared');
+      if ($('cCache').checked) parts.push('cache cleared');
+      $('doneText').textContent = parts.length ? parts.join(' · ') + '.' : 'Fresh paper.';
+      $('clearCard').classList.add('done');
+      Pet.pose(document.querySelector('#clearCard .done-msg .crane'), 'bow');
+    };
+    window.__applyTheme = t => { const r = document.documentElement; r.dataset.accent = t.accent; if (t.mode) r.dataset.mode = t.mode; if (t.fonts) r.dataset.fonts = t.fonts; };
+
+    // The empty-state crane is built from this template so each scene gets its own pose.
+    const petSource = document.createElement('template');
+    petSource.id = 'petSource';
+    document.body.appendChild(petSource);
+    petSource.innerHTML = document.querySelector('#clearCard .hero .crane').outerHTML.replace('<defs>', '<defs>');
+
+    setTab(tab);
+  </script>
+</body>
+</html>
