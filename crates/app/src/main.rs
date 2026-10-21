@@ -138,6 +138,14 @@ fn notes_layout_js(phase: &str, sheet: Frame, ms: f32) -> String {
 /// Internal pages are served from `http://shoji.<page>/` by wry's custom-protocol bridge.
 const INTERNAL_ORIGIN: &str = "http://shoji.";
 
+/// Internal pages carry everything they run inline: no script, frame, connection or form may come
+/// from anywhere else, so markup that slipped into one couldn't load code that talks to the host.
+const INTERNAL_CSP: &str = concat!(
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; ",
+    "img-src http: https: data: blob:; font-src http://shoji.fonts data:; media-src data: blob:; ",
+    "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+);
+
 /// Destination-URL bubble shown while hovering links (opt-out in Settings).
 const LINK_PREVIEW_SCRIPT: &str = r#"(() => {
   if (window.top !== window) return;
@@ -437,6 +445,20 @@ fn tracking_level(settings: &Settings) -> webview::Tracking {
     } else {
         webview::Tracking::Default
     }
+}
+
+/// Is `url` one of Shoji's own pages (`http://shoji.<page>/…`)? Only those are served by Shoji
+/// itself, so only their messages are trusted. A look-alike with credentials or a port in it
+/// (`http://shoji.x@site/`) is not one, whatever the engine would make of it.
+fn is_internal_origin(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix(INTERNAL_ORIGIN) else {
+        return false;
+    };
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    !authority.is_empty()
+        && authority
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.')
 }
 
 fn is_internal(url: &str) -> bool {
@@ -2521,6 +2543,7 @@ impl BrowserApp {
                     Some(html) => wry::http::Response::builder()
                         .header("Content-Type", "text/html; charset=utf-8")
                         .header("Cache-Control", "no-store")
+                        .header("Content-Security-Policy", INTERNAL_CSP)
                         .body(Cow::Owned(html.into_bytes())),
                     None => wry::http::Response::builder()
                         .status(404)
@@ -2568,7 +2591,7 @@ impl BrowserApp {
                 true
             })
             .with_ipc_handler(move |req: wry::http::Request<String>| {
-                let privileged = req.uri().to_string().starts_with(INTERNAL_ORIGIN);
+                let privileged = is_internal_origin(&req.uri().to_string());
                 if let Ok(msg) = serde_json::from_str::<UiToHostMessage>(req.body()) {
                     if privileged || msg.allowed_from_web_content() {
                         let _ = proxy_ipc.send_event(BrowserEvent::TabIpc(tab_id, msg));
@@ -6496,9 +6519,15 @@ impl BrowserApp {
                 }
             }
             M::LinkDropped { url } => {
+                // Any page can send this, so it only ever opens a web address.
                 let Ok(url) = normalize_url(&url, self.settings.search_url_template()) else {
                     return;
                 };
+                if !(url.starts_with("https://") || url.starts_with("http://"))
+                    || is_internal_origin(&url)
+                {
+                    return;
+                }
                 let in_split = self
                     .windows
                     .get(&win_id)
@@ -8358,6 +8387,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod feature_tests {
     use super::parse_css_color;
+
+    #[test]
+    fn only_shojis_own_pages_count_as_internal() {
+        use super::is_internal_origin as internal;
+        assert!(internal("http://shoji.settings/"));
+        assert!(internal("http://shoji.notice-12/?x=1"));
+        assert!(!internal("https://shoji.settings/"));
+        assert!(!internal("http://shoji.x@evil.example/"));
+        assert!(!internal("http://shoji.settings:8080/"));
+        assert!(!internal("http://shoji./"));
+        assert!(!internal("http://example.com/http://shoji.settings/"));
+    }
 
     #[test]
     fn page_colours_are_reduced_to_hex_or_dropped() {

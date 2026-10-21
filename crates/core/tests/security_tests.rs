@@ -463,3 +463,106 @@ fn test_security_v10_web_content_ipc_allowlist() {
     }
     .allowed_from_web_content());
 }
+
+// Mutation fuzzing: random edits of valid inputs must never panic a parser that takes outside
+// input (web pages' IPC, settings files, bookmark imports).
+
+struct Rng(u64);
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n.max(1) as u64) as usize
+    }
+}
+
+fn mutate(rng: &mut Rng, seed: &[u8]) -> Vec<u8> {
+    const PIECES: &[&[u8]] = &[
+        b"{",
+        b"}",
+        b"[",
+        b"]",
+        b"\"",
+        b":",
+        b",",
+        b"null",
+        b"-1",
+        b"1e309",
+        br"\u0000",
+        b"\xff",
+        b"<",
+        b">",
+        b"</a>",
+        b"<DT>",
+        b"\"children\"",
+        b"true",
+    ];
+    let mut out = seed.to_vec();
+    for _ in 0..1 + rng.below(6) {
+        let at = rng.below(out.len() + 1);
+        match rng.below(4) {
+            0 if !out.is_empty() => {
+                let end = (at + 1 + rng.below(8)).min(out.len());
+                out.drain(at.min(end)..end);
+            }
+            1 => {
+                let piece = PIECES[rng.below(PIECES.len())];
+                out.splice(at..at, piece.iter().copied());
+            }
+            2 if at < out.len() => out[at] = rng.next() as u8,
+            _ => {
+                let copy: Vec<u8> = out[at..(at + rng.below(16)).min(out.len())].to_vec();
+                out.splice(at..at, copy);
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn test_security_parsers_survive_mutated_input() {
+    let ipc_seeds = [
+        r#"{"action":"CreateTab","payload":{"url":"https://example.com"}}"#,
+        r#"{"action":"LoginSubmitted","payload":{"username":"a","password":"b"}}"#,
+        r#"{"action":"LinkDropped","payload":{"url":"https://example.com/x"}}"#,
+        r##"{"action":"PageInfo","payload":{"color":"#fff","has_video":true}}"##,
+        r#"{"action":"FindResult","payload":{"current":1,"total":3}}"#,
+    ];
+    let settings_seed = serde_json::to_string(&Settings::default()).unwrap();
+    let chromium = r#"{"roots":{"bookmark_bar":{"children":[{"type":"url","name":"A","url":"https://a.test/"},{"type":"folder","name":"F","children":[{"type":"url","name":"B","url":"https://b.test/"}]}]}}}"#;
+    let netscape = "<!DOCTYPE NETSCAPE-Bookmark-file-1><DL><p><DT><H3>F</H3><DL><p><DT><A HREF=\"https://a.test/\">A</A></DL><p></DL>";
+    let dir = std::env::temp_dir().join(format!("shoji_fuzz_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let settings_path = dir.join("settings.json");
+    let mut rng = Rng(0x5eed_1234_abcd_ef01);
+    for i in 0..4000 {
+        let seed = ipc_seeds[i % ipc_seeds.len()];
+        let m = mutate(&mut rng, seed.as_bytes());
+        if let Ok(text) = std::str::from_utf8(&m) {
+            if let Ok(msg) = serde_json::from_str::<UiToHostMessage>(text) {
+                let _ = msg.allowed_from_web_content();
+            }
+        }
+        let text = String::from_utf8_lossy(&mutate(&mut rng, chromium.as_bytes())).into_owned();
+        let _ = shoji_core::import::bookmarks::from_chromium_json(&text);
+        let text = String::from_utf8_lossy(&mutate(&mut rng, netscape.as_bytes())).into_owned();
+        let _ = shoji_core::import::bookmarks::from_netscape_html(&text);
+        if i % 8 == 0 {
+            std::fs::write(&settings_path, mutate(&mut rng, settings_seed.as_bytes())).unwrap();
+            let s = Settings::load_from_path(&settings_path);
+            assert!(matches!(
+                s.shield.mode.as_str(),
+                "off" | "standard" | "aggressive"
+            ));
+            assert!(matches!(
+                s.privacy.fingerprinting.as_str(),
+                "off" | "standard" | "strict"
+            ));
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
