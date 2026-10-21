@@ -233,7 +233,7 @@
           <label class="switch"><input type="checkbox" data-path="privacy.https_only"><span></span></label>
         </div>
         <div class="row">
-          <div class="what"><b>Clean links</b><small>Skip tracker redirects (Google, Facebook, Reddit and others) and drop tracking parameters such as utm_source and fbclid</small></div>
+          <div class="what"><b>Clean links</b><small>Skip tracker redirects (Google, Facebook, Reddit and others), drop tracking parameters such as utm_source and fbclid, and open AMP pages on the publisher's own site</small></div>
           <label class="switch"><input type="checkbox" data-path="shield.clean_links"><span></span></label>
         </div>
         <div class="row">
@@ -309,6 +309,14 @@
           <select data-path="shield.mode">
             <option value="standard">Standard</option><option value="aggressive">Aggressive</option><option value="off">Off</option>
           </select>
+        </div>
+        <div class="row">
+          <div class="what"><b>Hide cookie notices</b><small>Hides cookie banners and consent pop-ups using EasyList Cookie and uBlock Origin's cookie rules</small></div>
+          <label class="switch"><input type="checkbox" data-path="shield.hide_cookie_notices"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="what"><b>Lists for your language</b><small>Adds the regional ad lists for Windows' display language, as Brave does</small></div>
+          <label class="switch"><input type="checkbox" data-path="shield.regional_lists"><span></span></label>
         </div>
         <div class="row stack">
           <div class="what"><b>Paused sites</b><small>Byōbu leaves these alone. Use the shield button in the toolbar to add one</small></div>

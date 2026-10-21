@@ -137,11 +137,23 @@ impl Updater {
 
     /// Like [`Updater::sources`], plus lists the user added by URL.
     pub fn sources_with(&self, force: bool, custom: &[String]) -> Vec<ListSource> {
+        self.sources_for(force, custom, &[])
+    }
+
+    /// Like [`Updater::sources_with`], plus the regional lists for `languages` (catalog codes).
+    pub fn sources_for(
+        &self,
+        force: bool,
+        custom: &[String],
+        languages: &[String],
+    ) -> Vec<ListSource> {
         let mut all = sources::ublock_lists();
         all.extend(sources::community_lists());
+        all.extend(sources::url_tracking_lists());
+        all.extend(sources::cookie_lists());
         let _ = self.fetch("catalog", "json", sources::CATALOG_URL, 6 * 3600, force);
         if let Ok(json) = fs::read_to_string(self.file("catalog", "json")) {
-            let extra = sources::brave_lists_from_catalog(&json, &all);
+            let extra = sources::brave_lists_for(&json, &all, languages);
             all.extend(extra);
         }
         for url in custom {
@@ -168,8 +180,19 @@ impl Updater {
         custom: &[String],
         disabled: &[String],
     ) -> (Vec<ListSource>, Refresh) {
+        self.refresh_for(force, custom, disabled, &[])
+    }
+
+    /// [`Updater::refresh_with`], with the regional lists for `languages` (catalog codes).
+    pub fn refresh_for(
+        &self,
+        force: bool,
+        custom: &[String],
+        disabled: &[String],
+        languages: &[String],
+    ) -> (Vec<ListSource>, Refresh) {
         let all: Vec<ListSource> = self
-            .sources_with(force, custom)
+            .sources_for(force, custom, languages)
             .into_iter()
             .filter(|s| !disabled.contains(&s.id))
             .collect();
@@ -187,6 +210,14 @@ impl Updater {
             6 * 3600,
             force,
         ));
+        tally(self.fetch("debounce", "json", sources::DEBOUNCE_URL, 12 * 3600, force));
+        tally(self.fetch(
+            "clean-urls",
+            "json",
+            sources::CLEAN_URLS_URL,
+            12 * 3600,
+            force,
+        ));
         for s in &all {
             tally(self.fetch(&s.id, "txt", &s.url, s.refresh_secs, force));
         }
@@ -200,6 +231,15 @@ impl Updater {
             .iter()
             .filter_map(|id| fs::read_to_string(self.file(id, "json")).ok())
             .collect()
+    }
+
+    /// Brave's debounce and URL-cleaning rules, as last fetched.
+    pub fn navigation_rules(&self) -> crate::navigation::NavigationRules {
+        let read = |id: &str| fs::read_to_string(self.file(id, "json")).ok();
+        crate::navigation::NavigationRules::from_json(
+            read("debounce").as_deref(),
+            read("clean-urls").as_deref(),
+        )
     }
 
     /// Cached list text for a source, if it has ever been fetched.
