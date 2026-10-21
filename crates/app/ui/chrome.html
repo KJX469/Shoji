@@ -1396,7 +1396,7 @@
         const b = document.createElement('button');
         b.className = 'pill ' + (a.primary ? 'primary' : 'quiet');
         b.textContent = a.label;
-        b.onclick = () => { post(a.action, a.payload || null); dismissToast(); };
+        b.onclick = () => { if (a.action) post(a.action, a.payload || null); dismissToast(); };
         acts.appendChild(b);
       });
       const pet = el.querySelector('.crane');

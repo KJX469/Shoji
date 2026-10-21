@@ -493,11 +493,31 @@ impl Shoji {
 
     /// The window's toolbar strip (the chrome page with tabs in it).
     pub fn chrome(&self) -> Page {
-        self.page_where(
-            |u| u.starts_with("data:") || u.starts_with("about:blank"),
-            Duration::from_secs(30),
-        )
-        .expect("chrome strip")
+        // Other surfaces (side panel, dropdowns) are inline pages too; the strip has the tabs.
+        let end = Instant::now() + Duration::from_secs(30);
+        loop {
+            for t in self.targets() {
+                let url = t["url"].as_str().unwrap_or("");
+                if t["type"] != "page" || !(url.starts_with("data:") || url == "about:blank") {
+                    continue;
+                }
+                let Some(ws) = t["webSocketDebuggerUrl"].as_str() else {
+                    continue;
+                };
+                if let Some(mut p) = Page::connect(ws) {
+                    if p.eval("document.querySelectorAll('#tabs .tab').length") != 0 {
+                        return p;
+                    }
+                }
+            }
+            assert!(Instant::now() < end, "no chrome strip");
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+
+    /// The browser's process id.
+    pub fn pid(&self) -> u32 {
+        self.child.lock().unwrap().id()
     }
 
     pub fn is_running(&self) -> bool {
