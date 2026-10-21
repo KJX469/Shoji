@@ -9,22 +9,9 @@ jobs:
     steps:
       - run: |
           set +e
-          UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
-          for id in nngceckbapebfimnlniiiahkandclblb ddkjiahejlhfcafbddmgiahcphecmpfh cjpalhdlnbpafiamejdnhcphjbkeiagm; do
-            echo "== $id"
-            q="os=win&arch=x64&os_arch=x86_64&nacl_arch=x86-64&prod=chromecrx&prodchannel=stable&prodversion=130.0.6723.92&lang=en-US&acceptformat=crx3"
-            curl -sS -m 30 -A "$UA" "https://clients2.google.com/service/update2/crx?$q&x=id%3D$id%26v%3D0.0.0.1%26installsource%3Dondemand%26uc"; echo
-            curl -sS -m 60 -A "$UA" -o /tmp/a.crx -w '%{http_code} %{size_download}\n' -L "https://clients2.google.com/service/update2/crx?response=redirect&$q&x=id%3D$id%26installsource%3Dondemand%26uc"; head -c 4 /tmp/a.crx; echo
+          for id in nngceckbapebfimnlniiiahkandclblb aeblfdkhhhdcdjpifhhbdiojplfjncoa kbfnbcaeplbcioakkpcpgfkobkghlhen; do
+            for v in 130 140 150 160; do
+              printf '%s %s: ' $id $v
+              curl -sS -m 30 "https://clients2.google.com/service/update2/crx?response=updatecheck&prodversion=$v.0.0.0&acceptformat=crx2,crx3&x=id%3D$id%26v%3D0.0.0.1%26uc" | grep -o 'status="noupdate"\|version="[0-9.]*"' | head -1
+            done
           done
-          echo "== category data"
-          curl -sSL -m 30 -A "$UA" -o /tmp/c.html "https://chromewebstore.google.com/category/extensions/lifestyle/shopping"
-          grep -o 'AF_initDataCallback({key: .ds:[0-9]*' /tmp/c.html | head
-          python3 - <<'PY'
-          import re
-          t=open('/tmp/c.html',encoding='utf-8').read()
-          i=t.find('nngceckbapebfimnlniiiahkandclblb')
-          j=t.find('honey')
-          k=[m.start() for m in re.finditer(r'[a-p]{32}',t)][:1]
-          print(len(t),i,j,k)
-          if k: print(t[max(0,k[0]-200):k[0]+900])
-          PY
