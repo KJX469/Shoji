@@ -20,9 +20,10 @@ const HOUR: u64 = 3600;
 
 const UASSETS: &str = "https://ublockorigin.github.io/uAssets/filters";
 
-/// Brave's resource bundle (scriptlets and redirect stubs, tracking uBlock Origin's).
+/// Brave's resource bundle (scriptlets and redirect stubs), republished with uBlock Origin's by
+/// the `byobu-resources` workflow from a reviewed, pinned commit.
 pub const RESOURCES_URL: &str =
-    "https://raw.githubusercontent.com/brave/adblock-resources/master/dist/resources.json";
+    "https://github.com/KJX469/Shoji/releases/download/byobu-data/brave-resources.json";
 
 /// uBlock Origin's scriptlets and redirect stubs, assembled from its source by the
 /// `byobu-resources` workflow (uBO ships them as ES modules, so there is no file to download

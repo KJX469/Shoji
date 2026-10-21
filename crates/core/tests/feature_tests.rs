@@ -485,8 +485,10 @@ fn one_bad_setting_keeps_the_rest_and_the_bad_file_is_kept() {
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("settings.json");
 
-    let mut good = Settings::default();
-    good.first_run_complete = true;
+    let good = Settings {
+        first_run_complete: true,
+        ..Default::default()
+    };
     let mut json: serde_json::Value = serde_json::to_value(&good).unwrap();
     json["appearance"]["accent"] = serde_json::json!(5);
     // A byte-order mark in front must not matter either.

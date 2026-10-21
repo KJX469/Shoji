@@ -3402,6 +3402,7 @@ impl BrowserApp {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn show_overlay(
         &mut self,
         win_id: WindowId,

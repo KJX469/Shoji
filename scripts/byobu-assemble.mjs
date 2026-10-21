@@ -1,11 +1,12 @@
 // Assembles uBlock Origin's scriptlets and redirect resources into the JSON that Brave's
 // `adblock` engine consumes (an array of `Resource`s).
 //
-//   node scripts/byobu-assemble.mjs <out.json> [work-dir]
+//   node scripts/byobu-assemble.mjs <out.json> [work-dir] [commit]
 //
 // uBO keeps its scriptlets as ES modules; importing them in Node and calling `toString()` on
 // the registered functions is exactly what uBO itself does when it injects them.
-// Keeps a shallow sparse clone in <work-dir> so repeat runs only fetch what changed.
+// Keeps a shallow sparse clone in <work-dir> so repeat runs only fetch what changed. `commit`
+// (default: master) is the pinned uBlock commit from .github/byobu-pins.json.
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -15,20 +16,20 @@ import { pathToFileURL } from 'node:url';
 const out = resolve(process.argv[2] ?? 'ubo-resources.json');
 const work = resolve(process.argv[3] ?? join(process.env.TEMP ?? '/tmp', 'byobu-ubo'));
 const repo = join(work, 'uBlock');
+const commit = process.argv[4] ?? 'master';
 const git = (...a) => execFileSync('git', a, { stdio: 'pipe', cwd: existsSync(repo) ? repo : work });
 
 mkdirSync(work, { recursive: true });
-if (existsSync(join(repo, '.git'))) {
-  git('fetch', '--depth', '1', 'origin', 'master');
-  git('reset', '--hard', 'origin/master');
-} else {
-  git('clone', '--depth', '1', '--filter=blob:none', '--sparse', 'https://github.com/gorhill/uBlock.git', repo);
+if (!existsSync(join(repo, '.git'))) {
+  git('clone', '--depth', '1', '--filter=blob:none', '--sparse', '--no-checkout', 'https://github.com/gorhill/uBlock.git', repo);
   execFileSync(
     'git',
     ['sparse-checkout', 'set', '--no-cone', '/src/js/resources/', '/src/js/*.js', '/src/web_accessible_resources/'],
     { cwd: repo },
   );
 }
+git('fetch', '--depth', '1', 'origin', commit);
+git('checkout', '--force', '--detach', 'FETCH_HEAD');
 const head = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: repo }).toString().trim();
 
 const imp = (p) => import(pathToFileURL(join(repo, p)).href);

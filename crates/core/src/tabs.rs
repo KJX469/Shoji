@@ -971,7 +971,7 @@ impl TabManager {
                 pos - 1
             };
             let next_ws_id = self.workspaces[next_pos].id;
-            let removed_tabs: Vec<TabState> = self.tabs.drain(..).collect();
+            let removed_tabs: Vec<TabState> = std::mem::take(&mut self.tabs);
             for t in removed_tabs {
                 self.record_closed(t.url, t.title);
             }
@@ -2134,7 +2134,7 @@ pub fn normalize_url(input: &str, search_template: &str) -> Result<String, Strin
             Some(v6) => v6.split(']').next().unwrap_or(""),
             None => host.split(':').next().unwrap_or(""),
         };
-        let port_ok = authority.rsplit_once(':').map_or(true, |(_, p)| {
+        let port_ok = authority.rsplit_once(':').is_none_or(|(_, p)| {
             p.is_empty() || p.bytes().all(|b| b.is_ascii_digit()) || p.ends_with(']')
         });
         let is_ip = host.contains(':')

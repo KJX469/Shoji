@@ -1,32 +1,62 @@
-# Builds uBlock Origin's scriptlets (GPL-3.0) into the byobu-data release asset Shoji downloads.
+# Builds the signed Byobu data release from the upstream commits pinned in byobu-pins.json:
+# uBlock Origin's scriptlets (GPL-3.0) and Brave's resources.
 name: byobu-resources
 
 on:
-  schedule:
-    - cron: "17 */6 * * *"
+  push:
+    branches: [main]
+    paths:
+      - .github/byobu-pins.json
+      - .github/workflows/byobu-resources.yml
+      - scripts/byobu-assemble.mjs
   workflow_dispatch:
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
   assemble:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-      - name: Assemble uBlock Origin resources
-        run: node scripts/byobu-assemble.mjs ubo-resources.json "$RUNNER_TEMP/ubo"
+      - name: Assemble from the pinned commits
+        run: |
+          mkdir out
+          node scripts/byobu-assemble.mjs out/ubo-resources.json "$RUNNER_TEMP/ubo" "$(jq -r .ublock .github/byobu-pins.json)"
+          curl -fsSL -o out/brave-resources.json \
+            "https://raw.githubusercontent.com/brave/adblock-resources/$(jq -r .brave .github/byobu-pins.json)/dist/resources.json"
       - name: Sanity check
         run: |
-          node -e "const r=require('./ubo-resources.json'); if(!Array.isArray(r)||r.length<50) process.exit(1); console.log(r.length+' resources')"
-      - name: Publish release asset
+          for f in out/*.json; do
+            jq -e 'type == "array" and length >= 50' "$f" >/dev/null
+            echo "$f: $(jq length "$f") resources"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: byobu-data
+          path: out/
+
+  # Runs no upstream code; only this job can write to the repository.
+  publish:
+    needs: assemble
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: byobu-data
+          path: out
+      - name: Publish release assets
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           gh release view byobu-data >/dev/null 2>&1 || gh release create byobu-data \
             --title "Byobu data" --prerelease \
-            --notes "uBlock Origin scriptlets and redirect resources, assembled from https://github.com/gorhill/uBlock (GPL-3.0). Downloaded by Shoji at runtime; not part of the MIT browser binary."
-          gh release upload byobu-data ubo-resources.json --clobber
+            --notes "uBlock Origin scriptlets and redirect resources (https://github.com/gorhill/uBlock, GPL-3.0) and Brave's resources (https://github.com/brave/adblock-resources, MPL-2.0). Downloaded by Shoji at runtime; not part of the MIT browser binary."
+          gh release upload byobu-data out/* --clobber
