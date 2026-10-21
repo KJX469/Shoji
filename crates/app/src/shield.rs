@@ -103,6 +103,9 @@ struct Inner {
     ready: bool,
     /// Tabs opened as popups, until their first page is known (see [`watch_popup`])
     popups: HashMap<u64, PopupWatch>,
+    /// Downloads stopped as dangerous, by id: the tab and the address, for "Download anyway"
+    blocked_downloads: BTreeMap<u64, (u64, String)>,
+    next_download: u64,
 }
 
 /// A popup tab whose navigations are checked against `$popup` rules until its first page loads:
@@ -290,6 +293,27 @@ impl Hub {
                 });
             }
         }
+    }
+
+    /// Remember a download stopped as dangerous; returns its id for "Download anyway".
+    fn block_download(&self, tab: u64, url: &str) -> u64 {
+        let Ok(mut h) = self.inner.lock() else {
+            return 0;
+        };
+        h.next_download += 1;
+        let id = h.next_download;
+        h.blocked_downloads.insert(id, (tab, url.to_string()));
+        while h.blocked_downloads.len() > 20 {
+            h.blocked_downloads.pop_first();
+        }
+        id
+    }
+
+    /// The tab and address of a stopped download the user chose to keep.
+    pub fn take_blocked_download(&self, id: u64) -> Option<(TabId, String)> {
+        let mut h = self.inner.lock().ok()?;
+        let (tab, url) = h.blocked_downloads.remove(&id)?;
+        Some((TabId(tab), url))
     }
 
     /// Tell the host to close a popup tab Byōbu stopped.
@@ -620,6 +644,7 @@ fn kind_name(k: RequestKind) -> &'static str {
         RequestKind::Ping => "ping",
         RequestKind::Websocket => "websocket",
         RequestKind::Popup => "popup",
+        RequestKind::Download => "download",
         RequestKind::Other => "other",
     }
 }
@@ -1028,6 +1053,48 @@ pub fn attach(
             Ok(())
         }));
         let _ = unsafe { core.add_SourceChanged(&handler, &mut token) };
+    }
+
+    // Downloads from the malware and phishing lists' sites are stopped, like their pages.
+    if let Ok(core4) = core.cast::<ICoreWebView2_4>() {
+        let shield = shield.clone();
+        let top_target = top_target.clone();
+        let tab = tab_id.0;
+        let handler = DownloadStartingEventHandler::create(Box::new(move |_, args| {
+            let _doing = crate::crash::doing("byobu download");
+            let Some(args) = args else { return Ok(()) };
+            let op = unsafe { args.DownloadOperation()? };
+            let mut uri = PWSTR::null();
+            unsafe { op.Uri(&mut uri)? };
+            let url = take(uri);
+            let (page, mode) = {
+                let p = top_target.borrow();
+                (p.url.clone(), p.mode)
+            };
+            let Some(rule) = shield.check_document(&url, mode) else {
+                return Ok(());
+            };
+            unsafe {
+                args.SetCancel(true)?;
+                args.SetHandled(true)?;
+            }
+            hub().record(
+                tab,
+                &page,
+                &url,
+                RequestKind::Download,
+                &Decision::Block,
+                Some(rule),
+            );
+            let id = hub().block_download(tab, &url);
+            if let Ok(p) = hub().proxy.lock() {
+                if let Some(p) = p.as_ref() {
+                    let _ = p.send_event(BrowserEvent::ShieldBlockedDownload { id, url });
+                }
+            }
+            Ok(())
+        }));
+        let _ = unsafe { core4.add_DownloadStarting(&handler, &mut token) };
     }
 
     // Iframes get their own host's cosmetics and scriptlets.

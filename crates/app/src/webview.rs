@@ -505,6 +505,12 @@ pub fn attach_tab_events(
     if let Ok(core4) = core.cast::<ICoreWebView2_4>() {
         let handler = DownloadStartingEventHandler::create(Box::new(move |_, args| {
             let Some(args) = args else { return Ok(()) };
+            // Byōbu stopped it (a dangerous download), before this handler ran.
+            let mut cancelled = BOOL(0);
+            unsafe { args.Cancel(&mut cancelled)? };
+            if cancelled.as_bool() {
+                return Ok(());
+            }
             let op = unsafe { args.DownloadOperation()? };
             let mut path = PWSTR::null();
             unsafe { op.ResultFilePath(&mut path)? };
