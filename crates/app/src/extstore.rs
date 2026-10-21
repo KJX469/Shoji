@@ -141,6 +141,66 @@ fn display_name(dir: &Path, manifest: &serde_json::Value) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// `a` is a newer extension version than `b` (dotted numbers; a missing part is 0).
+pub fn newer(a: &str, b: &str) -> bool {
+    let parts = |v: &str| -> Vec<u64> {
+        v.split('.')
+            .map(|p| p.trim().parse::<u64>().unwrap_or(0))
+            .collect()
+    };
+    let (a, b) = (parts(a), parts(b));
+    (0..a.len().max(b.len())).find_map(|i| {
+        let (x, y) = (
+            a.get(i).copied().unwrap_or(0),
+            b.get(i).copied().unwrap_or(0),
+        );
+        (x != y).then_some(x > y)
+    }) == Some(true)
+}
+
+/// The store's update check for `installed` (id, version) pairs: one request answers for all.
+pub fn update_check_url(installed: &[(String, String)]) -> String {
+    let mut x = String::new();
+    for (id, version) in installed {
+        if !x.is_empty() {
+            x.push_str("%26x%3D");
+        }
+        x.push_str(&format!("id%3D{id}%26v%3D{version}%26uc"));
+    }
+    format!(
+        "https://clients2.google.com/service/update2/crx?response=updatecheck&prodversion=130.0.0.0&acceptformat=crx2,crx3&x={x}"
+    )
+}
+
+/// (id, version) of each `<app>` the update answer says has a newer version than the one
+/// installed.
+pub fn updates_in(xml: &str, installed: &[(String, String)]) -> Vec<(String, String)> {
+    let attr = |tag: &str, name: &str| -> Option<String> {
+        let at = tag.find(&format!(" {name}=\""))? + name.len() + 3;
+        let end = tag[at..].find('"')?;
+        Some(tag[at..at + end].to_string())
+    };
+    let mut out = Vec::new();
+    let mut app: Option<String> = None;
+    for tag in xml.split('<').skip(1) {
+        let tag = tag.split('>').next().unwrap_or("");
+        if tag.starts_with("app ") {
+            app = attr(tag, "appid");
+        } else if tag.starts_with("updatecheck ") {
+            let (Some(id), Some(version)) = (app.take(), attr(tag, "version")) else {
+                continue;
+            };
+            let current = installed.iter().find(|(i, _)| *i == id).map(|(_, v)| v);
+            if attr(tag, "status").as_deref() == Some("ok")
+                && current.is_some_and(|c| newer(&version, c))
+            {
+                out.push((id, version));
+            }
+        }
+    }
+    out
+}
+
 /// What an installed extension offers the browser's own UI.
 #[derive(Debug, Default, PartialEq)]
 pub struct ExtensionPages {
@@ -333,5 +393,34 @@ mod tests {
         assert_eq!(icon_data(&ext, "../../secret.png"), None);
         assert_eq!(icon_data(&ext, "img/32.exe"), None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn update_answers_name_only_newer_versions() {
+        assert!(newer("1.10.0", "1.9.9"));
+        assert!(newer("2", "1.99"));
+        assert!(!newer("1.0", "1.0.0"));
+        assert!(!newer("1.0.1", "1.0.2"));
+        let installed = vec![
+            ("a".repeat(32), "1.0.0".to_string()),
+            ("b".repeat(32), "3.1".to_string()),
+        ];
+        let url = update_check_url(&installed);
+        assert!(url.contains(&format!(
+            "id%3D{}%26v%3D1.0.0%26uc%26x%3Did%3D{}",
+            "a".repeat(32),
+            "b".repeat(32)
+        )));
+        let xml = format!(
+            r#"<?xml version="1.0"?><gupdate xmlns="http://www.google.com/update2/response" protocol="2.0">
+               <app appid="{a}" status="ok"><updatecheck codebase="https://x/a.crx" version="1.2.0" status="ok"/></app>
+               <app appid="{b}" status="ok"><updatecheck status="noupdate"/></app></gupdate>"#,
+            a = "a".repeat(32),
+            b = "b".repeat(32)
+        );
+        assert_eq!(
+            updates_in(&xml, &installed),
+            vec![("a".repeat(32), "1.2.0".to_string())]
+        );
     }
 }
