@@ -1,0 +1,1287 @@
+<!DOCTYPE html>
+<html lang="en" data-accent="{{ACCENT}}" data-mode="{{MODE}}" data-fonts="{{FONTS}}">
+<head>
+  <meta charset="UTF-8">
+  <title>Shoji panel</title>
+  <style>
+{{THEME_CSS}}
+    html, body { height: 100%; overflow: hidden; }
+    body { font-size: 13px; user-select: none; background: var(--surface); }
+    button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+    button:focus:not(:focus-visible) { outline: none; }
+    input, select { font: inherit; color: inherit; }
+
+    /* The dropdown. The host rounds its window corners and floats it under the toolbar button
+       it hangs from; pinned, it becomes a flat side panel. */
+    .pop { height: 100%; display: flex; flex-direction: column; overflow: hidden; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 14px; transform-origin: 50% 0; }
+    body.docked .pop { border-radius: 0; border-width: 0 0 0 1px; }
+    .pop.in { animation: pop-in .2s cubic-bezier(.2, .8, .2, 1) both; }
+    .pop.out { animation: pop-out .13s ease-in both; }
+    @keyframes pop-in { from { opacity: 0; transform: translateY(-10px) scale(.96); } }
+    @keyframes pop-out { to { opacity: 0; transform: translateY(-8px) scale(.97); } }
+    @media (prefers-reduced-motion: reduce) { .pop.in, .pop.out { animation-duration: .01s; } }
+
+    header { display: flex; align-items: center; gap: 10px; height: 42px; padding: 0 8px 0 14px; flex-shrink: 0; }
+    header.sub { padding-left: 8px; }
+    .crane-slot { display: flex; }
+    header.sub .crane-slot { display: none; }
+    .back-btn[hidden] { display: none; }
+    header .crane { width: 22px; height: 22px; flex-shrink: 0; }
+    header h1 { flex: 1; font-family: var(--font-display); font-size: 15px; font-weight: 500; letter-spacing: .01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .icon-btn { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; color: var(--ink-3); }
+    .icon-btn:hover { background: var(--hover); color: var(--ink); }
+    .icon-btn.on { color: var(--accent); background: var(--tint-soft); }
+    body.docked .pin-btn svg { transform: rotate(45deg); }
+
+    main { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 10px; scrollbar-width: thin; }
+    .view { display: none; flex-direction: column; gap: 8px; }
+    .view.active { display: flex; }
+    .group { display: flex; flex-direction: column; }
+    .item { display: flex; align-items: center; gap: 11px; height: 29px; padding: 0 9px; border-radius: 8px; color: var(--ink); text-align: left; width: 100%; font-size: 13px; }
+    .item span:first-of-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .item svg.chev { margin-left: auto; width: 14px; height: 14px; color: var(--ink-3); }
+    .item.link-row { height: 28px; font-size: 12.5px; }
+    .label { padding: 6px 10px 2px; font-size: 11px; letter-spacing: .03em; color: var(--ink-3); }
+    .item:hover { background: var(--hover); }
+    .item:active { background: var(--press); }
+    .item svg.i { color: var(--ink-2); }
+    .item span:first-of-type { flex: 1; }
+    kbd { font: 11px var(--font); color: var(--ink-3); }
+    .rule { height: 1px; background: var(--line); margin: 3px 8px; }
+    #view-menu { gap: 2px; }
+    .zoom { display: flex; align-items: center; gap: 3px; margin-left: auto; }
+    .zoom button { width: 26px; height: 24px; border-radius: 6px; background: var(--surface-2); display: grid; place-items: center; }
+    .zoom button:hover { background: var(--press); }
+    .zoom svg.i { width: 14px; height: 14px; }
+    .zoom .vr { width: 1px; height: 16px; background: var(--line-strong); margin: 0 3px; }
+
+    /* The Shoji-only things, as small tiles */
+    .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 3px 0; }
+    .tile { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0 5px; border-radius: 10px; background: var(--surface-2); color: var(--ink-2); font-size: 11.5px; transition: background .12s, color .12s; }
+    .tile:hover { background: var(--hover); color: var(--ink); }
+    .tile:active { background: var(--press); }
+    .tile svg.i { width: 18px; height: 18px; }
+    .tile span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .seg.mini { margin-left: auto; padding: 2px; gap: 1px; }
+    .seg.mini button { flex: none; height: 24px; padding: 0 8px; font-size: 11.5px; }
+    .side-row svg.i { flex-shrink: 0; }
+
+    /* Bookmarks panel */
+    .bm-tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+    .bm-tool { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 7px 0 5px; border-radius: 9px; background: var(--surface-2); color: var(--ink-2); font-size: 11px; }
+    .bm-tool:hover { background: var(--hover); color: var(--ink); }
+    .bm-tool svg.i { width: 17px; height: 17px; }
+    .bm-bar-row { padding: 2px 4px 0 6px; font-size: 12.5px; }
+    .bm-bar-row kbd { margin-left: 6px; }
+    .search { width: 100%; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); outline: none; font-size: 12.5px; user-select: text; }
+    .search:focus { border-color: var(--accent); background: var(--surface); }
+    .tree { display: flex; flex-direction: column; min-height: 40px; max-height: 330px; overflow-y: auto; overscroll-behavior: contain; contain: content; }
+    .bm-row.more { color: var(--ink-3); font-size: 11.5px; justify-content: center; }
+    .bm-row.more:hover { color: var(--ink); }
+    .tree .empty { padding: 18px 10px; color: var(--ink-3); text-align: center; line-height: 1.5; font-size: 12.5px; }
+    .bm-row { display: flex; flex-shrink: 0; align-items: center; gap: 8px; height: 30px; padding-right: 8px; border-radius: 7px; color: var(--ink); cursor: default; font-size: 12.5px; }
+    .bm-row:hover, .bm-row:focus-visible { background: var(--hover); outline: none; }
+    .bm-row.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+    .bm-row.drop-into { background: var(--tint); }
+    .bm-row.dragging { opacity: .45; }
+    .bm-row .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bm-row .s { max-width: 40%; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 11px; }
+    .bm-row .ico { width: 16px; height: 16px; border-radius: 4px; display: grid; place-items: center; flex-shrink: 0; font-size: 10px; font-weight: 700; background: hsl(var(--h, 30) 38% 50% / .24); color: hsl(var(--h, 30) 40% 42%); }
+    :root[data-mode="dark"] .bm-row .ico { color: hsl(var(--h, 30) 55% 70%); }
+    @media (prefers-color-scheme: dark) { :root:not([data-mode="light"]) .bm-row .ico { color: hsl(var(--h, 30) 55% 70%); } }
+    .bm-row .fold { width: 16px; height: 16px; flex-shrink: 0; color: var(--ink-3); }
+    .bm-row .chv { width: 12px; height: 12px; color: var(--ink-3); flex-shrink: 0; transition: transform .12s; }
+    .bm-row.open .chv { transform: rotate(90deg); }
+    .bm-row .n { font-size: 11px; color: var(--ink-3); }
+    .bm-foot { display: flex; gap: 14px; padding: 0 4px; }
+    #zoomVal { min-width: 44px; text-align: center; font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; cursor: pointer; }
+
+    .note { font-family: var(--font-text); padding: 12px 14px; border-radius: 10px; background: var(--tint-soft); border: 1px solid var(--line); color: var(--ink-2); font-size: 12px; line-height: 1.55; }
+    .note strong { color: var(--ink); font-weight: 600; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 13px; }
+    .note.warn strong { color: var(--warn); }
+    .card { padding: 6px 14px; border-radius: 10px; border: 1px solid var(--line); }
+    .row { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; font-size: 12px; border-bottom: 1px solid var(--line); }
+    .row:last-child { border-bottom: 0; }
+    .row span:first-child { color: var(--ink-3); flex-shrink: 0; }
+    .row span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+    .mono { font-family: var(--mono); font-size: 11px; }
+    .wide-btn { width: 100%; height: 34px; border-radius: 8px; background: var(--surface-2); font-size: 12px; }
+    .wide-btn:hover { background: var(--press); }
+    .big { font-size: 34px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; }
+    .sub { color: var(--ink-3); font-size: 12px; }
+    .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 2px; font-size: 13px; }
+    .sw { width: 34px; height: 20px; border-radius: 10px; background: var(--line-strong); position: relative; flex-shrink: 0; transition: background .15s; }
+    .sw::after { content: ""; position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); transition: transform .18s cubic-bezier(.3, 1.4, .5, 1); }
+    .sw[aria-checked="true"] { background: var(--accent); }
+    .sw[aria-checked="true"]::after { transform: translateX(14px); }
+    .sw:disabled { opacity: .5; cursor: default; }
+    .empty { padding: 26px 0 30px; text-align: center; color: var(--ink-3); font-size: 12.5px; line-height: 1.6; }
+    .scene { position: relative; display: grid; place-items: center; height: 84px; }
+    .scene .crane { width: 54px; height: 54px; }
+    .scene .zzz { left: calc(50% + 22px); top: 8px; font-size: 15px; }
+    .scene .zzz:nth-of-type(2) { left: calc(50% + 32px); top: 0; }
+
+    /* Shield */
+    .guard-card { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: linear-gradient(135deg, var(--tint-soft), transparent 70%); }
+    .guard-card .crane { width: 46px; height: 46px; }
+    .guard-card .sub { margin-top: 2px; }
+
+    /* Downloads */
+    .dl { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 10px; border-radius: 10px; }
+    .dl:hover { background: var(--hover); }
+    .dl.can-open { cursor: pointer; }
+    .dl-tile { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; flex-shrink: 0; background: var(--tint); font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-2); }
+    .dl-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+    .dl-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dl-meta { font-size: 11px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .dl-meta.bad { color: var(--warn); }
+    .bar { height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; margin-top: 2px; }
+    .bar div { height: 100%; background: var(--accent); transition: width .2s linear; }
+    .dl-acts { display: none; gap: 2px; flex-shrink: 0; }
+    .dl:hover .dl-acts, .dl:focus-within .dl-acts { display: flex; }
+    .dl-acts .icon-btn { width: 26px; height: 26px; }
+
+    /* Dark websites */
+    .seg { display: flex; gap: 2px; padding: 3px; border-radius: 9px; background: var(--surface-2); }
+    .seg button { flex: 1; height: 28px; border-radius: 7px; font-size: 12px; color: var(--ink-2); transition: background .15s, color .15s; }
+    .seg button:hover { color: var(--ink); }
+    .seg button[aria-checked="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px var(--line-strong); }
+    .seg button:disabled { opacity: .4; cursor: default; }
+    .sect { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; border-radius: 12px; border: 1px solid var(--line); }
+    .sect > .label { display: flex; justify-content: space-between; align-items: baseline; }
+    .sect > .label small { font: 11px var(--font); letter-spacing: 0; text-transform: none; color: var(--ink-3); }
+    .presets { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+    .preset { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 6px 0 5px; border-radius: 10px; font-size: 10.5px; color: var(--ink-2); border: 1px solid transparent; }
+    .preset:hover { background: var(--hover); }
+    .preset[aria-checked="true"] { border-color: var(--accent); color: var(--ink); background: var(--tint-soft); }
+    .preset i { width: 36px; height: 26px; border-radius: 7px; display: grid; place-items: center; font: 600 12px var(--font-display); font-style: normal; border: 1px solid var(--line-strong); }
+    .slide { display: grid; grid-template-columns: 74px 1fr 36px; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); }
+    .slide output { text-align: right; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+    input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 18px; background: transparent; cursor: pointer; }
+    input[type="range"]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: var(--line-strong); }
+    input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; border-radius: 50%; background: var(--surface); border: 2px solid var(--accent); transition: transform .12s; }
+    input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.2); }
+    .colors { display: flex; gap: 10px; }
+    .colors label { flex: 1; display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); }
+    input[type="color"] { width: 30px; height: 24px; border: 1px solid var(--line-strong); border-radius: 6px; background: none; padding: 0; cursor: pointer; }
+    input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
+    input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 4px; }
+    select, input[type="time"] { height: 28px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface-2); outline: none; }
+    select:focus, input[type="time"]:focus { border-color: var(--accent); }
+    .times { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-3); }
+    .times[hidden] { display: none; }
+    [hidden] { display: none !important; }
+    .link { color: var(--accent); font-size: 12px; text-align: left; }
+    .link:hover { text-decoration: underline; }
+
+    /* Dark websites: one switch, then this site, then the style */
+    .master { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); }
+    .master[data-on="true"] { border-color: var(--accent); background: var(--tint-soft); }
+    .master .moon { width: 30px; height: 30px; flex-shrink: 0; color: var(--ink-3); }
+    .master[data-on="true"] .moon { color: var(--accent); }
+    .master .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .master .txt b { font-size: 14px; font-weight: 600; }
+    .master .big { width: 46px; height: 26px; border-radius: 13px; }
+    .master .big::after { width: 20px; height: 20px; left: 3px; top: 3px; }
+    .master .big[aria-checked="true"]::after { transform: translateX(20px); }
+    .site-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+    .site-head b { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .choice { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); text-align: left; transition: background .12s, border-color .12s; }
+    .choice:hover { background: var(--hover); }
+    .choice[aria-checked="true"] { border-color: var(--accent); background: var(--tint-soft); }
+    .choice .dot { width: 16px; height: 16px; margin-top: 1px; border-radius: 50%; border: 2px solid var(--line-strong); flex-shrink: 0; display: grid; place-items: center; }
+    .choice[aria-checked="true"] .dot { border-color: var(--accent); }
+    .choice[aria-checked="true"] .dot::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+    .choice .what { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+    .choice .what b { font-size: 12.5px; font-weight: 600; }
+    .choice .what small { font-size: 11px; color: var(--ink-3); }
+    .tune { border-top: 1px solid var(--line); padding-top: 8px; }
+    .tune > summary { cursor: pointer; font-size: 12px; color: var(--ink-2); list-style: none; display: flex; align-items: center; gap: 6px; }
+    .tune > summary::-webkit-details-marker { display: none; }
+    .tune > summary::before { content: "\25B8"; font-size: 10px; transition: transform .15s; }
+    .tune[open] > summary::before { transform: rotate(90deg); }
+    .tune > .body { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; }
+    .dim { opacity: .55; }
+
+    /* Workspaces ("Spaces") panel */
+    .ws-new { display: flex; gap: 6px; }
+    .ws-new input { flex: 1; height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font: inherit; font-size: 12px; outline: none; }
+    .ws-new input:focus { border-color: var(--accent); background: var(--surface); }
+    .ws-new button { height: 32px; padding: 0 12px; border-radius: 7px; background: var(--accent); color: var(--surface); font-size: 12px; font-weight: 500; }
+    .ws-card { border-radius: 10px; border: 1px solid var(--line); padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; transition: border-color .12s, background .12s; }
+    .ws-card.active { border-color: var(--line-strong); background: var(--tint-soft); }
+    .ws-card.drop-target { border-color: var(--accent); background: var(--tint); }
+    .ws-head { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+    .ws-color { width: 14px; height: 14px; border-radius: 50%; background: var(--ws, var(--accent)); flex-shrink: 0; border: 1px solid rgba(0,0,0,.12); }
+    .ws-title { flex: 1; font-weight: 600; font-size: 12.5px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ws-rename { flex: 1; height: 24px; padding: 0 6px; border-radius: 5px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); font: inherit; font-size: 12px; }
+    .ws-act { width: 22px; height: 22px; border-radius: 5px; color: var(--ink-3); display: grid; place-items: center; font-size: 11px; }
+    .ws-act:hover { background: var(--hover); color: var(--ink); }
+    .ws-tabs { display: flex; flex-direction: column; gap: 2px; }
+    .ws-tab { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 6px; border-radius: 6px; font-size: 12px; color: var(--ink-2); cursor: grab; }
+    .ws-tab:hover { background: var(--hover); color: var(--ink); }
+    .ws-tab.current { color: var(--ink); font-weight: 500; }
+    .ws-splits { display: flex; flex-direction: column; gap: 3px; margin-top: 2px; }
+    .ws-split { padding: 5px 8px; border-radius: 7px; font-size: 11.5px; font-weight: 600; color: var(--ink); background: color-mix(in srgb, var(--sg) 28%, transparent); border-left: 4px solid var(--sg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
+    .ws-tab span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+  </style>
+</head>
+<body>
+  <div class="pop" id="pop">
+    <header id="hdr">
+      <button class="icon-btn back-btn" id="back" onclick="show('menu')" title="Back (Esc)" aria-label="Back" hidden>
+        <svg class="i" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
+      <span class="crane-slot" id="craneSlot">{{CRANE}}</span>
+      <h1 id="title">Shoji</h1>
+      <button class="icon-btn" onclick="post('CloseSidebar')" title="Close (Esc)" aria-label="Close">
+        <svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+
+    <main id="main">
+      <section class="view active" id="view-menu">
+        <div class="group">
+          <button class="item" onclick="act('CreateTab', { url: null })"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New tab</span><kbd>Ctrl+T</kbd></button>
+          <button class="item" onclick="act('OpenNewWindow')"><svg class="i" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M4 9h16"/></svg><span>New window</span><kbd>Ctrl+N</kbd></button>
+          <button class="item" onclick="run('new-private-window')"><svg class="i" viewBox="0 0 24 24"><path d="M3 11h18M5 11l1.600-5.200A2 2 0 0 1 8.500 4.400h7a2 2 0 0 1 1.900 1.400L19 11M7.500 19a2.500 2.500 0 1 0 0-5 2.500 2.500 0 0 0 0 5zM16.500 19a2.500 2.500 0 1 0 0-5 2.500 2.500 0 0 0 0 5zM10 16.500h4"/></svg><span>New private window</span><kbd>Ctrl+Shift+N</kbd></button>
+        </div>
+        <div class="tiles">
+          <button class="tile" onclick="show('spaces', true)" title="Spaces (Alt+W)"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1.5"/><rect x="13" y="4" width="8" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/></svg><span>Spaces</span></button>
+          <button class="tile" onclick="act('ToggleSplit')" title="Split view (Ctrl+Shift+S)"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg><span>Split view</span></button>
+          <button class="tile" onclick="act('ToggleNotes')" title="Quick note"><svg class="i" viewBox="0 0 24 24"><path d="M7 3.500h8.500L19 7v13.500H7z"/><path d="M15.500 3.500V7H19M10 11h6M10 14.500h6M10 18h3.500"/><path d="M4.500 6v15"/></svg><span>Note</span></button>
+          <button class="tile" onclick="post('ToggleDarkPanel')" title="Dark websites"><svg class="i" viewBox="0 0 24 24"><path d="M20 14.500A8 8 0 0 1 9.500 4a8 8 0 1 0 10.500 10.500z"/></svg><span>Dark</span></button>
+        </div>
+        <div class="rule"></div>
+        <div class="item side-row" style="cursor:default"><svg class="i" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M9.500 5v14"/></svg><span>Bookmarks button</span>
+          <div class="seg mini" role="radiogroup" aria-label="Bookmarks button in the toolbar">
+            <button role="radio" data-side="on" aria-checked="false">Show</button>
+            <button role="radio" data-side="off" aria-checked="true">Hide</button>
+          </div>
+        </div>
+        <div class="rule"></div>
+        <div class="group">
+          <button class="item" onclick="show('passwords', true)"><svg class="i" viewBox="0 0 24 24"><circle cx="8" cy="12" r="3.500"/><path d="M11.500 12H20M17 12v3M14.500 12v2"/></svg><span>Passwords and autofill</span><svg class="i chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+          <button class="item" onclick="show('history', true)"><svg class="i" viewBox="0 0 24 24"><path d="M4.500 12a7.500 7.500 0 1 0 2.300-5.400M4 4.500V8h3.500M12 8v4l3 2"/></svg><span>History</span><svg class="i chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+          <button class="item" onclick="show('bookmarks', true)"><svg class="i" viewBox="0 0 24 24"><path d="M7 4h10a1 1 0 0 1 1 1v15l-6-4-6 4V5a1 1 0 0 1 1-1z"/></svg><span>Bookmarks and lists</span><svg class="i chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+          <button class="item" onclick="post('ToggleDownloadsSidebar')"><svg class="i" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span>Downloads</span><kbd>Ctrl+J</kbd></button>
+          <button class="item" onclick="show('extensions', true)"><svg class="i" viewBox="0 0 24 24"><path d="M10 4h4v3a2 2 0 1 0 0 4h-0v0h3v4h-3a2 2 0 1 0-4 0H7v-4a2 2 0 1 0 0-4V4z" transform="translate(0 1)"/></svg><span>Extensions</span><svg class="i chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+          <button class="item" onclick="act('OpenClearData')"><svg class="i" viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg><span>Delete browsing data…</span><kbd>Ctrl+Shift+Del</kbd></button>
+        </div>
+        <div class="rule"></div>
+        <div class="item" style="cursor:default"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.500-4.500M8.500 11h5M11 8.500v5"/></svg><span>Zoom</span>
+          <div class="zoom"><button onclick="post('ZoomOut')" aria-label="Zoom out" title="Zoom out (Ctrl+-)">−</button><span id="zoomVal" onclick="post('ZoomReset')" title="Reset (Ctrl+0)">100%</span><button onclick="post('ZoomIn')" aria-label="Zoom in" title="Zoom in (Ctrl++)">+</button>
+            <i class="vr"></i><button onclick="run('fullscreen')" aria-label="Full screen" title="Full screen (F11)"><svg class="i" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button></div>
+        </div>
+        <div class="rule"></div>
+        <div class="group">
+          <button class="item" onclick="act('PrintPage')"><svg class="i" viewBox="0 0 24 24"><path d="M7 9V4h10v5M7 17H5a1 1 0 0 1-1-1v-5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v5a1 1 0 0 1-1 1h-2"/><rect x="7" y="14" width="10" height="6" rx="1"/></svg><span>Print…</span><kbd>Ctrl+P</kbd></button>
+          <button class="item" onclick="show('find', true)"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.500-4.500"/></svg><span>Find and edit</span><svg class="i chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+          <button class="item" onclick="show('share', true)"><svg class="i" viewBox="0 0 24 24"><path d="M12 15V4M8 8l4-4 4 4M5 13v6h14v-6"/></svg><span>Save and share</span><svg class="i chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+          <button class="item" onclick="show('tools', true)"><svg class="i" viewBox="0 0 24 24"><path d="M14.500 5.500a4 4 0 0 0-5 5L4 16l4 4 5.500-5.500a4 4 0 0 0 5-5l-2.500 2.500-2.500-.5-.5-2.500z"/></svg><span>More tools</span><svg class="i chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+        </div>
+        <div class="rule"></div>
+        <div class="group">
+          <button class="item" onclick="show('help', true)"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.500"/><path d="M9.500 9.500a2.500 2.500 0 1 1 3.500 2.300c-.7.400-1 .9-1 1.700M12 17h.01"/></svg><span>Help</span><svg class="i chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+          <button class="item" onclick="act('OpenSettings')"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg><span>Settings</span><kbd>Ctrl+,</kbd></button>
+          <button class="item" onclick="run('exit')"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg><span>Exit</span></button>
+        </div>
+      </section>
+
+      <section class="view" id="view-passwords">
+        <div class="group">
+          <button class="item" onclick="act('OpenPage', { page: 'passwords' })"><svg class="i" viewBox="0 0 24 24"><circle cx="8" cy="12" r="3.500"/><path d="M11.500 12H20M17 12v3M14.500 12v2"/></svg><span>Password manager</span></button>
+          <button class="item" onclick="act('OpenSettings')"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg><span>Sign-in and autofill settings</span></button>
+        </div>
+        <div class="note">Logins are kept in an encrypted vault on this PC. Open the password manager to add, import or check them.</div>
+      </section>
+
+      <section class="view" id="view-history">
+        <div class="group">
+          <button class="item" onclick="act('OpenPage', { page: 'history' })"><svg class="i" viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h9"/></svg><span>Show full history</span><kbd>Ctrl+H</kbd></button>
+          <button class="item" onclick="act('OpenClearData')"><svg class="i" viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg><span>Delete browsing data…</span><kbd>Ctrl+Shift+Del</kbd></button>
+        </div>
+        <div class="rule"></div>
+        <div class="label" id="closedLabel">Recently closed</div>
+        <div class="group" id="closedList"></div>
+        <div class="label" id="recentLabel">Recently visited</div>
+        <div class="group" id="recentList"></div>
+      </section>
+
+      <section class="view" id="view-bookmarks">
+        <input id="bmSearch" class="search" type="text" spellcheck="false" autocomplete="off" placeholder="Search bookmarks" aria-label="Search bookmarks">
+        <div id="bmTree" class="tree" role="tree" aria-label="Bookmarks"></div>
+        <div class="bm-tools">
+          <button class="bm-tool" onclick="act('RunAction', { value: 'bookmark-page' })" title="Bookmark this tab (Ctrl+D)"><svg class="i" viewBox="0 0 24 24"><path d="M7 4h10a1 1 0 0 1 1 1v15l-6-4-6 4V5a1 1 0 0 1 1-1zM12 8v4M10 10h4"/></svg><span>This tab</span></button>
+          <button class="bm-tool" onclick="act('RunAction', { value: 'bookmark-all' })" title="Bookmark all tabs (Ctrl+Shift+D)"><svg class="i" viewBox="0 0 24 24"><path d="M6 4h9a1 1 0 0 1 1 1v13l-5.500-3.500L5 18V5a1 1 0 0 1 1-1zM9 20.500l7.500-3.500V8"/></svg><span>All tabs</span></button>
+          <button class="bm-tool" onclick="post('BookmarkMenu', { from: 'panel', x: 24, y: 120 })" title="New folder, bar and more"><svg class="i" viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM12 10.500v5M9.500 13h5"/></svg><span>Folder</span></button>
+          <button class="bm-tool" onclick="act('RunAction', { value: 'bookmark-manager' })" title="Bookmark manager (Ctrl+Shift+O)"><svg class="i" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 9h16M9 9v11"/></svg><span>Manager</span></button>
+        </div>
+        <div class="switch-row bm-bar-row"><span>Show bookmarks bar <kbd>Ctrl+Shift+B</kbd></span><button class="sw" id="barSwitch" role="switch" aria-checked="false" aria-label="Show bookmarks bar"></button></div>
+        <div class="bm-foot">
+          <button class="link" onclick="act('RunAction', { value: 'bookmark-import' })">Import…</button>
+          <button class="link" onclick="act('RunAction', { value: 'bookmark-export' })">Export…</button>
+        </div>
+      </section>
+
+      <section class="view" id="view-extensions">
+        <div class="group">
+          <button class="item" onclick="run('extensions')"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg><span>Manage extensions</span></button>
+          <button class="item" onclick="act('CreateTab', { url: 'https://chromewebstore.google.com/' })"><svg class="i" viewBox="0 0 24 24"><path d="M5 9h14l-1 10H6zM9 9V7a3 3 0 0 1 6 0v2"/></svg><span>Chrome Web Store</span></button>
+        </div>
+        <div class="note">Extensions are loaded by the engine and have no toolbar button; install them from Settings by pasting a Web Store address.</div>
+      </section>
+
+      <section class="view" id="view-find">
+        <div class="group">
+          <button class="item" onclick="act('ToggleFindBar')"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.500-4.500"/></svg><span>Find in page…</span><kbd>Ctrl+F</kbd></button>
+          <div class="rule"></div>
+          <button class="item" onclick="run('edit-cut')"><svg class="i" viewBox="0 0 24 24"><circle cx="6" cy="17.500" r="2.500"/><circle cx="18" cy="17.500" r="2.500"/><path d="M8 15.500L18 4M16 15.500L6 4"/></svg><span>Cut</span><kbd>Ctrl+X</kbd></button>
+          <button class="item" onclick="run('edit-copy')"><svg class="i" viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h1"/></svg><span>Copy</span><kbd>Ctrl+C</kbd></button>
+          <button class="item" onclick="run('edit-paste')"><svg class="i" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="16" rx="2"/><path d="M9 5V4h6v1M9 11h6M9 15h4"/></svg><span>Paste</span><kbd>Ctrl+V</kbd></button>
+          <button class="item" onclick="run('edit-selectall')"><svg class="i" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2" stroke-dasharray="3 2.500"/></svg><span>Select all</span><kbd>Ctrl+A</kbd></button>
+        </div>
+      </section>
+
+      <section class="view" id="view-share">
+        <div class="group">
+          <button class="item" onclick="run('save-page')"><svg class="i" viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5zM8 4v5h7V4M8 20v-6h8v6"/></svg><span>Save page as…</span><kbd>Ctrl+S</kbd></button>
+          <button class="item" onclick="run('copy-link')"><svg class="i" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.500 0l3-3a4 4 0 0 0-5.500-5.500l-1 1M14 10a4 4 0 0 0-5.500 0l-3 3A4 4 0 0 0 11 18.500l1-1"/></svg><span>Copy link to this page</span></button>
+          <button class="item" onclick="act('PrintPage')"><svg class="i" viewBox="0 0 24 24"><path d="M7 9V4h10v5M7 17H5a1 1 0 0 1-1-1v-5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v5a1 1 0 0 1-1 1h-2"/><rect x="7" y="14" width="10" height="6" rx="1"/></svg><span>Print or save as PDF…</span><kbd>Ctrl+P</kbd></button>
+        </div>
+      </section>
+
+      <section class="view" id="view-tools">
+        <div class="group">
+          <button class="item" onclick="act('ToggleReader')"><svg class="i" viewBox="0 0 24 24"><path d="M4 5.500C6.500 4.500 9.500 4.500 12 6c2.500-1.500 5.500-1.500 8-.5v13c-2.500-1-5.500-1-8 .5-2.500-1.500-5.500-1.500-8-.5z"/><path d="M12 6v13.500"/></svg><span>Reader view</span><kbd>F9</kbd></button>
+          <button class="item" onclick="act('TogglePictureInPicture')"><svg class="i" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><rect x="12" y="11" width="7" height="5" rx="1"/></svg><span>Picture in picture</span></button>
+          <button class="item" onclick="post('ToggleShieldPanel')"><svg class="i" viewBox="0 0 24 24"><path d="M12 3l7 3v5.500c0 4.300-3 7.700-7 9.500-4-1.800-7-5.200-7-9.500V6z"/></svg><span>Byōbu shield</span></button>
+          <button class="item" onclick="act('OpenPage', { page: 'byobu' })"><svg class="i" viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h9"/></svg><span>What Byōbu blocked</span></button>
+          <div class="rule"></div>
+          <button class="item" onclick="run('hard-reload')"><svg class="i" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.300 5.700"/><path d="M20 4v7h-7"/></svg><span>Reload, skipping the cache</span><kbd>Ctrl+Shift+R</kbd></button>
+          <button class="item" onclick="run('view-source')"><svg class="i" viewBox="0 0 24 24"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5"/></svg><span>View page source</span><kbd>Ctrl+U</kbd></button>
+          <button class="item" onclick="act('OpenDevTools')"><svg class="i" viewBox="0 0 24 24"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 5l-4 14"/></svg><span>Developer tools</span><kbd>F12</kbd></button>
+          <div class="rule"></div>
+          <button class="item" onclick="act('OpenPage', { page: 'wish' })"><svg class="i" viewBox="0 0 24 24"><path d="M12 4l1.800 4.500L18.500 9l-3.600 3.200 1 4.800L12 14.500 8.100 17l1-4.800L5.500 9l4.700-.5z"/></svg><span>Senbazuru</span></button>
+        </div>
+      </section>
+
+      <section class="view" id="view-help">
+        <div class="group">
+          <button class="item" onclick="run('help-about')"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.500"/><path d="M12 11v5M12 8h.01"/></svg><span>About Shoji</span></button>
+          <button class="item" onclick="run('help-whatsnew')"><svg class="i" viewBox="0 0 24 24"><path d="M12 4l1.800 4.500L18.500 9l-3.600 3.200 1 4.800L12 14.500 8.100 17l1-4.800L5.500 9l4.700-.5z"/></svg><span>What's new</span></button>
+          <button class="item" onclick="run('help-update')"><svg class="i" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg><span>Check for updates</span></button>
+          <button class="item" onclick="run('help-report')"><svg class="i" viewBox="0 0 24 24"><path d="M5 20V5h12l-2 4 2 4H7"/></svg><span>Report an issue</span></button>
+        </div>
+        <div class="note">Shoji looks for updates by itself every hour and installs them once the browser is closed.</div>
+      </section>
+
+      <section class="view" id="view-spaces">
+        <div class="ws-new">
+          <input id="wsNewName" type="text" placeholder="New workspace name…" maxlength="40" onkeydown="if(event.key==='Enter')createWs()">
+          <button onclick="createWs()">Add</button>
+        </div>
+        <div id="wsList" style="display:flex;flex-direction:column;gap:10px"></div>
+      </section>
+
+      <section class="view" id="view-security">
+        <div class="note" id="secNote"><strong id="secTitle"></strong><span id="secDesc"></span></div>
+        <div class="card" id="certCard">
+          <div class="row"><span>Site</span><span id="pHost"></span></div>
+          <div class="row"><span>Issued to</span><span id="pSubject"></span></div>
+          <div class="row"><span>Issued by</span><span id="pIssuer"></span></div>
+          <div class="row"><span>Valid</span><span id="pValid"></span></div>
+          <div class="row"><span>Signature</span><span id="pAlg"></span></div>
+          <div class="row"><span>Thumbprint</span><span class="mono" id="pThumb"></span></div>
+        </div>
+        <button class="wide-btn" id="certBtn" onclick="post('OpenCertificateDialog', { host: currentHost })">View certificate</button>
+        <div class="card">
+          <div class="row"><span>Cookies &amp; storage</span><span id="pStorage"></span></div>
+          <div class="row" id="cookieRow"><span>Cookies in use</span><span id="pCookies">…</span></div>
+        </div>
+        <button class="wide-btn" id="clearCookiesBtn" onclick="clearCookies()">Clear cookies and site data…</button>
+      </section>
+
+      <section class="view" id="view-shield">
+        <div class="guard-card">
+          {{CRANE_GUARD}}
+          <div>
+            <div class="sub" id="shHost"></div>
+            <div class="big" id="shCount">0</div>
+            <div class="sub">blocked on this page · <span id="shWeek">0</span> this week</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="switch-row"><span>Shield on this site</span><button class="sw" id="shSwitch" role="switch" aria-checked="true" aria-label="Shield on this site"></button></div>
+          <div class="row"><span>Ads and trackers</span><span id="shBlocked">0</span></div>
+          <div class="row"><span>Scripts replaced or cleaned</span><span id="shReplaced">0</span></div>
+        </div>
+        <div class="group">
+          <button class="item" onclick="act('ShieldPickElement')"><svg class="i" viewBox="0 0 24 24"><path d="M5 5l6 14 2-6 6-2z"/></svg><span>Hide an element…</span></button>
+          <button class="item" onclick="act('OpenPage', { page: 'byobu' })"><svg class="i" viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h9"/></svg><span>See what was blocked</span></button>
+          <button class="item" onclick="act('OpenSettings')"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg><span>Filter lists and settings</span></button>
+        </div>
+        <div class="note" id="shNote" hidden></div>
+      </section>
+
+      <section class="view" id="view-downloads">
+        <div class="scene" id="dlScene">{{CRANE_PET}}<span class="zzz">z</span><span class="zzz">z</span></div>
+        <div id="dlList"></div>
+        <div class="group" id="dlFoot">
+          <div class="rule"></div>
+          <button class="item" onclick="act('OpenPage', { page: 'downloads' })"><svg class="i" viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h9"/></svg><span>Show all downloads</span></button>
+          <button class="item" onclick="post('ChangeDownloadFolder')"><svg class="i" viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg><span>Change download folder…</span></button>
+        </div>
+      </section>
+
+      <section class="view" id="view-dark">
+        <div class="seg" role="radiogroup" aria-label="What to adjust">
+          <button role="radio" id="dkScopeSites" aria-checked="true">Websites</button>
+          <button role="radio" id="dkScopeBrowser" aria-checked="false">Browser</button>
+        </div>
+        <div class="sect" id="dkBrowserNote" hidden>
+          <div class="sub">How Shoji's own toolbar, menus and pages look in dark mode. Same controls, applied to the browser instead of to sites.</div>
+        </div>
+
+        <div id="dkWeb" style="display:flex;flex-direction:column;gap:12px">
+          <div class="master" id="dkMaster" data-on="false">
+            <svg class="moon i" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+            <div class="txt"><b>Dark websites</b><span class="sub" id="dkMasterSub"></span></div>
+            <button class="sw big" id="dkOn" role="switch" aria-checked="false" aria-label="Dark websites"></button>
+          </div>
+
+          <div class="sect" id="dkSite">
+            <div class="site-head"><b id="dkHost"></b><span class="sub" id="dkNow"></span></div>
+            <div role="radiogroup" aria-label="This site" style="display:flex;flex-direction:column;gap:6px">
+              <button class="choice" role="radio" id="dkFollow" aria-checked="false"><span class="dot"></span><span class="what"><b>Same as other sites</b><small id="dkFollowSub"></small></span></button>
+              <button class="choice" role="radio" id="dkAlways" aria-checked="false"><span class="dot"></span><span class="what"><b>Always dark</b><small>Even when dark websites is off</small></span></button>
+              <button class="choice" role="radio" id="dkNever" aria-checked="false"><span class="dot"></span><span class="what"><b>Never dark</b><small>Leave this site as it was made</small></span></button>
+            </div>
+          </div>
+
+          <div class="sect" id="dkLook">
+            <div class="label"><span>Style</span><small id="dkScope"></small></div>
+            <div class="seg" id="dkApplies" role="radiogroup" aria-label="Where the style applies">
+              <button role="radio" id="dkAppliesAll" aria-checked="true">All sites</button>
+              <button role="radio" id="dkAppliesSite" aria-checked="false"></button>
+            </div>
+            <div class="presets" id="dkPresets"></div>
+            <details class="tune" id="dkTune">
+              <summary>Fine-tune</summary>
+              <div class="body">
+                <div class="seg" role="radiogroup" aria-label="Mode">
+                  <button role="radio" id="dkModeDark" aria-checked="true">Dark</button>
+                  <button role="radio" id="dkModeLight" aria-checked="false">Dim, stay light</button>
+                </div>
+                <label class="slide">Brightness<input type="range" id="dkBrightness" min="50" max="150"><output></output></label>
+                <label class="slide">Contrast<input type="range" id="dkContrast" min="50" max="150"><output></output></label>
+                <label class="slide">Sepia<input type="range" id="dkSepia" min="0" max="100"><output></output></label>
+                <label class="slide">Grayscale<input type="range" id="dkGrayscale" min="0" max="100"><output></output></label>
+                <div class="colors">
+                  <label>Background<input type="color" id="dkBackground"></label>
+                  <label>Text<input type="color" id="dkText"></label>
+                </div>
+                <div id="dkText2" style="display:flex;flex-direction:column;gap:8px">
+                  <div class="switch-row" style="padding:0"><span>Font</span><select id="dkFont" aria-label="Font">
+                    <option>Segoe UI</option><option>Arial</option><option>Verdana</option><option>Tahoma</option><option>Trebuchet MS</option>
+                    <option>Georgia</option><option>Cambria</option><option>Consolas</option><option>Cascadia Mono</option>
+                  </select></div>
+                  <label class="slide">Text stroke<input type="range" id="dkStroke" min="0" max="100"><output></output></label>
+                </div>
+                <button class="link" id="dkReset" style="padding:0 2px">Back to the Sumi look</button>
+              </div>
+            </details>
+          </div>
+
+          <div class="sect" id="dkSched">
+            <div class="switch-row" style="padding:0"><span><b>Only at certain hours</b></span><button class="sw" id="dkSchedOn" role="switch" aria-checked="false" aria-label="Schedule"></button></div>
+            <div class="times" id="dkTimes" hidden>From <input type="time" id="dkFrom"> to <input type="time" id="dkTo"></div>
+          </div>
+        </div>
+
+      </section>
+    </main>
+  </div>
+
+  <script>
+{{PET_JS}}
+    const $ = id => document.getElementById(id);
+    const ACCENTS = {{ACCENTS_JSON}};
+    const toneOf = id => (ACCENTS.find(a => a.id === id) || ACCENTS[0]).tone;
+    let currentHost = '';
+    let mode = 'menu';
+    let docked = false;
+    const MODES = ['menu', 'spaces', 'security', 'shield', 'downloads', 'dark', 'passwords', 'history', 'bookmarks', 'extensions', 'find', 'share', 'tools', 'help'];
+    const TITLES = { menu: 'Shoji', spaces: 'Spaces', security: 'This site', shield: 'Byōbu', downloads: 'Downloads', dark: 'Dark websites',
+      passwords: 'Passwords and autofill', history: 'History', bookmarks: 'Bookmarks', extensions: 'Extensions', find: 'Find and edit', share: 'Save and share', tools: 'More tools', help: 'Help' };
+    let canBack = false;
+    let shell = { tabs: [], inactive_tabs: [], workspaces: [], active_workspace_id: 1, active_tab_id: 0 };
+    let editingWsId = null;
+    let draggedTabId = null;
+    function post(action, payload = null) {
+      if (window.ipc) window.ipc.postMessage(JSON.stringify({ action, payload }));
+    }
+    // Run an action and fold the dropdown away (a pinned panel stays open).
+    function act(action, payload = null) {
+      post(action, payload);
+      if (!docked) post('CloseSidebar');
+    }
+    // `fromMenu`: reached from the main menu, so there is a way back to it.
+    function show(next, fromMenu) {
+      mode = next;
+      canBack = !!fromMenu;
+      for (const m of MODES) {
+        $('view-' + m).classList.toggle('active', m === mode);
+      }
+      $('title').textContent = TITLES[mode] || 'Shoji';
+      $('back').hidden = !canBack;
+      $('hdr').classList.toggle('sub', canBack);
+      $('main').scrollTop = 0;
+      if (mode === 'menu' || mode === 'history' || mode === 'bookmarks') post('MenuDataQuery');
+      if (mode === 'bookmarks') { renderTree(); if (fromMenu) setTimeout(() => $('bmSearch').focus(), 30); }
+      reportHeight();
+    }
+    // Run a named action (the same ones the command palette has) and fold the dropdown away.
+    const run = name => act('RunAction', { value: name });
+    const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    /* Opening, closing and sizing: the host owns the window, this page owns the motion. */
+    let lastHeight = 0;
+    function reportHeight() {
+      const v = document.querySelector('.view.active');
+      if (!v) return;
+      const h = $('hdr').offsetHeight + v.offsetHeight + 16;
+      if (Math.abs(h - lastHeight) > 0.5) { lastHeight = h; post('SidebarHeight', { height: h }); }
+    }
+    new ResizeObserver(reportHeight).observe($('view-menu').parentElement);
+    document.querySelectorAll('.view').forEach(v => new ResizeObserver(reportHeight).observe(v));
+    // Opened by the pointer resting on its button: the host folds it away as soon as the pointer is off
+    // it and its button (it reads the cursor itself). Only typing inside keeps it open.
+    let hoverOpened = false;
+    const pinHover = () => { if (hoverOpened) { hoverOpened = false; post('PinHover'); } };
+    addEventListener('keydown', pinHover, true);
+    window.__popOpen = d => {
+      docked = !!d.docked;
+      hoverOpened = !!d.hover;
+      document.body.classList.toggle('docked', docked);
+      const pop = $('pop');
+      pop.classList.remove('out', 'in');
+      void pop.offsetWidth;
+      if (!docked) pop.classList.add('in');
+      if (d.mode === 'bookmarks') { $('bmSearch').value = ''; $('bmTree').scrollTop = 0; }
+      show(d.mode);
+      // Pointing at a button must not take the keyboard from the page.
+      if (!hoverOpened) window.focus();
+      if (mode === 'downloads') renderDownloads();
+    };
+    window.__popClose = () => {
+      const pop = $('pop');
+      pop.classList.remove('in');
+      pop.classList.add('out');
+    };
+    window.__popMode = d => {
+      docked = !!d.docked;
+      document.body.classList.toggle('docked', docked);
+    };
+    function createWs() {
+      const inp = $('wsNewName');
+      const name = inp.value.trim();
+      inp.value = '';
+      post('CreateWorkspace', { name, color: '' });
+    }
+    function cycleWsColor(id, current) {
+      const idx = ACCENTS.findIndex(a => a.id === current);
+      const next = ACCENTS[(idx + 1) % ACCENTS.length].id;
+      post('SetWorkspaceColor', { id, color: next });
+    }
+    function startRenameWs(id) { editingWsId = id; renderSpaces(); }
+    function commitRenameWs(id, val) {
+      editingWsId = null;
+      const trimmed = val.trim();
+      if (trimmed) post('RenameWorkspace', { id, name: trimmed });
+      else renderSpaces();
+    }
+
+    window.__shellUpdate = function (msg) {
+      const d = msg && (msg.data || msg);
+      if (!d || !d.tabs) return;
+      shell = d;
+      renderSpaces();
+    };
+
+    function renderSpaces() {
+      const box = $('wsList');
+      if (!box) return;
+      const allTabs = (shell.tabs || []).concat(shell.inactive_tabs || []);
+      const wsList = shell.workspaces || [];
+      box.innerHTML = '';
+      wsList.forEach((ws, idx) => {
+        const card = document.createElement('div');
+        card.className = 'ws-card' + (ws.id === shell.active_workspace_id ? ' active' : '');
+        card.ondragover = e => { if (draggedTabId != null) { e.preventDefault(); card.classList.add('drop-target'); } };
+        card.ondragleave = () => card.classList.remove('drop-target');
+        card.ondrop = e => {
+          e.preventDefault();
+          card.classList.remove('drop-target');
+          if (draggedTabId != null) {
+            post('MoveTabToWorkspace', { tab_id: draggedTabId, workspace_id: ws.id });
+            draggedTabId = null;
+          }
+        };
+
+        const head = document.createElement('div');
+        head.className = 'ws-head';
+        const dot = document.createElement('button');
+        dot.className = 'ws-color';
+        dot.style.setProperty('--ws', toneOf(ws.color));
+        dot.title = 'Change workspace color';
+        dot.onclick = () => cycleWsColor(ws.id, ws.color);
+        head.appendChild(dot);
+
+        if (editingWsId === ws.id) {
+          const inp = document.createElement('input');
+          inp.className = 'ws-rename';
+          inp.value = ws.name;
+          inp.onkeydown = e => {
+            if (e.key === 'Enter') commitRenameWs(ws.id, inp.value);
+            else if (e.key === 'Escape') { editingWsId = null; renderSpaces(); }
+          };
+          inp.onblur = () => commitRenameWs(ws.id, inp.value);
+          head.appendChild(inp);
+          setTimeout(() => { inp.focus(); inp.select(); }, 0);
+        } else {
+          const title = document.createElement('button');
+          title.className = 'ws-title';
+          title.textContent = `${ws.name} (${allTabs.filter(t => t.workspace === ws.id).length})`;
+          title.onclick = () => post('SwitchWorkspace', { id: ws.id });
+          title.ondblclick = () => startRenameWs(ws.id);
+          head.appendChild(title);
+        }
+
+        const ren = document.createElement('button');
+        ren.className = 'ws-act';
+        ren.title = 'Rename';
+        ren.textContent = '✎';
+        ren.onclick = () => startRenameWs(ws.id);
+        head.appendChild(ren);
+
+        if (idx > 0) {
+          const up = document.createElement('button');
+          up.className = 'ws-act';
+          up.title = 'Move up';
+          up.textContent = '↑';
+          up.onclick = () => post('ReorderWorkspace', { from_index: idx, to_index: idx - 1 });
+          head.appendChild(up);
+        }
+        if (idx + 1 < wsList.length) {
+          const dn = document.createElement('button');
+          dn.className = 'ws-act';
+          dn.title = 'Move down';
+          dn.textContent = '↓';
+          dn.onclick = () => post('ReorderWorkspace', { from_index: idx, to_index: idx + 1 });
+          head.appendChild(dn);
+        }
+        if (wsList.length > 1) {
+          const del = document.createElement('button');
+          del.className = 'ws-act';
+          del.title = 'Delete workspace';
+          del.textContent = '×';
+          del.onclick = () => post('DeleteWorkspace', { id: ws.id });
+          head.appendChild(del);
+        }
+        card.appendChild(head);
+
+        const tabsBox = document.createElement('div');
+        tabsBox.className = 'ws-tabs';
+        allTabs.filter(t => t.workspace === ws.id).forEach(t => {
+          const row = document.createElement('div');
+          row.className = 'ws-tab' + (t.id === shell.active_tab_id ? ' current' : '');
+          row.draggable = true;
+          row.ondragstart = e => { draggedTabId = t.id; e.dataTransfer.effectAllowed = 'move'; };
+          row.ondragend = () => { draggedTabId = null; };
+          const label = document.createElement('span');
+          label.textContent = t.title || t.url || 'New tab';
+          label.onclick = () => post('SwitchTab', { id: t.id });
+          row.appendChild(label);
+          if (ws.id === shell.active_workspace_id && t.id !== shell.active_tab_id) {
+            const spBtn = document.createElement('button');
+            spBtn.className = 'ws-act';
+            spBtn.title = 'Open in split view';
+            spBtn.textContent = '◫';
+            spBtn.onclick = e => { e.stopPropagation(); post('SplitWith', { tab_id: t.id }); };
+            row.appendChild(spBtn);
+          }
+          tabsBox.appendChild(row);
+        });
+        card.appendChild(tabsBox);
+        if (ws.id === shell.active_workspace_id && (shell.splits || []).length) {
+          const titleOf = id => { const t = allTabs.find(x => x.id === id); return t ? (t.title || t.url || 'New tab') : '?'; };
+          const sbox = document.createElement('div');
+          sbox.className = 'ws-splits';
+          shell.splits.forEach(sp => {
+            const row = document.createElement('div');
+            row.className = 'ws-split';
+            row.style.setProperty('--sg', toneOf(sp.color));
+            row.textContent = `◫ ${sp.name || 'Split ' + sp.id}: ${titleOf(sp.panes[0])} | ${titleOf(sp.panes[1])}`;
+            row.title = 'Split group — click to open';
+            row.onclick = () => post('SwitchTab', { id: sp.panes[0] });
+            sbox.appendChild(row);
+          });
+          card.appendChild(sbox);
+        }
+        box.appendChild(card);
+      });
+    }
+
+    addEventListener('keydown', e => { if (e.key === 'Escape') { if (canBack) show('menu'); else post('CloseSidebar'); } });
+    // Clicking anywhere else closes a floating dropdown.
+    addEventListener('blur', () => { if (!docked) post('SidebarBlur'); });
+    // While the pointer is on the list the host need not keep checking where it is.
+    document.documentElement.addEventListener('mouseenter', () => { if (!docked) post('SidebarPointer', { inside: true }); });
+    document.documentElement.addEventListener('mouseleave', () => { if (!docked) post('SidebarPointer', { inside: false }); });
+    window.__applyTheme = t => { const r = document.documentElement; r.dataset.accent = t.accent; if (t.mode) r.dataset.mode = t.mode; if (t.fonts) r.dataset.fonts = t.fonts; };
+
+    /* Menu: what the host knows (recent pages, the sidebar and bookmarks-bar settings) */
+    let MD = { history: [], closed: [], private: false, bar: false, sidebar: 'off' };
+    const hostOf = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
+    function renderSide() {
+      document.querySelectorAll('[data-side]').forEach(b => b.setAttribute('aria-checked', String(b.dataset.side === MD.sidebar)));
+      $('barSwitch').setAttribute('aria-checked', String(!!MD.bar));
+    }
+    document.querySelectorAll('[data-side]').forEach(b => b.onclick = () => {
+      MD.sidebar = b.dataset.side;
+      renderSide();
+      post('SetSidebarMode', { mode: MD.sidebar });
+    });
+    $('barSwitch').onclick = () => { MD.bar = !MD.bar; renderSide(); post('ToggleBookmarksBar'); };
+    function pageRows(box, list, action) {
+      box.textContent = '';
+      list.forEach(it => {
+        const b = document.createElement('button');
+        b.className = 'item link-row';
+        b.title = it.url;
+        const t = document.createElement('span');
+        t.textContent = it.title || hostOf(it.url) || it.url;
+        b.appendChild(t);
+        b.onclick = () => act(action, { url: it.url });
+        box.appendChild(b);
+      });
+    }
+    window.__menuData = d => {
+      MD = d;
+      renderSide();
+      pageRows($('recentList'), d.history || [], 'Navigate');
+      pageRows($('closedList'), d.closed || [], 'CreateTab');
+      $('recentLabel').hidden = !(d.history || []).length;
+      $('closedLabel').hidden = !(d.closed || []).length;
+      reportHeight();
+    };
+
+    /* Bookmarks: the list, search, drag to file, right-click for the rest. The data is indexed once
+       when it arrives; the rows carry no handlers of their own (the list listens), and at most
+       MAX_ROWS are drawn, so a big collection opens as fast as a small one. */
+    let BM = { items: [], folders: [] }, BMKEY = '';
+    let IDX = { kids: new Map(), at: new Map() };
+    const openFolders = new Set();
+    const MAX_ROWS = 300;
+    let dragUrl = null, lastDrop = null;
+    const hue = str => { let h = 7; for (const c of str) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+    const parentOf = f => f.includes(' / ') ? f.slice(0, f.lastIndexOf(' / ')) : '';
+    const leafOf = f => f.includes(' / ') ? f.slice(f.lastIndexOf(' / ') + 3) : f;
+    const FOLDER = '<svg class="i fold" viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg>';
+    const CHEV = '<svg class="i chv" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>';
+    const tree = $('bmTree');
+    function reindex() {
+      const kids = new Map(), at = new Map(), count = new Map();
+      const add = (m, k, v) => { const a = m.get(k); if (a) a.push(v); else m.set(k, [v]); };
+      BM.folders.forEach(f => add(kids, parentOf(f), f));
+      BM.items.forEach(i => {
+        const f = i.folder || '';
+        i.hay = (i.title + ' ' + i.url).toLowerCase();
+        add(at, f, i);
+        for (let p = f; p; p = parentOf(p)) count.set(p, (count.get(p) || 0) + 1);
+      });
+      IDX = { kids, at, count };
+    }
+    function markDrop(row, cls) {
+      if (lastDrop && lastDrop[0] === row && lastDrop[1] === cls) return;
+      clearDrop();
+      row.classList.add(cls);
+      lastDrop = [row, cls];
+    }
+    function clearDrop() { if (lastDrop) lastDrop[0].classList.remove('drop-before', 'drop-into'); lastDrop = null; }
+    function openUrl(e, url) { act(e.ctrlKey || e.shiftKey ? 'CreateTab' : 'Navigate', { url }); }
+    function rowBase(depth) {
+      const el = document.createElement('div');
+      el.className = 'bm-row';
+      el.tabIndex = -1;
+      el.style.paddingLeft = (8 + depth * 16) + 'px';
+      return el;
+    }
+    function bmRow(f, depth, sub) {
+      const el = rowBase(depth);
+      el.draggable = true;
+      el.dataset.url = f.url;
+      el.dataset.in = f.folder || '';
+      el.title = f.title + '\n' + f.url;
+      const ico = document.createElement('span');
+      ico.className = 'ico';
+      ico.style.setProperty('--h', hue(hostOf(f.url) || f.url));
+      ico.textContent = (hostOf(f.url) || f.title || '?').charAt(0).toUpperCase();
+      const t = document.createElement('span');
+      t.className = 't';
+      t.textContent = f.title || f.url;
+      el.append(ico, t);
+      if (sub) { const s = document.createElement('span'); s.className = 's'; s.textContent = sub; el.appendChild(s); }
+      return el;
+    }
+    function folderRow(path, depth) {
+      const el = rowBase(depth);
+      el.classList.add('folder');
+      if (openFolders.has(path)) el.classList.add('open');
+      el.dataset.folder = path;
+      el.innerHTML = CHEV + FOLDER + '<span class="t"></span><span class="n"></span>';
+      el.querySelector('.t').textContent = leafOf(path);
+      el.querySelector('.n').textContent = IDX.count.get(path) || '';
+      return el;
+    }
+    function note(a, b) {
+      const d = document.createElement('div');
+      d.className = 'empty';
+      d.append(a);
+      if (b) { d.appendChild(document.createElement('br')); d.append(b); }
+      return d;
+    }
+    const rowKey = r => r ? (r.dataset.folder != null ? 'f:' + r.dataset.folder : 'u:' + r.dataset.url) : '';
+    let treeStale = true;
+    function renderTree() {
+      if (mode !== 'bookmarks') { treeStale = true; return; }
+      treeStale = false;
+      const keep = rowKey(document.activeElement && document.activeElement.closest && document.activeElement.closest('.bm-row'));
+      const q = $('bmSearch').value.trim().toLowerCase();
+      const frag = document.createDocumentFragment();
+      let n = 0, cut = false;
+      if (q) {
+        const words = q.split(/\s+/);
+        for (const f of BM.items) {
+          if (!words.every(w => f.hay.includes(w))) continue;
+          if (n >= MAX_ROWS) { cut = true; break; }
+          frag.appendChild(bmRow(f, 0, f.folder ? leafOf(f.folder) : hostOf(f.url)));
+          n++;
+        }
+        if (!n) frag.appendChild(note('Nothing matches.'));
+      } else {
+        const walk = (parent, depth) => {
+          for (const f of IDX.kids.get(parent) || []) {
+            if (n >= MAX_ROWS) { cut = true; return; }
+            frag.appendChild(folderRow(f, depth));
+            n++;
+            if (openFolders.has(f)) walk(f, depth + 1);
+          }
+          for (const i of IDX.at.get(parent) || []) {
+            if (n >= MAX_ROWS) { cut = true; return; }
+            frag.appendChild(bmRow(i, depth, ''));
+            n++;
+          }
+        };
+        walk('', 0);
+        if (!BM.items.length && !BM.folders.length) frag.appendChild(note('No bookmarks yet.', 'Press Ctrl+D on a page to keep it here.'));
+      }
+      if (cut) {
+        const m = rowBase(0);
+        m.classList.add('more');
+        m.dataset.more = '1';
+        m.textContent = q ? 'More matches in the bookmark manager' : 'The rest are in the bookmark manager';
+        frag.appendChild(m);
+      }
+      tree.replaceChildren(frag);
+      if (keep) {
+        const again = [...tree.querySelectorAll('.bm-row')].find(r => rowKey(r) === keep);
+        if (again) again.focus({ preventScroll: true });
+      }
+      reportHeight();
+    }
+    function toggleFolder(path) {
+      if (openFolders.has(path)) openFolders.delete(path); else openFolders.add(path);
+      renderTree();
+    }
+    const rowOf = e => (e.target && e.target.closest ? e.target.closest('.bm-row') : null);
+    tree.addEventListener('click', e => {
+      const r = rowOf(e);
+      if (!r) return;
+      if (r.dataset.folder != null) toggleFolder(r.dataset.folder);
+      else if (r.dataset.url) openUrl(e, r.dataset.url);
+      else if (r.dataset.more) act('RunAction', { value: 'bookmark-manager' });
+    });
+    tree.addEventListener('auxclick', e => { const r = rowOf(e); if (r && r.dataset.url && e.button === 1) post('CreateTab', { url: r.dataset.url }); });
+    tree.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      const r = rowOf(e);
+      const p = { from: 'panel', x: e.clientX, y: e.clientY };
+      if (r && r.dataset.url) p.url = r.dataset.url;
+      else if (r && r.dataset.folder != null) p.folder = r.dataset.folder;
+      post('BookmarkMenu', p);
+    });
+    tree.addEventListener('dragstart', e => {
+      const r = rowOf(e);
+      if (!r || !r.dataset.url) return;
+      dragUrl = r.dataset.url;
+      r.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', dragUrl);
+    });
+    tree.addEventListener('dragend', () => { dragUrl = null; clearDrop(); tree.querySelectorAll('.dragging').forEach(x => x.classList.remove('dragging')); });
+    tree.addEventListener('dragover', e => {
+      if (!dragUrl) return;
+      const r = rowOf(e);
+      if (!r) { if (e.target === tree) e.preventDefault(); return; }
+      if (r.dataset.folder != null) { e.preventDefault(); markDrop(r, 'drop-into'); }
+      else if (r.dataset.url && r.dataset.url !== dragUrl) { e.preventDefault(); markDrop(r, 'drop-before'); }
+    });
+    tree.addEventListener('drop', e => {
+      if (!dragUrl) return;
+      e.preventDefault();
+      const u = dragUrl, r = rowOf(e);
+      clearDrop();
+      if (!r) { if (e.target === tree) post('BookmarkMove', { url: u, folder: '' }); return; }
+      if (r.dataset.folder != null) { openFolders.add(r.dataset.folder); post('BookmarkMove', { url: u, folder: r.dataset.folder }); }
+      else if (r.dataset.url && r.dataset.url !== u) post('BookmarkMove', { url: u, folder: r.dataset.in || '', before: r.dataset.url });
+    });
+    // Keyboard: arrows walk the list, Right / Left open and close folders, Enter opens, Delete removes.
+    tree.addEventListener('keydown', e => {
+      const r = rowOf(e);
+      const rows = [...tree.querySelectorAll('.bm-row')];
+      const i = rows.indexOf(r);
+      const go = j => { const t = rows[Math.max(0, Math.min(rows.length - 1, j))]; if (t) t.focus(); };
+      const folder = r && r.dataset.folder != null ? r.dataset.folder : null;
+      if (e.key === 'ArrowDown') { e.preventDefault(); go(i + 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); if (i <= 0) $('bmSearch').focus(); else go(i - 1); }
+      else if (e.key === 'Home') { e.preventDefault(); go(0); }
+      else if (e.key === 'End') { e.preventDefault(); go(rows.length - 1); }
+      else if (e.key === 'ArrowRight' && folder != null && !openFolders.has(folder)) { e.preventDefault(); toggleFolder(folder); }
+      else if (e.key === 'ArrowLeft' && folder != null && openFolders.has(folder)) { e.preventDefault(); toggleFolder(folder); }
+      else if (e.key === 'ArrowLeft' && r) {
+        const up = r.dataset.url ? r.dataset.in : parentOf(folder || '');
+        const t = up && rows.find(x => x.dataset.folder === up);
+        if (t) { e.preventDefault(); t.focus(); }
+      }
+      else if ((e.key === 'Enter' || e.key === ' ') && r) { e.preventDefault(); r.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey })); }
+      else if (e.key === 'Delete' && r && r.dataset.url) { e.preventDefault(); post('BookmarkRemove', { urls: [r.dataset.url] }); go(i + 1 < rows.length ? i : i - 1); }
+    });
+    let searchTimer = 0;
+    $('bmSearch').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(renderTree, 60); });
+    $('bmSearch').addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); const f = tree.querySelector('.bm-row'); if (f) f.focus(); }
+      else if (e.key === 'Enter') { const f = tree.querySelector('.bm-row[data-url]'); if (f) { e.preventDefault(); f.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey })); } }
+      else if (e.key === 'Escape' && $('bmSearch').value) { e.preventDefault(); e.stopPropagation(); $('bmSearch').value = ''; renderTree(); }
+    });
+    window.__bookmarks = d => {
+      const key = JSON.stringify(d);
+      if (key === BMKEY) return;
+      BMKEY = key;
+      BM = d;
+      reindex();
+      renderTree();
+    };
+
+    /* Shield */
+    let shieldHost = '', shieldPaused = [], shieldState = 'on';
+    window.__shieldPanel = (d, paused) => {
+      shieldHost = d.host; shieldPaused = paused || []; shieldState = d.state;
+      $('shHost').textContent = d.host || 'This page';
+      $('shCount').textContent = d.blocked + d.replaced;
+      $('shBlocked').textContent = d.blocked;
+      $('shReplaced').textContent = d.replaced;
+      $('shWeek').textContent = Number(d.week).toLocaleString();
+      $('shSwitch').setAttribute('aria-checked', String(d.state === 'on'));
+      $('shSwitch').disabled = d.state === 'off' || d.state === 'none';
+      const note = $('shNote');
+      note.hidden = d.state !== 'off' && d.ready;
+      note.textContent = d.state === 'off' ? 'Byōbu is turned off in Settings.' : 'Loading filter lists…';
+      // The crane stands guard while the screen is up, and rests when it is paused.
+      const pet = document.querySelector('.guard-card .crane');
+      if (pet) pet.dataset.pose = d.state === 'on' ? 'guard' : 'sleep';
+    };
+    $('shSwitch').onclick = () => {
+      if (!shieldHost) return;
+      const bare = shieldHost.replace(/^www\./, '');
+      const list = shieldPaused.filter(p => p !== bare && p !== shieldHost);
+      if (shieldState === 'on') list.push(bare);
+      post('SaveSettings', { patch: { shield: { paused_sites: list } } });
+    };
+    window.__syncZoom = f => { $('zoomVal').textContent = Math.round(f * 100) + '%'; };
+
+    window.__sidebarSync = function (msg) {
+      const data = msg && (msg.data || msg);
+      if (!data) return;
+      // The host knows which dropdown is open; settle on it even if the first open ran early.
+      if (data.mode && data.mode !== mode) show(data.mode);
+      const s = data.security_info;
+      if (!s) return;
+      currentHost = s.host;
+      const note = $('secNote');
+      note.className = 'note' + (!s.is_secure && !s.is_internal ? ' warn' : '');
+      if (s.is_internal) {
+        $('secTitle').textContent = 'Shoji page';
+        $('secDesc').textContent = 'This page is part of the browser and never touches the network.';
+      } else if (s.is_secure) {
+        $('secTitle').textContent = 'Connection is secure';
+        $('secDesc').textContent = 'Information you send to this site is encrypted in transit.';
+      } else {
+        $('secTitle').textContent = 'Connection is not secure';
+        $('secDesc').textContent = 'Avoid entering passwords or payment details — this connection can be read or altered.';
+      }
+      const showCert = s.is_secure && !s.is_internal;
+      $('certCard').hidden = !showCert;
+      $('certBtn').hidden = !showCert;
+      const pending = s.has_certificate ? '' : '…';
+      $('pHost').textContent = s.host;
+      $('pSubject').textContent = s.subject || pending;
+      $('pIssuer').textContent = s.issuer || pending;
+      $('pValid').textContent = s.valid_from ? `${s.valid_from} → ${s.valid_to}` : pending;
+      $('pAlg').textContent = s.signature_algorithm || pending;
+      $('pThumb').textContent = s.thumbprint || pending;
+      $('pStorage').textContent = s.is_internal ? '—' : (s.is_persistent ? 'Kept across sessions' : 'Cleared on exit');
+      $('cookieRow').hidden = $('clearCookiesBtn').hidden = !!s.is_internal;
+      if (!s.is_internal) { $('pCookies').textContent = '…'; resetClearBtn(); post('SiteCookies'); }
+    };
+
+    /* Clearing a site's cookies and stored data: the first press asks, the second does it */
+    let clearArmed = 0;
+    const CLEAR_LABEL = 'Clear cookies and site data…';
+    function resetClearBtn() { clearTimeout(clearArmed); clearArmed = 0; $('clearCookiesBtn').textContent = CLEAR_LABEL; }
+    function clearCookies() {
+      const b = $('clearCookiesBtn');
+      if (!clearArmed) {
+        b.textContent = 'Press again to clear them and reload the page';
+        clearArmed = setTimeout(resetClearBtn, 4000);
+        return;
+      }
+      clearTimeout(clearArmed); clearArmed = 0;
+      b.textContent = 'Clearing…';
+      post('ClearSiteCookies');
+    }
+    window.__siteCookies = d => {
+      $('pCookies').textContent = d.cleared ? 'None' : String(d.n);
+      if (d.cleared) { $('clearCookiesBtn').textContent = 'Cleared. The page was reloaded.'; setTimeout(resetClearBtn, 2500); }
+    };
+
+    /* Downloads: the saved list from the host, with live progress laid over what is running */
+    let dlLog = [];
+    const dlLive = new Map();
+    window.__downloadsList = list => { dlLog = list || []; renderDownloads(); };
+    window.__syncDownloads = d => { dlLive.set(d.key, d); renderDownloads(); };
+    const size = b => {
+      if (!(b > 0)) return '';
+      const u = ['B', 'KB', 'MB', 'GB'];
+      let i = 0;
+      while (b >= 1024 && i < 3) { b /= 1024; i++; }
+      return (i > 1 ? b.toFixed(1) : Math.round(b)) + ' ' + u[i];
+    };
+    const ago = ms => {
+      const s = Math.max(0, (Date.now() - ms) / 1000);
+      if (s < 60) return 'just now';
+      if (s < 3600) return Math.floor(s / 60) + ' min ago';
+      if (s < 86400) return Math.floor(s / 3600) + ' h ago';
+      return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    };
+    function renderDownloads() {
+      const rows = dlLog.slice(0, 12).map(e => {
+        const live = dlLive.get(e.key);
+        const running = live ? live.state === 'InProgress' : e.state === 'downloading';
+        const done = live ? live.state === 'Completed' : e.state === 'done';
+        const ext = (e.name.split('.').pop() || '').slice(0, 4);
+        const pct = live && live.total_bytes > 0 ? Math.min(100, Math.round(live.received_bytes / live.total_bytes * 100)) : 0;
+        const meta = running
+          ? `${pct}% · ${size(live ? live.received_bytes : 0)}${live && live.total_bytes > 0 ? ' of ' + size(live.total_bytes) : ''}`
+          : done ? [size(e.bytes), e.source, ago(e.started)].filter(Boolean).join(' · ')
+          : 'Stopped · ' + ago(e.started);
+        const acts = running
+          ? `<button class="icon-btn" title="Cancel" aria-label="Cancel download" data-a="cancel"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`
+          : `${done ? '<button class="icon-btn" title="Show in folder" aria-label="Show in folder" data-a="show"><svg class="i" viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg></button>' : ''}`
+            + `<button class="icon-btn" title="Remove from list" aria-label="Remove from list" data-a="remove"><svg class="i" viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></button>`;
+        return `<div class="dl${done ? ' can-open' : ''}" data-key="${e.key}" data-live="${live ? live.download_id : ''}" title="${esc(e.path)}">` +
+          `<div class="dl-tile">${esc(ext || 'file')}</div>` +
+          `<div class="dl-body"><div class="dl-name">${esc(e.name)}</div><div class="dl-meta${!running && !done ? ' bad' : ''}">${esc(meta)}</div>` +
+          (running ? `<div class="bar"><div style="width:${pct}%"></div></div>` : '') + `</div>` +
+          `<div class="dl-acts">${acts}</div></div>`;
+      });
+      $('dlList').innerHTML = rows.join('');
+      $('dlFoot').hidden = !dlLog.length;
+      const active = dlLog.some(e => { const l = dlLive.get(e.key); return l ? l.state === 'InProgress' : e.state === 'downloading'; });
+      const pet = document.querySelector('#dlScene .crane');
+      const want = active ? 'carry' : dlLog.length ? '' : 'sleep';
+      if (pet && pet.dataset.pose !== want) { want ? pet.setAttribute('data-pose', want) : pet.removeAttribute('data-pose'); }
+      $('dlScene').style.display = dlLog.length && !active ? 'none' : '';
+      document.querySelectorAll('#dlScene .zzz').forEach(z => z.style.display = want === 'sleep' ? '' : 'none');
+      if (!dlLog.length) {
+        $('dlList').innerHTML = '<div class="empty">Nothing downloaded yet.<br>Files you save will show up here.</div>';
+      }
+    }
+    $('dlList').addEventListener('click', e => {
+      const row = e.target.closest('.dl');
+      if (!row) return;
+      const key = +row.dataset.key;
+      const btn = e.target.closest('button[data-a]');
+      if (btn) {
+        e.stopPropagation();
+        if (btn.dataset.a === 'cancel') post('CancelDownload', { download_id: +row.dataset.live });
+        else post('DownloadAction', { key, action: btn.dataset.a });
+      } else if (row.classList.contains('can-open')) {
+        post('DownloadAction', { key, action: 'open' });
+        if (!docked) post('CloseSidebar');
+      }
+    });
+
+    /* Dark websites */
+    let D = null;
+    const SLIDERS = [['dkBrightness', 'brightness', '%'], ['dkContrast', 'contrast', '%'], ['dkSepia', 'sepia', '%'], ['dkGrayscale', 'grayscale', '%'], ['dkStroke', 'text_stroke', '']];
+    let sendTimer = 0, pendingSend = null;
+    let scope = 'sites';       // 'sites' or 'browser'
+    let appliesTo = 'all';     // for websites: the look every site shares, or this site's own
+    const siteLook = () => scope === 'sites' && appliesTo === 'site' && D && D.host;
+    // The look being edited: the browser's own, the one every site shares, or one site's.
+    const cur = () => scope === 'browser' ? D.browser : (siteLook() ? D.theme : D.global);
+    function edit(patch) {
+      if (!D) return;
+      const next = Object.assign({}, cur(), patch);
+      if (!('preset' in patch)) next.preset = 'custom';
+      if (scope === 'browser') D.browser = next;
+      else if (siteLook()) { D.theme = next; D.own_look = true; }
+      else { D.global = next; if (!D.own_look) D.theme = next; }
+      pendingSend = scope === 'browser' ? { browser: true, theme: next } : { host: siteLook() ? D.host : null, theme: next };
+      clearTimeout(sendTimer);
+      // Dragging a slider sends a few updates a second so pages follow along live.
+      sendTimer = setTimeout(flush, 90);
+      renderDark(true);
+    }
+    function flush() {
+      if (!pendingSend) return;
+      if (pendingSend.browser) post('SetBrowserTheme', { theme: pendingSend.theme });
+      else post('SetDarkTheme', pendingSend);
+      pendingSend = null;
+    }
+    function setScope(next) {
+      scope = next;
+      renderDark(false);
+      reportHeight();
+    }
+    $('dkScopeSites').onclick = () => setScope('sites');
+    $('dkScopeBrowser').onclick = () => setScope('browser');
+    $('dkTune').addEventListener('toggle', () => reportHeight());
+    function renderDark(local) {
+      if (!D) return;
+      const browser = scope === 'browser';
+      const t = cur();
+      $('dkScopeSites').setAttribute('aria-checked', String(!browser));
+      $('dkScopeBrowser').setAttribute('aria-checked', String(browser));
+      $('dkBrowserNote').hidden = !browser;
+      if (mode === 'dark') $('title').textContent = browser ? 'Dark mode' : 'Dark websites';
+      // Browser: only the look. Websites: the switch, this site, the look, the schedule.
+      $('dkMaster').hidden = browser;
+      $('dkSite').hidden = browser || !D.host;
+      $('dkSched').hidden = browser;
+      $('dkApplies').hidden = browser || !D.host;
+      $('dkText2').hidden = browser;
+      $('dkModeDark').parentElement.hidden = browser;
+
+      $('dkMaster').dataset.on = String(D.on);
+      $('dkOn').setAttribute('aria-checked', String(D.on));
+      $('dkMasterSub').textContent = D.on ? 'On: pages open dark' : 'Off: pages look as their sites made them';
+
+      if (D.host) {
+        $('dkHost').textContent = D.host;
+        $('dkNow').textContent = D.dark_here ? 'Dark here' : 'Not dark here';
+        $('dkFollowSub').textContent = D.on ? 'Dark, like every other site' : 'Not dark, because dark websites is off';
+        for (const [id, key] of [['dkFollow', 'follow'], ['dkAlways', 'always'], ['dkNever', 'never']]) {
+          $(id).setAttribute('aria-checked', String(D.site === key));
+        }
+        $('dkAppliesSite').textContent = D.host + ' only';
+        if (!D.host) appliesTo = 'all';
+        $('dkAppliesAll').setAttribute('aria-checked', String(appliesTo === 'all'));
+        $('dkAppliesSite').setAttribute('aria-checked', String(appliesTo === 'site'));
+      } else {
+        appliesTo = 'all';
+      }
+      $('dkScope').textContent = browser ? 'The browser itself' : (siteLook() ? (D.own_look ? 'Its own style' : 'Starts from the shared style') : 'Shared by every site');
+      document.querySelectorAll('#dkPresets .preset').forEach(b => b.setAttribute('aria-checked', String(b.dataset.id === t.preset)));
+      $('dkModeDark').setAttribute('aria-checked', String(t.mode !== 'light'));
+      $('dkModeLight').setAttribute('aria-checked', String(t.mode === 'light'));
+      for (const [id, key, unit] of SLIDERS) {
+        const el = $(id);
+        if (document.activeElement !== el) el.value = t[key];
+        el.nextElementSibling.textContent = t[key] + unit;
+      }
+      if (document.activeElement !== $('dkBackground')) $('dkBackground').value = t.background;
+      if (document.activeElement !== $('dkText')) $('dkText').value = t.text;
+      if (document.activeElement !== $('dkFont')) $('dkFont').value = t.use_font ? t.font_family : '';
+      $('dkSchedOn').setAttribute('aria-checked', String(D.schedule.enabled));
+      $('dkTimes').hidden = !D.schedule.enabled;
+      if (!local) {
+        if (document.activeElement !== $('dkFrom')) $('dkFrom').value = D.schedule.from;
+        if (document.activeElement !== $('dkTo')) $('dkTo').value = D.schedule.to;
+      }
+      // The style does nothing while nothing is dark; say so by dimming it.
+      $('dkLook').classList.toggle('dim', !browser && !D.on && !(D.host && D.site === 'always') && !D.schedule.enabled && !D.dark_here);
+    }
+    window.__darkPanel = d => {
+      if (pendingSend) return; // our own edit is still on its way; its echo will follow
+      const first = !D;
+      const host = D && D.host;
+      D = d;
+      if (first) buildPresets();
+      if (host !== d.host) appliesTo = 'all'; // another page: back to the shared style
+      renderDark(false);
+      reportHeight();
+    };
+    function buildPresets() {
+      $('dkPresets').innerHTML = D.presets.map(p =>
+        `<button class="preset" role="radio" data-id="${p.preset}" aria-checked="false" title="${p.preset}"><i style="background:${p.background};color:${p.text}">Aa</i>${p.preset[0].toUpperCase() + p.preset.slice(1)}</button>`).join('');
+      $('dkPresets').onclick = e => {
+        const b = e.target.closest('.preset');
+        if (!b) return;
+        const p = D.presets.find(x => x.preset === b.dataset.id);
+        if (p) edit(Object.assign({}, p, { preset: p.preset }));
+      };
+    }
+    // The master switch and the three choices for this site each do one clear thing, whatever
+    // they showed before; the panel redraws from the host's answer (and at once, below).
+    $('dkOn').onclick = () => { if (!D) return; D.on = !D.on; D.dark_here = D.site === 'always' || (D.site !== 'never' && D.on); renderDark(true); post('SetDarkWebsites', { on: D.on }); };
+    const siteMode = m => () => {
+      if (!D || !D.host) return;
+      D.site = m;
+      D.dark_here = m === 'always' || (m === 'follow' && D.on);
+      renderDark(true);
+      post('SetDarkSiteMode', { host: D.host, mode: m });
+    };
+    $('dkFollow').onclick = siteMode('follow');
+    $('dkAlways').onclick = siteMode('always');
+    $('dkNever').onclick = siteMode('never');
+    $('dkAppliesAll').onclick = () => { appliesTo = 'all'; renderDark(true); };
+    $('dkAppliesSite').onclick = () => { appliesTo = 'site'; renderDark(true); };
+    $('dkModeDark').onclick = () => edit({ mode: 'dark' });
+    $('dkModeLight').onclick = () => edit({ mode: 'light' });
+    for (const [id, key] of SLIDERS) $(id).addEventListener('input', e => edit({ [key]: +e.target.value }));
+    $('dkBackground').addEventListener('input', e => edit({ background: e.target.value }));
+    $('dkText').addEventListener('input', e => edit({ text: e.target.value }));
+    (() => {
+      const sel = $('dkFont');
+      const none = document.createElement('option');
+      none.value = ''; none.textContent = 'Page default';
+      sel.prepend(none);
+      sel.addEventListener('change', () => edit(sel.value ? { use_font: true, font_family: sel.value } : { use_font: false }));
+    })();
+    const sched = () => post('SetDarkSchedule', { enabled: D.schedule.enabled, from: $('dkFrom').value || '20:00', to: $('dkTo').value || '07:00' });
+    $('dkSchedOn').onclick = () => { D.schedule.enabled = !D.schedule.enabled; renderDark(true); sched(); };
+    $('dkFrom').addEventListener('change', sched);
+    $('dkTo').addEventListener('change', sched);
+    $('dkReset').onclick = () => { if (D) edit(Object.assign({}, D.presets[0], { preset: 'sumi' })); };
+
+    renderDownloads();
+    reportHeight();
+    // Tell the host the page is up, so it never shows an unpainted view. A timer, not
+    // requestAnimationFrame: this view starts hidden, and a hidden page never gets a frame.
+    setTimeout(() => post('SidebarReady'), 200);
+  </script>
+</body>
+</html>

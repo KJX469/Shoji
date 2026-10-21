@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="en" data-accent="{{ACCENT}}" data-mode="{{MODE}}" data-fonts="{{FONTS}}">
+<head>
+  <meta charset="UTF-8">
+  <title>Welcome</title>
+  <style>
+{{THEME_CSS}}
+    html, body { height: 100%; }
+    body { display: grid; place-items: center; overflow: hidden auto; user-select: none; }
+    body::before { content: ""; position: fixed; inset: 0; pointer-events: none;
+      background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+      background-size: 132px 196px; background-position: center -40px;
+      -webkit-mask-image: radial-gradient(ellipse 62% 58% at 50% 45%, transparent 40%, #000 100%);
+      mask-image: radial-gradient(ellipse 62% 58% at 50% 45%, transparent 40%, #000 100%); opacity: .7; transition: opacity .5s; }
+    body:not([data-step="color"])::before { opacity: .3; }
+    main { position: relative; display: flex; flex-direction: column; align-items: center; width: min(800px, 100%); text-align: center; padding: 32px 24px; }
+    @keyframes rise { from { opacity: 0; transform: translateY(10px); } }
+    .hero { width: 148px; height: 148px; transition: width .5s var(--ease), height .5s var(--ease); }
+    body:not([data-step="color"]) .hero { width: 60px; height: 60px; }
+
+    /* The crane. Four paths: [1] tail, [2] upright wing, [3] wing's reverse side, [4] neck and head.
+       Wings fold about the body line (their left edge), the head nods about the neck, so a pose
+       is just a few small rotations and squashes. Idle motion runs all the time; each step plays
+       its own gesture once when it appears (set with data-pose). */
+    .hero { overflow: visible; will-change: transform; animation: bob 6s ease-in-out infinite alternate; }
+    .hero path { transform-box: fill-box; }
+    .hero path:nth-of-type(1) { transform-origin: 100% 100%; }
+    .hero path:nth-of-type(2), .hero path:nth-of-type(3) { transform-origin: 0% 55%; }
+    .hero path:nth-of-type(4) { transform-origin: 8% 82%; }
+    @keyframes bob { from { transform: translateY(0); } to { transform: translateY(-5px); } }
+    @keyframes breathe { from { transform: scaleX(1); } to { transform: scaleX(.93); } }
+    .hero path:nth-of-type(2), .hero path:nth-of-type(3) { animation: breathe 3.4s ease-in-out infinite alternate; }
+
+    /* color: unfolds from a closed crane, then settles */
+    .hero[data-pose="unfold"] { animation: rise-in 1s var(--ease) both, bob 6s 1s ease-in-out infinite alternate; }
+    .hero[data-pose="unfold"] path:nth-of-type(2), .hero[data-pose="unfold"] path:nth-of-type(3) { animation: wing-open 1.1s .1s cubic-bezier(.3, 1.5, .6, 1) both, breathe 3.4s 1.3s ease-in-out infinite alternate; }
+    .hero[data-pose="unfold"] path:nth-of-type(4) { animation: head-up 1s .3s cubic-bezier(.3, 1.4, .6, 1) both; }
+    .hero[data-pose="unfold"] path:nth-of-type(1) { animation: tail-in .9s .2s var(--ease) both; }
+    @keyframes rise-in { from { opacity: 0; transform: translateY(18px) scale(.82); } }
+    @keyframes wing-open { from { transform: scaleX(.08); } }
+    @keyframes head-up { from { transform: rotate(34deg); } }
+    @keyframes tail-in { from { transform: rotate(-24deg); opacity: 0; } }
+
+    /* import: leans in and dips its head to gather, wings opening to take it in */
+    .hero[data-pose="gather"] { animation: lean 1.3s var(--ease) both, bob 6s 1.3s ease-in-out infinite alternate; }
+    .hero[data-pose="gather"] path:nth-of-type(4) { animation: dip 1.3s ease-in-out both; }
+    .hero[data-pose="gather"] path:nth-of-type(2), .hero[data-pose="gather"] path:nth-of-type(3) { animation: wing-wide 1.3s ease-in-out both, breathe 3.4s 1.3s ease-in-out infinite alternate; }
+    @keyframes lean { 30% { transform: rotate(5deg) translateY(2px); } 100% { transform: none; } }
+    @keyframes dip { 0%, 100% { transform: none; } 35%, 60% { transform: rotate(22deg); } }
+    @keyframes wing-wide { 40% { transform: scaleX(1.09); } }
+    /* while a read is running: steady wingbeats, lifting a little */
+    .hero[data-pose="busy"] { animation: lift 1.2s ease-in-out infinite alternate; }
+    .hero[data-pose="busy"] path:nth-of-type(2), .hero[data-pose="busy"] path:nth-of-type(3) { animation: flap .55s ease-in-out infinite alternate; }
+    .hero[data-pose="busy"] path:nth-of-type(1) { animation: tail-flick .55s ease-in-out infinite alternate; }
+    @keyframes flap { to { transform: scaleX(.42); } }
+    @keyframes tail-flick { to { transform: rotate(-7deg); } }
+    @keyframes lift { from { transform: translateY(0); } to { transform: translateY(-9px); } }
+    /* import finished: a small hop, wings thrown wide, head up */
+    .hero[data-pose="cheer"] { animation: hop .9s cubic-bezier(.3, 1.3, .5, 1) both, bob 6s .9s ease-in-out infinite alternate; }
+    .hero[data-pose="cheer"] path:nth-of-type(2), .hero[data-pose="cheer"] path:nth-of-type(3) { animation: wing-wide .9s ease-in-out both, breathe 3.4s .9s ease-in-out infinite alternate; }
+    .hero[data-pose="cheer"] path:nth-of-type(4) { animation: head-high .9s ease-in-out both; }
+    @keyframes hop { 40% { transform: translateY(-16px) rotate(-3deg); } 70% { transform: translateY(1px); } }
+    @keyframes head-high { 40% { transform: rotate(-12deg); } }
+
+    /* default browser: two nods, "yes" */
+    .hero[data-pose="nod"] path:nth-of-type(4) { animation: nod 1.2s ease-in-out both; }
+    @keyframes nod { 0%, 100% { transform: none; } 20%, 60% { transform: rotate(16deg); } 40%, 80% { transform: rotate(-2deg); } }
+
+    /* fork: tilts one way then the other, weighing it up */
+    .hero[data-pose="tilt"] { animation: tilt 1.5s ease-in-out both, bob 6s 1.5s ease-in-out infinite alternate; }
+    .hero[data-pose="tilt"] path:nth-of-type(4) { animation: head-tilt 1.5s ease-in-out both; }
+    @keyframes tilt { 25% { transform: rotate(-7deg); } 65% { transform: rotate(6deg); } 100% { transform: none; } }
+    @keyframes head-tilt { 25% { transform: rotate(-10deg); } 65% { transform: rotate(12deg); } }
+
+    /* type: three quick pecks at the page */
+    .hero[data-pose="peck"] path:nth-of-type(4) { animation: peck 1.1s ease-in-out both; }
+    @keyframes peck { 0%, 100% { transform: none; } 15%, 45%, 75% { transform: rotate(15deg); } 30%, 60%, 90% { transform: rotate(2deg); } }
+
+    /* privacy: wings fold across and shelter it, then open again */
+    .hero[data-pose="shelter"] path:nth-of-type(2), .hero[data-pose="shelter"] path:nth-of-type(3) { animation: wing-close 1.5s ease-in-out both, breathe 3.4s 1.5s ease-in-out infinite alternate; }
+    .hero[data-pose="shelter"] path:nth-of-type(4) { animation: tuck 1.5s ease-in-out both; }
+    .hero[data-pose="shelter"] path:nth-of-type(1) { animation: tail-in 1.5s ease-in-out both; }
+    @keyframes wing-close { 35%, 65% { transform: scaleX(.18); } }
+    @keyframes tuck { 35%, 65% { transform: rotate(26deg); } }
+
+    /* search: looks around, left then right */
+    .hero[data-pose="look"] { animation: look 1.6s ease-in-out both, bob 6s 1.6s ease-in-out infinite alternate; }
+    .hero[data-pose="look"] path:nth-of-type(4) { animation: scan 1.6s ease-in-out both; }
+    @keyframes look { 25% { transform: translateX(-7px); } 70% { transform: translateX(7px); } 100% { transform: none; } }
+    @keyframes scan { 25% { transform: rotate(-12deg); } 70% { transform: rotate(14deg); } }
+
+    /* leaving: the page lets go, the crane takes off (see finish()) */
+    body.leaving { overflow: hidden; }
+    body.leaving .step, body.leaving .progress { opacity: 0; transform: translateY(10px); transition: opacity .45s ease, transform .45s var(--ease); }
+    body.leaving::before { opacity: 0; transition: opacity .6s; }
+    body.leaving .hero, body.leaving .hero path { animation: none; }
+    @media (prefers-reduced-motion: reduce) {
+      .hero, .hero path { animation: none !important; }
+    }
+    h1 { margin-top: 22px; font-family: var(--font-display); font-size: 30px; font-weight: 400; letter-spacing: -.01em; }
+    p.lead { font-family: var(--font-text); margin-top: 10px; max-width: 440px; color: var(--ink-2); font-size: 14px; line-height: 1.6; }
+    .step { display: none; flex-direction: column; align-items: center; width: 100%; }
+    .step.on { display: flex; animation: rise .6s var(--ease) both; }
+
+    /* Progress through the customize steps */
+    .progress { display: flex; align-items: center; gap: 10px; margin-top: 18px; color: var(--ink-3); }
+    .progress[hidden] { display: none; }
+    .bars { display: flex; gap: 5px; }
+    .bars i { width: 22px; height: 4px; border-radius: 2px; background: var(--press); transition: background .3s; }
+    .bars i.done { background: var(--tone); }
+
+    /* Color */
+    .picker { display: flex; flex-wrap: wrap; justify-content: center; max-width: 100%; gap: 6px; margin-top: 34px; padding: 8px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
+    .opt { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 74px; padding: 10px 0 8px; border: 0; border-radius: 11px; background: none; color: var(--ink-2); font: inherit; font-size: 11.5px; cursor: pointer; transition: background .15s, color .15s; }
+    .opt:hover { background: var(--hover); color: var(--ink); }
+    .opt[aria-checked="true"] { background: var(--tint); color: var(--ink); font-weight: 600; }
+    .swatch-crane .crane { width: 38px; height: 38px; filter: var(--crane-shadow); }
+    .darkrow { display: flex; align-items: center; gap: 14px; margin-top: 22px; padding: 10px 16px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); text-align: left; font-size: 13px; }
+    .darkrow small { display: block; color: var(--ink-3); font-size: 11.5px; }
+    .switch { position: relative; width: 38px; height: 22px; flex-shrink: 0; }
+    .switch input { position: absolute; opacity: 0; inset: 0; cursor: pointer; z-index: 1; margin: 0; }
+    .switch span { position: absolute; inset: 0; border-radius: 11px; background: var(--press); border: 1px solid var(--line); transition: background .2s; }
+    .switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--ink-2); transition: transform .2s var(--ease), background .2s; }
+    .switch input:checked + span { background: var(--tone); border-color: transparent; }
+    .switch input:checked + span::after { transform: translateX(16px); background: var(--on-tone); }
+    .fine { max-width: 440px; line-height: 1.5; margin-top: 16px; font-size: 12px; color: var(--ink-3); }
+
+    /* Buttons */
+    button { font: inherit; color: inherit; }
+    .actions { display: flex; align-items: center; gap: 10px; margin-top: 30px; }
+    .begin { height: 42px; padding: 0 30px; border: 0; border-radius: 10px; background: var(--tone); color: var(--on-tone); font-size: 14px; font-weight: 600; cursor: pointer; transition: filter .15s, transform .15s; }
+    .begin:hover { filter: brightness(.96); }
+    .begin:active { transform: translateY(1px); }
+    .back { height: 42px; padding: 0 18px; border: 0; border-radius: 10px; background: none; color: var(--ink-2); font-size: 13.5px; cursor: pointer; }
+    .back:hover { background: var(--hover); color: var(--ink); }
+
+    /* Continue customizing, or start browsing */
+    .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: min(560px, 100%); margin-top: 32px; }
+    .choice { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 20px 20px 18px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); text-align: left; cursor: pointer; box-shadow: var(--shadow); transition: border-color .15s, transform .2s var(--ease), background .15s; }
+    .choice:hover { border-color: var(--line-strong); transform: translateY(-2px); }
+    .choice.primary { background: var(--tint-soft); border-color: color-mix(in srgb, var(--tone) 70%, transparent); }
+    .choice svg.i { width: 20px; height: 20px; color: var(--accent); margin-bottom: 6px; }
+    .choice b { font-family: var(--font-display); font-size: 19px; font-weight: 500; }
+    .choice small { font-family: var(--font-text); font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+    .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+    .chips span { padding: 2px 9px; border-radius: 20px; background: var(--surface); border: 1px solid var(--line); font-size: 11.5px; color: var(--ink-2); }
+
+    /* Type tester */
+    .specimen { display: flex; align-items: center; gap: 6px; width: min(620px, 100%); margin-top: 26px; padding: 4px 6px 4px 18px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
+    .specimen:focus-within { border-color: var(--accent); }
+    .specimen input { flex: 1; min-width: 0; height: 46px; border: 0; background: none; outline: none; color: var(--ink); font-family: var(--font-display); font-size: 20px; user-select: text; }
+    .specimen input::placeholder { color: var(--ink-3); }
+    .icon-btn { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 9px; background: none; color: var(--ink-2); cursor: pointer; }
+    .icon-btn:hover { background: var(--hover); color: var(--ink); }
+    .icon-btn:active svg { transform: rotate(-90deg); transition: transform .2s; }
+    .sheets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; width: 100%; margin-top: 18px; }
+    .sheet { position: relative; display: flex; flex-direction: column; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); text-align: left; overflow: hidden; cursor: pointer; padding: 0; box-shadow: var(--shadow); transition: border-color .15s, transform .25s var(--ease); }
+    .sheet:hover, .sheet:focus-visible { transform: translateY(-3px); border-color: var(--line-strong); }
+    .sheet[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow); }
+    .mini-strip { display: flex; align-items: flex-end; gap: 6px; height: 30px; padding: 0 10px; background: var(--bg-sunk); }
+    .mini-tab { padding: 5px 12px 6px; border-radius: 7px 7px 0 0; background: var(--surface); font-family: var(--font); font-size: 11px; color: var(--ink); }
+    .mini-tab.dim { background: none; color: var(--ink-3); }
+    .mini-omni { margin: 8px 10px 0; padding: 6px 10px; border-radius: 7px; background: var(--surface-2); font-family: var(--font); font-size: 11px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sheet-body { display: flex; flex-direction: column; gap: 8px; flex: 1; padding: 16px 16px 14px; }
+    .sheet-body .label { font-size: 10px; }
+    .sheet-body h2 { font-family: var(--font-display); font-size: 25px; font-weight: 400; line-height: 1.15; letter-spacing: -.005em; color: var(--ink); overflow-wrap: anywhere; min-height: 2.3em; }
+    .sheet-body p { font-family: var(--font-text); font-size: 12.5px; line-height: 1.55; color: var(--ink-2); }
+    .sheet-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 6px; font-family: var(--font); font-size: 11.5px; color: var(--ink-3); }
+    .tick { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--line-strong); color: transparent; flex-shrink: 0; }
+    .tick svg.i { width: 12px; height: 12px; stroke-width: 2.4; }
+    [aria-checked="true"] .tick { background: var(--tone); border-color: transparent; color: var(--on-tone); }
+    .hint { margin-top: 14px; font-size: 12px; color: var(--ink-3); }
+    kbd { padding: 0 5px; border-radius: 4px; border: 1px solid var(--line-strong); font: 11px var(--font); }
+
+    /* Search engine */
+    .mock-search { display: flex; align-items: center; gap: 12px; width: min(520px, 100%); height: 50px; margin-top: 28px; padding: 0 18px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow); color: var(--ink-3); font-size: 15px; text-align: left; }
+    .mock-search .i { color: var(--ink-3); }
+    .mock-search em { font-style: normal; color: var(--ink); }
+    .caret { width: 1.5px; height: 20px; margin-left: -9px; background: var(--accent); animation: blink 1.1s steps(1) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    .engines { display: flex; flex-direction: column; gap: 6px; width: min(520px, 100%); margin-top: 16px; }
+    .engine { display: flex; align-items: center; gap: 14px; padding: 11px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); text-align: left; cursor: pointer; transition: border-color .15s, background .15s; }
+    .engine:hover { border-color: var(--line-strong); }
+    .engine[aria-checked="true"] { border-color: var(--accent); background: var(--tint-soft); }
+    .mono svg.i { width: 17px; height: 17px; }
+    .mono { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--line); font-family: var(--font-display); font-size: 16px; color: var(--ink-2); flex-shrink: 0; }
+    .engine[aria-checked="true"] .mono { background: var(--tone); border-color: transparent; color: var(--on-tone); }
+    .engine .what { flex: 1; display: flex; flex-direction: column; gap: 1px; }
+    .engine b { font-weight: 600; font-size: 13.5px; }
+    .engine small { font-family: var(--font-text); font-size: 12px; color: var(--ink-3); }
+    .tag { margin-left: 6px; padding: 1px 7px; border-radius: 10px; background: var(--hover); font-size: 10.5px; font-weight: 500; color: var(--ink-3); }
+
+    /* Import */
+    .browsers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; width: min(560px, 100%); margin-top: 24px; }
+    .browser { position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px 6px 12px; border-radius: 13px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-size: 12.5px; cursor: pointer; box-shadow: var(--shadow); transition: border-color .15s, transform .2s var(--ease), background .15s; }
+    .browser:hover { border-color: var(--line-strong); transform: translateY(-2px); }
+    .browser[aria-checked="true"] { border-color: var(--accent); background: var(--tint-soft); box-shadow: 0 0 0 1px var(--accent), var(--shadow); }
+    .browser .logo, .row .logo { display: block; width: 36px; height: 36px; flex-shrink: 0; }
+    .browser .logo img, .row .logo img, .more-btn .logo img { display: block; width: 100%; height: 100%; object-fit: contain; }
+    .browser.absent .logo { opacity: .55; filter: grayscale(.4); }
+    .found { font-size: 10.5px; font-weight: 600; color: var(--on-tone); background: var(--tone); padding: 1px 8px; border-radius: 10px; }
+    .absent-tag { font-size: 10.5px; color: var(--ink-3); }
+    .more { width: min(560px, 100%); margin-top: 10px; text-align: left; }
+    .more-btn { display: flex; align-items: center; gap: 12px; width: 100%; height: 46px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); font-size: 13.5px; cursor: pointer; text-align: left; }
+    .more-btn:hover { border-color: var(--line-strong); color: var(--ink); }
+    .more-btn[aria-checked="true"] { border-color: var(--accent); background: var(--tint-soft); color: var(--ink); }
+    .more-btn .logo { width: 26px; height: 26px; }
+    .more-btn .label-text { flex: 1; }
+    .more-btn .chev { width: 16px; height: 16px; transition: transform .2s var(--ease); }
+    .more-btn[aria-expanded="true"] .chev { transform: rotate(180deg); }
+    .more-panel { margin-top: 6px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
+    .more-panel[hidden] { display: none; }
+    .more-panel input { width: 100%; height: 40px; padding: 0 14px; border: 0; border-bottom: 1px solid var(--line); background: none; outline: none; color: var(--ink); font: inherit; font-size: 13px; user-select: text; }
+    .more-list { max-height: 232px; overflow-y: auto; padding: 4px; }
+    .row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 7px 10px; border: 0; border-radius: 9px; background: none; color: var(--ink); font-size: 13px; text-align: left; cursor: pointer; }
+    .row:hover, .row:focus-visible { background: var(--hover); }
+    .row .logo { width: 24px; height: 24px; }
+    .row .name { flex: 1; }
+    .row .found { font-size: 10px; }
+    .none { padding: 14px; color: var(--ink-3); font-size: 12.5px; text-align: center; }
+    .panel { width: min(560px, 100%); margin-top: 14px; padding: 14px 16px; border-radius: 13px; border: 1px solid var(--line); background: var(--surface); text-align: left; font-size: 13px; }
+    .panel[hidden] { display: none; }
+    .checks { display: flex; flex-direction: column; gap: 2px; }
+    .check { display: flex; align-items: center; gap: 12px; padding: 7px 4px; cursor: pointer; border-radius: 8px; }
+    .check:hover { background: var(--hover); }
+    .check input { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
+    .check small { display: block; color: var(--ink-3); font-size: 11.5px; }
+    .check.off { opacity: .5; cursor: default; }
+    .field { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; color: var(--ink-2); }
+    .field select { flex: 1; height: 34px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font: inherit; }
+    .ghost { height: 34px; padding: 0 14px; border-radius: 9px; border: 1px solid var(--line-strong); background: none; color: var(--ink); font-size: 13px; cursor: pointer; }
+    .ghost:hover { background: var(--hover); }
+    .note { margin-top: 10px; font-size: 12px; line-height: 1.5; color: var(--ink-3); }
+    .note.warn { color: var(--ink-2); padding: 8px 10px; border-radius: 9px; background: var(--tint-soft); }
+    .busy { display: flex; align-items: center; gap: 14px; }
+    .spin { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--press); border-top-color: var(--accent); animation: spin .8s linear infinite; flex-shrink: 0; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .result { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+    .result li { display: flex; align-items: center; gap: 10px; }
+    .result .tick { width: 18px; height: 18px; background: var(--tone); border-color: transparent; color: var(--on-tone); }
+    .result b { font-weight: 600; }
+    .link { border: 0; background: none; color: var(--ink-3); font-size: 13px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+    .link:hover { color: var(--ink); }
+
+    /* Default browser */
+    .status { display: flex; align-items: center; gap: 16px; width: min(480px, 100%); margin-top: 30px; padding: 18px 20px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow); text-align: left; }
+    .status .badge { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-2); flex-shrink: 0; }
+    .status .badge svg.i { width: 22px; height: 22px; }
+    .status.yes { border-color: var(--accent); background: var(--tint-soft); }
+    .status.yes .badge { background: var(--tone); color: var(--on-tone); border-color: transparent; }
+    .status b { display: block; font-size: 14.5px; font-weight: 600; }
+    .status small { display: block; margin-top: 2px; font-family: var(--font-text); font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+    .steps { margin-top: 16px; width: min(480px, 100%); text-align: left; font-family: var(--font-text); font-size: 12.5px; line-height: 1.7; color: var(--ink-3); padding-left: 22px; }
+
+
+    /* The opening: a closed shoji, lit from behind. The crane's shadow comes up to the paper,
+       the two panels slide apart, and the crane itself folds out where the shadow was. At the
+       end the crane flies off and the panels slide shut before the first new tab. */
+    .opening { position: fixed; inset: 0; z-index: 50; pointer-events: none; overflow: hidden;
+      --paper: #f6efe0; --glow: #fffcf3; --kumiko: rgba(128, 100, 62, .26); --wood: rgba(112, 86, 50, .5); --shade: rgb(78, 88, 114); }
+    :root[data-mode="dark"] .opening { --paper: #29251f; --glow: #4a3f2d; --kumiko: rgba(214, 186, 140, .14); --wood: rgba(214, 186, 140, .3); --shade: rgb(10, 9, 8); }
+    @media (prefers-color-scheme: dark) { :root:not([data-mode="light"]) .opening { --paper: #29251f; --glow: #4a3f2d; --kumiko: rgba(214, 186, 140, .14); --wood: rgba(214, 186, 140, .3); --shade: rgb(10, 9, 8); } }
+    .opening[hidden] { display: none; }
+    .door { position: absolute; top: 0; bottom: 0; width: 50.5%; background-color: var(--paper);
+      background-image: radial-gradient(ellipse 90% 70% at var(--gx) 45%, var(--glow), transparent 72%), linear-gradient(var(--kumiko) 1.5px, transparent 1.5px), linear-gradient(90deg, var(--kumiko) 1.5px, transparent 1.5px);
+      background-size: 100% 100%, 132px 196px, 132px 196px; background-repeat: no-repeat, repeat, repeat;
+      transition: transform 1.3s cubic-bezier(.62, 0, .22, 1); }
+    .door.l { left: 0; --gx: 100%; background-position: 0 0, 50vw -40px, 50vw -40px; box-shadow: inset -3px 0 0 var(--wood); }
+    .door.r { right: 0; --gx: 0%; background-position: 0 0, .5vw -40px, .5vw -40px; box-shadow: inset 3px 0 0 var(--wood); }
+    .door::after { content: ""; position: absolute; top: 50%; width: 6px; height: 46px; margin-top: -23px; border-radius: 3px; background: var(--wood); opacity: .6; }
+    .door.l::after { right: 14px; }
+    .door.r::after { left: 14px; }
+    body.opened .door.l { transform: translateX(-101%); }
+    body.opened .door.r { transform: translateX(101%); }
+    .kage { position: absolute; left: 50%; top: 44%; width: 300px; height: 300px; margin: -150px 0 0 -150px; opacity: 0; filter: blur(7px);
+      --c1: var(--shade); --c2: var(--shade); --c3: var(--shade); --c4: var(--shade); }
+    .kage .crane { width: 100%; height: 100%; }
+    .kage.come { animation: kage-come 1.5s cubic-bezier(.3, .6, .3, 1) both; }
+    @keyframes kage-come { from { opacity: 0; transform: translateX(34vw) scale(.9); } 70% { opacity: .3; } to { opacity: .3; transform: none; } }
+    body.opened .kage { opacity: 0; transition: opacity .45s; animation: none; }
+    body.scene main { opacity: 0; }
+    main { transition: opacity .7s .35s ease; }
+    .skiphint { position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); padding: 3px 12px; border-radius: 11px; background: var(--paper); font-size: 11.5px; color: var(--ink-3); opacity: 0; animation: hint-in .6s 1.2s ease both; }
+    @keyframes hint-in { to { opacity: .75; } }
+    body.opened .skiphint { opacity: 0; animation: none; transition: opacity .2s; }
+    @media (prefers-reduced-motion: reduce) { .opening { display: none; } body.scene main { opacity: 1; } }
+
+    /* The colour's old name, under the picker */
+    .iro { min-height: 1.5em; margin-top: 12px; font-family: var(--font-display); font-style: italic; font-size: 13.5px; color: var(--ink-3); transition: opacity .3s; }
+    .iro b { font-style: normal; font-weight: 500; color: var(--ink-2); }
+    .psst { margin-top: 10px; font-size: 12px; color: var(--ink-3); opacity: 0; transition: opacity .5s; }
+    .psst.on { opacity: 1; }
+
+    @media (max-width: 680px) {
+      .browsers { grid-template-columns: repeat(2, 1fr); }
+      .sheets, .choices { grid-template-columns: 1fr; }
+      .mini-strip, .mini-omni { display: none; }
+    }
+  </style>
+</head>
+<body data-step="color" class="scene">
+  <div class="opening" id="opening" aria-hidden="true">
+    <div class="door l"></div><div class="door r"></div>
+    <div class="kage" id="kage">{{CRANE_KAGE}}</div>
+    <div class="skiphint">Click to come in</div>
+  </div>
+  <main>
+    {{CRANE}}
+    <div class="progress" id="progress" hidden><span class="label" id="progressText"></span><div class="bars" id="bars"></div></div>
+
+    <section class="step on" data-step="color">
+      <h1>Welcome to Shoji</h1>
+      <p class="lead">Choose a color for your crane. It tints the browser and its icon in the taskbar, Start menu and desktop.</p>
+      <div class="picker" role="radiogroup" aria-label="Color">{{SWATCHES}}</div>
+      <div class="iro" id="iro" aria-live="polite"></div>
+      <label class="darkrow">
+        <span class="switch"><input type="checkbox" id="darkSites" {{DARK_CHECKED}} onchange="post('SetDarkWebsites', { on: this.checked })"><span></span></span>
+        <span>Dark websites<small>Matches your Windows setting. A few sites may look off — the moon button turns it off.</small></span>
+      </label>
+      <div class="actions"><button class="begin" onclick="go('import')">Continue</button></div>
+      <div class="fine">Shoji follows your Windows light or dark setting. Change either one any time in Settings.</div>
+      <div class="psst" id="psst">Psst. There are a few more of these, here and there.</div>
+    </section>
+
+    <section class="step" data-step="import">
+      <h1 id="importTitle">Bring your browser with you</h1>
+      <p class="lead">Copy bookmarks, history, sign-ins and saved passwords from the browser you use now. It stays on this PC, and your old browser isn't changed.</p>
+      <div class="browsers" id="popular" role="radiogroup" aria-label="Popular browsers"></div>
+      <div class="more">
+        <button class="more-btn" id="moreBtn" aria-expanded="false" aria-checked="false" onclick="toggleMore()">
+          <span class="logo" id="moreLogo"></span>
+          <span class="label-text" id="moreLabel">More browsers</span>
+          <svg class="i chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="more-panel" id="morePanel" hidden>
+          <input id="moreSearch" placeholder="Search browsers" aria-label="Search browsers" autocomplete="off" spellcheck="false">
+          <div class="more-list" id="moreList" role="listbox"></div>
+        </div>
+      </div>
+      <div class="panel" id="importOptions" hidden></div>
+      <div class="actions">
+        <button class="back" data-prev>Back</button>
+        <button class="link" id="importSkip" onclick="afterImport()">Skip for now</button>
+        <button class="begin" id="importGo" onclick="startImport()" disabled>Import</button>
+      </div>
+    </section>
+
+    <section class="step" data-step="default">
+      <h1>Make Shoji your default browser?</h1>
+      <p class="lead">Links from email, chat and other apps will open here.</p>
+      <div class="status" id="defaultStatus">
+        <span class="badge"><svg class="i" viewBox="0 0 24 24" id="defaultIcon"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.4 2.2 3.6 4.9 3.6 8s-1.2 5.8-3.6 8c-2.4-2.2-3.6-4.9-3.6-8s1.2-5.8 3.6-8z"/></svg></span>
+        <span class="what"><b id="defaultTitle">Shoji isn't your default yet</b><small id="defaultText">Windows will ask you to confirm the change in Settings.</small></span>
+      </div>
+      <ol class="steps" id="defaultSteps">
+        <li>Choose <b>Set as default</b> below. Windows Settings opens.</li>
+        <li>Under <b>Web browser</b>, pick <b>Shoji</b>.</li>
+        <li>Come back here. This page updates by itself.</li>
+      </ol>
+      <div class="actions">
+        <button class="back" data-prev>Back</button>
+        <button class="link" id="defaultSkip" onclick="afterDefault()">Not now</button>
+        <button class="begin" id="defaultGo" onclick="post('SetDefaultBrowser')">Set as default</button>
+      </div>
+    </section>
+
+    <section class="step" data-step="fork">
+      <h1>Make it yours?</h1>
+      <p class="lead">A few more choices, a few seconds each. Everything here can be changed later in Settings.</p>
+      <div class="choices">
+        <button class="choice primary" onclick="go(CUSTOM[0].id)">
+          <svg class="i" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>
+          <b>Keep customizing</b>
+          <small>Set up the rest of Shoji now.</small>
+          <span class="chips" id="customChips"></span>
+        </button>
+        <button class="choice" onclick="finish()">
+          <svg class="i" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          <b>Start browsing</b>
+          <small>Go with the defaults. You can change anything later in Settings.</small>
+        </button>
+      </div>
+      <div class="actions"><button class="back" onclick="go('default')">Back</button></div>
+    </section>
+
+    <section class="step" data-step="type">
+      <h1>Pick your type</h1>
+      <p class="lead">Write anything to see it set three ways. Hover a sheet to try it on the whole page, then click the one you like.</p>
+      <div class="specimen">
+        <input id="specimen" maxlength="60" spellcheck="false" placeholder="Type to try it out" aria-label="Sample text">
+        <button class="icon-btn" onclick="shuffle()" title="Another line" aria-label="Another sample line">
+          <svg class="i" viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14-5.3L20 9"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 0 1-14 5.3L4 15"/><path d="M4 20v-5h5"/></svg>
+        </button>
+      </div>
+      <div class="sheets" role="radiogroup" aria-label="Type" id="sheets"></div>
+      <div class="hint">Keys <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> choose a set</div>
+      <div class="actions"><button class="back" data-back>Back</button><button class="begin" data-next></button></div>
+    </section>
+
+    <section class="step" data-step="privacy">
+      <h1>Remember your browsing?</h1>
+      <p class="lead">Like most browsers, Shoji can keep you signed in and remember history and cache, saved in your Windows profile. Or it can forget everything when it closes.</p>
+      <div class="engines" role="radiogroup" aria-label="Browsing data" id="modes">
+        <button class="engine" role="radio" aria-checked="false" data-private="false">
+          <span class="mono"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7.500V12l3 2"/></svg></span>
+          <span class="what"><b>Remember<span class="tag">Default</span></b><small>Logins, history and cache stay between sessions.</small></span>
+          <span class="tick"><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+        </button>
+        <button class="engine" role="radio" aria-checked="false" data-private="true">
+          <span class="mono"><svg class="i" viewBox="0 0 24 24"><path d="M3 12s3.500-6 9-6 9 6 9 6-3.500 6-9 6-9-6-9-6z"/><path d="M4 4l16 16"/></svg></span>
+          <span class="what"><b>Private</b><small>Everything is forgotten when Shoji closes.</small></span>
+          <span class="tick"><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+        </button>
+      </div>
+      <div class="note warn" id="privacyNote" hidden>Private mode doesn't keep the history and sign-ins you just imported. Choose Remember to keep them.</div>
+      <div class="fine">You can switch any time with Private mode in Settings.</div>
+      <div class="actions"><button class="back" data-back>Back</button><button class="begin" data-next></button></div>
+    </section>
+
+    <section class="step" data-step="search">
+      <h1>Choose a search engine</h1>
+      <p class="lead">It answers whatever you type in the address bar and on the new tab page.</p>
+      <div class="mock-search" aria-hidden="true">
+        <svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>
+        <span class="caret"></span><span>Search with <em id="engineName"></em></span>
+      </div>
+      <div class="engines" role="radiogroup" aria-label="Search engine" id="engines"></div>
+      <div class="actions"><button class="back" data-back>Back</button><button class="begin" data-next></button></div>
+    </section>
+  </main>
+  <script>
+{{PET_JS}}
+    const PROFILES = {{PROFILES_JSON}};
+    const LOGOS = {{LOGOS_JSON}};
+    const PRIVATE_NOW = {{PRIVATE_MODE}};
+    const ENGINES = [
+      { id: 'duckduckgo', name: 'DuckDuckGo', note: "Doesn't profile you or keep a search history.", tag: 'Default' },
+      { id: 'google', name: 'Google', note: 'The broadest results on the web.' },
+      { id: 'bing', name: 'Bing', note: "Microsoft's search engine." },
+      { id: 'brave', name: 'Brave Search', note: 'An independent index, without profiling.' },
+      { id: 'ecosia', name: 'Ecosia', note: 'Puts its profits toward planting trees.' },
+    ];
+    // The optional customize prompts, in order. Add a <section class="step"> and an entry here.
+    const CUSTOM = [
+      { id: 'type', title: 'Type' },
+      { id: 'privacy', title: 'Privacy' },
+      { id: 'search', title: 'Search' },
+    ];
+    // Every numbered step, in order. "fork" sits between Default and the customize prompts.
+    const FLOW = [{ id: 'color', title: 'Color' }, { id: 'import', title: 'Import' }, { id: 'default', title: 'Default browser' }, ...CUSTOM];
+    const LINES = [
+      'Paper lets the light through.',
+      'A quiet place to read the web.',
+      'Seven cranes, one thin frame.',
+      'Ink settles, the page stays calm.',
+      'The quick brown fox jumps over the lazy dog.',
+    ];
+
+    const $ = id => document.getElementById(id);
+    let imported = { favourites: 0, history: 0, cookies: 0, passwords: 0 };
+    // Opened from Settings (shoji://welcome#import): just the import and default-browser steps.
+    const SOLO = location.hash === '#import';
+    const root = document.documentElement;
+    const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const TICK = '<span class="tick"><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>';
+    function post(action, payload = null) {
+      if (window.ipc) window.ipc.postMessage(JSON.stringify({ action, payload }));
+    }
+    const save = patch => post('SaveSettings', { patch });
+    /* The crane. Each step has its own gesture; setup always ends with it flying off. */
+    const hero = document.querySelector('.hero');
+    const POSES = { color: 'unfold', import: 'gather', default: 'nod', fork: 'tilt', type: 'peck', privacy: 'shelter', search: 'look' };
+    const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    function pose(name) {
+      if (!hero || !name) return;
+      hero.removeAttribute('data-pose');
+      void hero.getBoundingClientRect(); // restart the animation if the same pose comes round again
+      hero.setAttribute('data-pose', name);
+    }
+    let leaving = false;
+    // Every way out of setup comes through here: the page lets go, the crane lifts off and
+    // flies up and away, then the host swaps in the new tab page.
+    function finish() {
+      if (leaving) return;
+      leaving = true;
+      clearInterval(defaultTimer);
+      document.body.classList.add('leaving');
+      // The panels slide shut behind the crane, then the first new tab opens.
+      const done = () => {
+        if (calm || SOLO) { post('FinishWelcome'); return; }
+        $('kage').classList.remove('come');
+        $('opening').hidden = false;
+        void $('opening').offsetWidth;
+        document.body.classList.remove('opened');
+        setTimeout(() => post('FinishWelcome'), 1350);
+      };
+      if (!hero || !hero.animate || calm) { setTimeout(done, 250); return; }
+      const r = hero.getBoundingClientRect();
+      const dx = innerWidth - r.left + 80, up = r.top + r.height + 120;
+      const flight = hero.animate([
+        { transform: 'translate(0, 0) rotate(0deg) scale(1)', offset: 0, easing: 'ease-out' },
+        { transform: 'translate(-6px, 12px) rotate(3deg) scale(1.03, .95)', offset: .16, easing: 'cubic-bezier(.5, 0, .9, .6)' },
+        { transform: `translate(${dx * .22}px, ${-up * .38}px) rotate(-12deg) scale(1.15)`, offset: .5, easing: 'cubic-bezier(.4, 0, 1, 1)' },
+        { transform: `translate(${dx}px, ${-up}px) rotate(-20deg) scale(.55)`, offset: 1 },
+      ], { duration: 1600, fill: 'forwards' });
+      // Wings beat fast as it climbs; head stretches forward, tail trails.
+      const beat = { duration: 230, iterations: 7, delay: 180, direction: 'alternate', easing: 'ease-in-out' };
+      hero.querySelectorAll('path:nth-of-type(2), path:nth-of-type(3)').forEach(w => w.animate([{ transform: 'scaleX(1.05)' }, { transform: 'scaleX(.22)' }], beat));
+      const head = hero.querySelector('path:nth-of-type(4)');
+      if (head) head.animate([{ transform: 'none' }, { transform: 'rotate(-9deg)' }], { duration: 400, delay: 200, fill: 'forwards', easing: 'ease-out' });
+      const tail = hero.querySelector('path:nth-of-type(1)');
+      if (tail) tail.animate([{ transform: 'none' }, { transform: 'rotate(8deg)' }], { duration: 400, delay: 200, fill: 'forwards', easing: 'ease-out' });
+      hero.animate([{ opacity: 1 }, { opacity: 1, offset: .7 }, { opacity: 0 }], { duration: 1600, fill: 'forwards' });
+      let sent = false;
+      const once = () => { if (!sent) { sent = true; done(); } };
+      flight.onfinish = once;
+      setTimeout(once, 2200);
+    }
+
+    /* Steps */
+    let current = 'color';
+    function go(id) {
+      current = id;
+      document.body.dataset.step = id;
+      document.querySelectorAll('.step').forEach(s => s.classList.toggle('on', s.dataset.step === id));
+      const n = id === 'fork' ? FLOW.findIndex(s => s.id === 'default') : FLOW.findIndex(s => s.id === id);
+      $('progress').hidden = n < 0 || SOLO;
+      if (n >= 0) {
+        $('progressText').textContent = id === 'fork' ? `${n + 1} of ${FLOW.length} · Done with the essentials` : `${n + 1} of ${FLOW.length} · ${FLOW[n].title}`;
+        [...$('bars').children].forEach((b, i) => b.classList.toggle('done', i <= n));
+      }
+      window.scrollTo(0, 0);
+      if (id === 'type') $('specimen').focus({ preventScroll: true });
+      if (!importing) pose(POSES[id]);
+      if (id === 'default') watchDefault(true); else watchDefault(false);
+      if (id === 'import') post('ListImportSources');
+      if (id === 'privacy') chooseMode(currentPrivate, false);
+    }
+    $('customChips').innerHTML = CUSTOM.map(s => `<span>${esc(s.title)}</span>`).join('');
+    $('bars').innerHTML = FLOW.map(() => '<i></i>').join('');
+    document.querySelectorAll('[data-prev]').forEach(b => { b.onclick = () => { const first = b.closest('.step').dataset.step === 'import'; if (first && SOLO) finish(); else go(first ? 'color' : 'import'); }; });
+    CUSTOM.forEach((s, i) => {
+      const section = document.querySelector(`.step[data-step="${s.id}"]`);
+      const next = CUSTOM[i + 1];
+      const nextBtn = section.querySelector('[data-next]');
+      nextBtn.textContent = next ? `Next: ${next.title}` : 'Start browsing';
+      nextBtn.onclick = () => next ? go(next.id) : finish();
+      section.querySelector('[data-back]').onclick = () => go(i ? CUSTOM[i - 1].id : 'fork');
+    });
+
+    /* Color. Each crane colour has an old Japanese name, said quietly under the picker. */
+    const IRO = {
+      white: ['白練', 'Shironeri', 'the white of glossed silk'],
+      blue: ['瑠璃', 'Ruri', 'lapis lazuli'],
+      cyan: ['浅葱', 'Asagi', 'pale scallion, a blue-green'],
+      green: ['若竹', 'Wakatake', 'young bamboo'],
+      gold: ['山吹', 'Yamabuki', 'kerria in flower'],
+      purple: ['藤', 'Fuji', 'wisteria'],
+      red: ['紅', 'Beni', 'safflower red'],
+    };
+    function sayIro(id) {
+      const n = IRO[id], el = $('iro');
+      if (!n) return;
+      el.innerHTML = `<b>${n[0]}</b> ${esc(n[1])} · ${esc(n[2])}`;
+    }
+    function pick(id) {
+      post('SetAccent', { accent: id });
+      window.__applyTheme({ accent: id });
+      sayIro(id);
+      if (current === 'color') pose('cheer');
+    }
+    /* Tap the crane a few times: a small flock, and a hint that there is more to find. */
+    let heroTaps = [];
+    if (hero) hero.addEventListener('click', () => {
+      if (leaving) return;
+      const now = Date.now();
+      heroTaps = heroTaps.filter(t => now - t < 3000).concat(now);
+      if (heroTaps.length < 5) { pose('nod'); return; }
+      heroTaps = [];
+      pose('cheer');
+      if (window.Pet) Pet.flock(6, hero);
+      $('psst').classList.add('on');
+      post('FoundSecret', { id: 'welcome' });
+    });
+
+    /* Type: every sheet renders the sample in its own set; hovering one dresses the page in it. */
+    let fonts = root.dataset.fonts;
+    $('sheets').innerHTML = PROFILES.map((p, i) => `
+      <button class="sheet" role="radio" aria-checked="false" data-fonts="${esc(p.id)}" style="${esc(p.vars)}">
+        <div class="mini-strip"><span class="mini-tab">New tab</span><span class="mini-tab dim">Reading</span></div>
+        <div class="mini-omni">Search or enter address</div>
+        <div class="sheet-body">
+          <span class="label">${i + 1} · ${esc(p.name)}</span>
+          <h2 class="sample"></h2>
+          <p>Shoji keeps very little for itself: tabs, an address bar, and a calm page to read on.</p>
+          <div class="sheet-foot"><span>${esc(p.note)}</span>${TICK}</div>
+        </div>
+      </button>`).join('');
+    function chooseFonts(id) {
+      if (id !== fonts) save({ appearance: { fonts: id } });
+      fonts = id;
+      root.dataset.fonts = id;
+      document.querySelectorAll('.sheet').forEach(s => s.setAttribute('aria-checked', String(s.dataset.fonts === id)));
+    }
+    document.querySelectorAll('.sheet').forEach(s => {
+      s.onclick = () => chooseFonts(s.dataset.fonts);
+      s.onmouseenter = s.onfocus = () => { root.dataset.fonts = s.dataset.fonts; };
+      s.onmouseleave = s.onblur = () => { root.dataset.fonts = fonts; };
+    });
+    function setSample(text) {
+      document.querySelectorAll('.sample').forEach(h => { h.textContent = text || LINES[0]; });
+    }
+    let line = 0;
+    function shuffle() {
+      line = (line + 1) % LINES.length;
+      $('specimen').value = LINES[line];
+      setSample(LINES[line]);
+    }
+    $('specimen').value = LINES[0];
+    $('specimen').oninput = e => setSample(e.target.value.trim());
+    setSample(LINES[0]);
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && !$('morePanel').hidden) { toggleMore(false); return; }
+      if (e.key === 'Escape' && !importing) { const b = document.querySelector('.step.on [data-back], .step.on [data-prev], .step.on .back'); if (b) b.click(); return; }
+      if (e.key === 'Enter' && !e.target.closest('button, select, a, textarea, input') && !importing) {
+        const b = document.querySelector('.step.on .begin:not(:disabled), .step.on [data-next]'); if (b) b.click(); return;
+      }
+      if (current !== 'type' || e.target.tagName === 'INPUT' || e.ctrlKey || e.altKey) return;
+      const p = PROFILES[Number(e.key) - 1];
+      if (p) chooseFonts(p.id);
+    });
+
+    /* Browsing data: remember (default) or private */
+    let currentPrivate = PRIVATE_NOW;
+    function chooseMode(isPrivate, persist) {
+      currentPrivate = isPrivate;
+      // Private means nothing typed leaves the browser, so search suggestions go with it.
+      if (persist) save({ privacy: { ephemeral_default: isPrivate }, appearance: { search_suggestions: !isPrivate } });
+      $('privacyNote').hidden = !(isPrivate && (imported.history || imported.cookies));
+      document.querySelectorAll('#modes .engine').forEach(b => b.setAttribute('aria-checked', String((b.dataset.private === 'true') === isPrivate)));
+    }
+    document.querySelectorAll('#modes .engine').forEach(b => { b.onclick = () => chooseMode(b.dataset.private === 'true', true); });
+    chooseMode(PRIVATE_NOW, false);
+
+    /* Search engine */
+    let engine = ENGINES.some(e => e.id === '{{SEARCH_ENGINE}}') ? '{{SEARCH_ENGINE}}' : 'duckduckgo';
+    $('engines').innerHTML = ENGINES.map(e => `
+      <button class="engine" role="radio" aria-checked="false" data-id="${e.id}">
+        <span class="mono">${esc(e.name[0])}</span>
+        <span class="what"><b>${esc(e.name)}${e.tag ? `<span class="tag">${esc(e.tag)}</span>` : ''}</b><small>${esc(e.note)}</small></span>
+        ${TICK}
+      </button>`).join('');
+    function chooseEngine(id, persist) {
+      if (persist && id !== engine) save({ search_engine: id });
+      engine = id;
+      $('engineName').textContent = ENGINES.find(e => e.id === id).name;
+      document.querySelectorAll('#engines .engine').forEach(b => b.setAttribute('aria-checked', String(b.dataset.id === id)));
+    }
+    document.querySelectorAll('#engines .engine').forEach(b => { b.onclick = () => chooseEngine(b.dataset.id, true); });
+    chooseEngine(engine, false);
+
+
+    /* Import */
+    let sources = [], chosen = null, pickedPath = null, importing = false, lastResult = null;
+    const byId = id => sources.find(s => s.id === id);
+    const logo = id => `<span class="logo"><img src="${LOGOS[id] || ''}" alt=""></span>`;
+    const foundTag = s => s.installed ? '<span class="found">Found</span>' : '';
+    window.__importSources = list => {
+      sources = list;
+      renderBrowsers();
+      // Pre-select the first browser that is actually installed, so most people just press Import.
+      if (!chosen) { const first = sources.find(s => s.installed); if (first) select(first.id); }
+    };
+    function renderBrowsers() {
+      $('popular').innerHTML = sources.filter(s => s.popular).map(s => `
+        <button class="browser ${s.installed ? '' : 'absent'}" role="radio" aria-checked="${s.id === chosen}" data-id="${s.id}">
+          ${logo(s.id)}<span>${esc(s.name)}</span>${s.installed ? foundTag(s) : '<span class="absent-tag">Not found</span>'}
+        </button>`).join('');
+      document.querySelectorAll('#popular .browser').forEach(b => { b.onclick = () => select(b.dataset.id); });
+      renderMore();
+    }
+    function renderMore() {
+      const q = $('moreSearch').value.trim().toLowerCase();
+      const rows = sources.filter(s => !s.popular && (!q || s.name.toLowerCase().includes(q)));
+      $('moreList').innerHTML = rows.length ? rows.map(s => `
+        <button class="row" role="option" data-id="${s.id}">${logo(s.id)}<span class="name">${esc(s.name)}</span>${foundTag(s)}</button>`).join('')
+        : '<div class="none">No browser by that name. Try "Bookmarks file" to import an exported file.</div>';
+      document.querySelectorAll('#moreList .row').forEach(b => { b.onclick = () => { select(b.dataset.id); toggleMore(false); }; });
+      const s = byId(chosen);
+      const other = s && !s.popular;
+      $('moreBtn').setAttribute('aria-checked', String(!!other));
+      $('moreLogo').innerHTML = other ? `<img src="${LOGOS[s.id] || ''}" alt="">` : '';
+      $('moreLogo').style.display = other ? '' : 'none';
+      $('moreLabel').textContent = other ? s.name : 'More browsers';
+    }
+    function toggleMore(force) {
+      const open = force === undefined ? $('morePanel').hidden : force;
+      $('morePanel').hidden = !open;
+      $('moreBtn').setAttribute('aria-expanded', String(open));
+      if (open) { $('moreSearch').value = ''; renderMore(); $('moreSearch').focus({ preventScroll: true }); }
+    }
+    $('moreSearch').oninput = renderMore;
+    function select(id) {
+      if (importing) return;
+      chosen = id; pickedPath = null; lastResult = null;
+      document.querySelectorAll('#popular .browser').forEach(b => b.setAttribute('aria-checked', String(b.dataset.id === id)));
+      renderMore();
+      renderOptions();
+    }
+    const canRead = s => s.family === 'chromium' || s.family === 'firefox';
+    function renderOptions() {
+      const s = byId(chosen), box = $('importOptions');
+      if (!s) { box.hidden = true; $('importGo').disabled = true; return; }
+      box.hidden = false;
+      const ready = s.installed || pickedPath;
+      let html = '';
+      if (!ready) {
+        const what = s.family === 'htmlfile' ? 'a bookmarks file' : 'its data folder';
+        html += `<div class="field">${s.pick ? '' : `${esc(s.name)} wasn't found on this PC. `}Choose ${what} to import from.
+          <button class="ghost" onclick="post('PickImportSource', { source: '${s.id}' })">Choose…</button></div>`;
+      } else {
+        if (pickedPath) html += `<div class="note" style="margin:0 0 10px">From <b>${esc(pickedPath)}</b> <button class="link" onclick="post('PickImportSource', { source: '${s.id}' })">Change</button></div>`;
+        if (!pickedPath && s.profiles.length > 1) {
+          html += `<label class="field">Profile <select id="profile">${s.profiles.map((p, i) => `<option value="${i}">${esc(p.name)}</option>`).join('')}</select></label>`;
+        }
+        const live = canRead(s);
+        const locked = PRIVATE_NOW;
+        const check = (id, title, sub, on, off) => `<label class="check ${off ? 'off' : ''}"><input type="checkbox" id="k_${id}" ${on && !off ? 'checked' : ''} ${off ? 'disabled' : ''}><span>${title}<small>${sub}</small></span></label>`;
+        html += `<div class="checks">
+          ${check('favourites', 'Bookmarks', 'Bookmarks, from the bar and every folder', true, false)}
+          ${check('history', 'History', locked ? "Private mode doesn't keep history" : 'So the address bar can suggest places you have been', true, !live || locked)}
+          ${check('cookies', 'Sign-ins', locked ? "Private mode doesn't keep sign-ins" : 'Stay signed in to the sites you use', true, !live || locked)}
+          ${check('passwords', 'Saved passwords', s.family === 'chromium' ? "Into Shoji's password manager, encrypted" : 'Not readable from here. Export a CSV from it and import that in Passwords', true, s.family !== 'chromium')}
+        </div>`;
+        if (!live) html += `<div class="note">Only bookmarks can be read from this source.</div>`;
+      }
+      box.innerHTML = html;
+      $('importGo').disabled = !ready;
+      $('importGo').textContent = 'Import';
+      $('importGo').onclick = startImport;
+      $('importSkip').hidden = false;
+    }
+    window.__importPicked = (id, path) => { if (id === chosen) { pickedPath = path; renderOptions(); } };
+    function kinds() {
+      const on = k => { const e = $('k_' + k); return !!e && e.checked && !e.disabled; };
+      return { favourites: on('favourites'), history: on('history'), cookies: on('cookies'), passwords: on('passwords') };
+    }
+    function startImport() {
+      const s = byId(chosen);
+      if (!s || importing) return;
+      const k = kinds();
+      if (!k.favourites && !k.history && !k.cookies && !k.passwords) return;
+      importing = true;
+      pose('busy');
+      const profile = $('profile') ? Number($('profile').value) : 0;
+      $('importOptions').innerHTML = `<div class="busy"><span class="spin"></span><span id="importStatus">Starting…</span></div>`;
+      $('importGo').disabled = true; $('importSkip').hidden = true;
+      post('StartImport', { source: s.id, profile, path: pickedPath, kinds: k });
+    }
+    window.__importProgress = text => { const e = $('importStatus'); if (e) e.textContent = text + '…'; };
+    window.__importFailed = msg => {
+      importing = false; pose('gather'); $('importSkip').hidden = false;
+      renderOptions();
+      $('importOptions').insertAdjacentHTML('afterbegin', `<div class="note warn" style="margin:0 0 10px">${esc(msg)}</div>`);
+    };
+    window.__importDone = r => {
+      importing = false; lastResult = r;
+      pose(r.favourites || r.history || r.cookies || r.passwords ? 'cheer' : 'gather');
+      imported.favourites += r.favourites; imported.history += r.history; imported.cookies += r.cookies; imported.passwords += r.passwords;
+      const s = byId(chosen);
+      const n = x => Number(x).toLocaleString();
+      const items = [];
+      if (r.favourites) items.push(`<b>${n(r.favourites)}</b> bookmark${r.favourites === 1 ? '' : 's'}`);
+      if (r.history) items.push(`<b>${n(r.history)}</b> page${r.history === 1 ? '' : 's'} of history`);
+      if (r.cookies) items.push(`<b>${n(r.cookies)}</b> sign-in${r.cookies === 1 ? '' : 's'}`);
+      if (r.passwords) items.push(`<b>${n(r.passwords)}</b> password${r.passwords === 1 ? '' : 's'}`);
+      const tick = '<span class="tick"><svg class="i" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>';
+      let html = items.length
+        ? `<ul class="result">${items.map(i => `<li>${tick}<span>${i}</span></li>`).join('')}</ul>`
+        : `<div>Nothing new to bring over${r.notes.length ? '' : ' — it was all here already.'}</div>`;
+      if (r.locked) html += `<div class="note warn">${esc(s.name)} is open and holding some of its files. Close it completely, then <button class="link" onclick="renderOptions()">try again</button>.</div>`;
+      else if (r.notes.length) html += `<div class="note">${r.notes.map(esc).join('<br>')}</div>`;
+      $('importOptions').innerHTML = html;
+      $('importSkip').hidden = true;
+      $('importGo').disabled = false;
+      $('importGo').textContent = 'Continue';
+      $('importGo').onclick = () => { $('importGo').onclick = startImport; afterImport(); };
+    };
+
+    /* Default browser: Windows decides, so open its page and watch for the change */
+    let defaultTimer = 0, isDefault = false;
+    function afterImport() { if (SOLO) finish(); else go('default'); }
+    function afterDefault() { if (SOLO) finish(); else go('fork'); }
+    function watchDefault(on) {
+      clearInterval(defaultTimer);
+      if (!on) return;
+      post('CheckDefaultBrowser');
+      defaultTimer = setInterval(() => post('CheckDefaultBrowser'), 1500);
+    }
+    window.__defaultBrowser = yes => {
+      isDefault = yes;
+      $('defaultStatus').classList.toggle('yes', yes);
+      $('defaultTitle').textContent = yes ? 'Shoji is your default browser' : "Shoji isn't your default yet";
+      $('defaultText').textContent = yes ? 'Links from other apps will open here.' : 'Windows will ask you to confirm the change in Settings.';
+      $('defaultIcon').innerHTML = yes ? '<path d="M5 12.5l4.5 4.5L19 7.5"/>' : '<circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.4 2.2 3.6 4.9 3.6 8s-1.2 5.8-3.6 8c-2.4-2.2-3.6-4.9-3.6-8s1.2-5.8 3.6-8z"/>';
+      $('defaultSteps').hidden = yes;
+      $('defaultSkip').hidden = yes;
+      const go_ = $('defaultGo');
+      go_.textContent = yes ? 'Continue' : 'Set as default';
+      go_.onclick = yes ? afterDefault : () => post('SetDefaultBrowser');
+    };
+
+    window.__applyTheme = t => {
+      root.dataset.accent = t.accent;
+      if (t.mode) root.dataset.mode = t.mode;
+      if (t.fonts) chooseFonts(t.fonts);
+      document.querySelectorAll('.opt').forEach(o => o.setAttribute('aria-checked', String(o.dataset.id === t.accent)));
+    };
+    window.__applyTheme({ accent: root.dataset.accent, fonts });
+    sayIro(root.dataset.accent);
+    /* The opening scene; any click or key comes straight in. */
+    function comeIn() {
+      if (document.body.classList.contains('opened')) return;
+      clearTimeout(sceneTimer);
+      document.body.classList.add('opened');
+      document.body.classList.remove('scene');
+      pose('unfold');
+      setTimeout(() => { if (!leaving) $('opening').hidden = true; }, 1400);
+    }
+    let sceneTimer = 0;
+    if (SOLO || calm) {
+      $('opening').hidden = true;
+      document.body.classList.add('opened');
+      document.body.classList.remove('scene');
+      if (SOLO) go('import'); else pose('unfold');
+    } else {
+      $('kage').classList.add('come');
+      sceneTimer = setTimeout(comeIn, 1700);
+      addEventListener('pointerdown', comeIn, { once: true });
+      addEventListener('keydown', comeIn, { once: true });
+    }
+  </script>
+</body>
+</html>

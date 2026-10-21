@@ -1,0 +1,1902 @@
+<!DOCTYPE html>
+<html lang="en" data-accent="{{ACCENT}}" data-mode="{{MODE}}" data-fonts="{{FONTS}}" data-frost="{{FROST}}">
+<head>
+  <meta charset="UTF-8">
+  <title>Shoji</title>
+  <style>
+{{THEME_CSS}}
+    html, body { height: 100%; overflow: hidden; }
+    body { display: flex; flex-direction: column; font-size: 12.5px; user-select: none; background: var(--bg-sunk); }
+    button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+    button:focus:not(:focus-visible) { outline: none; }
+
+    /* Title bar: tabs share the top row with the window controls, like a shoji frame's top rail */
+    .titlebar { position: relative; display: flex; align-items: flex-end; height: 44px; flex-shrink: 0; app-region: drag; }
+    .ws-pill, .tab, .new-tab, .caption button, .resize-top { app-region: no-drag; }
+    .tab-strip { flex: 1; min-width: 0; display: flex; align-items: flex-end; height: 100%; padding-left: 8px; overflow: hidden; }
+    .ws-pill { align-self: center; display: flex; align-items: center; gap: 7px; height: 30px; max-width: 140px; margin: 0 4px 0 0; padding: 0 9px; border-radius: 7px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); font-size: 12.5px; font-weight: 600; flex-shrink: 0; transition: background .12s, border-color .12s; }
+    .ws-pill[hidden] { display: none; }
+    .ws-pill:hover { background: var(--hover); }
+    .ws-pill.drop-ws { border-color: var(--accent); box-shadow: 0 0 0 2px var(--tint-soft); }
+    .ws-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ws, var(--tone)); flex-shrink: 0; }
+    #wsName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* Many tabs scroll sideways (wheel, or the active tab is scrolled into view) rather than
+       sliding under the new-tab button and window controls. */
+    #tabs { display: flex; align-items: flex-end; flex: 0 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+    #tabs::-webkit-scrollbar { display: none; }
+    .drag { flex: 1; min-width: 48px; height: 100%; }
+    .caption { display: flex; flex-shrink: 0; height: 100%; align-self: flex-start; }
+    .caption button { width: 46px; height: 100%; display: grid; place-items: center; color: var(--ink-2); font: 10px "Segoe Fluent Icons", "Segoe MDL2 Assets"; transition: background .1s, color .1s; }
+    .caption button:hover { background: var(--hover); color: var(--ink); }
+    .caption button:active { background: var(--press); }
+    .caption #winClose:hover { background: #c42b1c; color: #fff; }
+    .caption #winClose:active { background: #b02a1d; color: #fff; }
+    body.inactive .tab-strip, body.inactive .caption { opacity: .55; }
+    .resize-top { position: absolute; top: 0; left: 0; right: 138px; height: 4px; cursor: n-resize; z-index: 5; }
+    body.maximized .resize-top { display: none; }
+    /* Tabs: higher-contrast pills so each one reads as a separate target */
+    :root { --tab-ink: color-mix(in srgb, var(--ink) 94%, var(--surface)); --tab-ink-dim: color-mix(in srgb, var(--ink) 88%, var(--surface)); --tab-bg: color-mix(in srgb, var(--ink) 9%, var(--bg-sunk)); --tab-bg-hover: color-mix(in srgb, var(--ink) 15%, var(--bg-sunk)); --tab-edge: color-mix(in srgb, var(--ink) 24%, transparent); }
+    .tab { position: relative; display: flex; align-items: center; gap: 9px; height: 36px; width: 240px; flex: 0 1 240px; min-width: 46px; margin: 0 1px; padding: 0 10px 0 14px; container-type: inline-size; border-radius: 10px 10px 0 0; font-size: 13.5px; font-weight: 500; background: var(--tab-bg); color: var(--tab-ink-dim); box-shadow: inset 0 0 0 1px var(--tab-edge); cursor: default; transition: background .12s, color .12s; }
+    .tab:hover:not(.active) { background: var(--tab-bg-hover); color: var(--tab-ink); }
+    .tab.active { background: var(--surface); color: var(--tab-ink); font-weight: 600; box-shadow: inset 0 0 0 1px var(--tab-edge), 0 -1px 0 var(--surface); }
+    .tab.active::before { content: ""; position: absolute; left: 12px; right: 12px; top: 0; height: 3px; border-radius: 0 0 3px 3px; background: var(--accent); }
+    .tab * { pointer-events: none; }
+    .tab .close, .tab .audio { pointer-events: auto; }
+    /* The strip clips whatever leaves it, so a dragged tab is lifted by colour, not by a shadow that would be cut */
+    .dragging { opacity: .96; z-index: 4; background: var(--surface); box-shadow: inset 0 0 0 1.5px var(--accent); cursor: grabbing; transition: none; }
+    /* A tab dragged in from another window: the tabs part and an empty slot waits for it */
+    #dropBar { position: absolute; top: 8px; height: 36px; box-sizing: border-box; display: flex; align-items: center; padding: 0 14px; border-radius: 10px 10px 0 0; font-size: 13.5px; font-weight: 600; color: var(--tab-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: color-mix(in srgb, var(--accent) 22%, var(--surface)); box-shadow: inset 0 0 0 2px var(--accent); z-index: 6; pointer-events: none; opacity: 0; transform: scaleX(.6); transform-origin: 50% 100%; transition: opacity .14s, transform .18s cubic-bezier(.2, .8, .2, 1), left .14s cubic-bezier(.2, .8, .2, 1), width .14s; }
+    #dropBar.on { opacity: 1; transform: none; }
+    #dropBar[hidden] { display: none; }
+    /* The tab being dragged in: it follows the pointer along the strip and settles into the gap on release */
+    #dropGhost { position: absolute; top: 8px; left: 0; height: 36px; width: 200px; box-sizing: border-box; display: flex; align-items: center; gap: 9px; padding: 0 12px 0 14px; border-radius: 10px 10px 0 0; font-size: 13.5px; font-weight: 600; color: var(--tab-ink); white-space: nowrap; background: var(--surface); box-shadow: 0 8px 22px rgba(0,0,0,.35), inset 0 0 0 1px var(--tab-edge), inset 0 3px 0 var(--accent); z-index: 7; pointer-events: none; opacity: 0; transform: translateX(var(--gx, 0px)) translateY(6px) scale(.94); transform-origin: 50% 100%; transition: opacity .12s, transform .08s linear; will-change: transform; }
+    #dropGhost.on { opacity: 1; transform: translateX(var(--gx, 0px)) scale(1); }
+    #dropGhost.settle { transition: opacity .16s, transform .22s cubic-bezier(.22, 1, .36, 1); }
+    #dropGhost[hidden] { display: none; }
+    #dropGhost img { width: 18px; height: 18px; border-radius: 4px; flex-shrink: 0; object-fit: contain; }
+    #dropGhost span { overflow: hidden; text-overflow: ellipsis; }
+    #tabs .parting { transition: transform .22s cubic-bezier(.22, 1, .36, 1); }
+    /* A tab that has just joined the strip settles into its place */
+    .tab.arriving { animation: tab-arrive .26s cubic-bezier(.22, 1, .36, 1); transform-origin: 50% 100%; }
+    @keyframes tab-arrive { from { opacity: 0; transform: translateY(7px) scale(.9, .86); } }
+    .tab { touch-action: none; }
+    .tab.drop-left { outline: 3px solid var(--accent); outline-offset: -3px; clip-path: inset(0 0 0 0); }
+    .tab.drop-right { outline: 3px solid var(--accent); outline-offset: -3px; }
+    .favicon { width: 18px; height: 18px; border-radius: 4px; flex-shrink: 0; object-fit: contain; }
+    .title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 12px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 12px), transparent); }
+    .close { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; color: var(--tab-ink-dim); opacity: 0; transition: opacity .12s, background .12s; }
+    .tab:hover .close, .tab.active .close { opacity: 1; }
+    .close:hover { background: var(--press); color: var(--ink); }
+    /* An idle tab gives the close button's space to its title */
+    .tab:not(.active):not(:hover) .close { display: none; }
+    .close svg.i { width: 15px; height: 15px; stroke-width: 2; }
+    .new-tab { display: grid; place-items: center; width: 34px; height: 34px; margin: 0 0 3px 6px; border-radius: 9px; color: var(--tab-ink-dim); flex-shrink: 0; }
+    .new-tab:hover { background: var(--hover); color: var(--ink); }
+    .new-tab svg.i { width: 18px; height: 18px; }
+
+    /* Navigation bar */
+    .nav { display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 8px; background: var(--surface); border-bottom: 1px solid var(--line); flex-shrink: 0; }
+    .btn { position: relative; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 7px; color: var(--ink-2); flex-shrink: 0; transition: background .12s, color .12s; }
+    .btn:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+    .btn:active:not(:disabled) { background: var(--press); }
+    .btn:disabled { opacity: .35; cursor: default; }
+    /* Back and forward: one solid arrow, turned round for back */
+    svg.i.arrow, .pb.back svg.i, .pb.fwd svg.i { fill: currentColor; stroke-width: 1.2; }
+    svg.i.arrow { width: 20px; height: 20px; }
+    svg.i.arrow.back, .pb.back svg.i { transform: scaleX(-1); }
+    .omni { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; margin: 0 6px; }
+    .lock { position: absolute; left: 4px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--ink-3); z-index: 1; }
+    .lock:hover { background: var(--hover); color: var(--ink); }
+    .lock svg.i { width: 14px; height: 14px; }
+    svg.i.eng { stroke: none; }
+    .lock svg.eng { width: 16px; height: 16px; }
+    .inshield { position: absolute; right: 4px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; color: var(--ink-2); z-index: 1; transition: background .12s, color .12s; }
+    .inshield:hover { background: var(--hover); color: var(--ink); }
+    .inshield svg.i { width: 15px; height: 15px; }
+    .lock.insecure { color: var(--warn); }
+    #omnibox { width: 100%; height: 34px; padding: 0 36px 0 34px; border-radius: 8px; border: 1px solid transparent; background: var(--surface-2); color: var(--ink); font: inherit; font-size: 13px; outline: none; user-select: text; transition: border-color .15s, background .15s, box-shadow .15s; }
+    #omnibox::placeholder { color: var(--ink-3); }
+    #omnibox:hover { border-color: var(--line); }
+    #omnibox:focus { background: var(--surface); border-color: var(--accent); box-shadow: 0 0 0 3px var(--tint-soft); }
+    .zoom { position: absolute; right: 32px; display: flex; align-items: center; height: 22px; border-radius: 11px; background: var(--hover); font-size: 11px; color: var(--ink-2); overflow: hidden; }
+    .zoom[hidden] { display: none; }
+    .zoom button { height: 100%; padding: 0 7px; font-variant-numeric: tabular-nums; }
+    .zoom button:hover { background: var(--press); color: var(--ink); }
+    .zoom .step { display: none; }
+    .zoom.expanded .step { display: block; }
+    .dl-ring { position: absolute; inset: 3px; width: 24px; height: 24px; transform: rotate(-90deg); pointer-events: none; }
+    .dl-ring circle { fill: none; stroke-width: 2; }
+    .dl-ring .track { stroke: var(--line); }
+    .dl-ring .fill { stroke: var(--accent); stroke-dasharray: 69.1; stroke-dashoffset: 69.1; stroke-linecap: round; transition: stroke-dashoffset .25s linear; }
+    #btnDark.on { color: var(--accent); }
+    #btnNotes.open { background: var(--tint); color: var(--ink); }
+    .dl-count { position: absolute; top: 1px; right: 0; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; font-size: 9px; font-weight: 700; line-height: 14px; background: var(--tone); color: var(--on-tone); }
+
+    /* Bookmarks bar */
+    .bmbar { display: flex; align-items: center; gap: 4px; height: 34px; padding: 0 8px; background: var(--surface); border-bottom: 1px solid var(--line); flex-shrink: 0; }
+    .bmbar[hidden] { display: none; }
+    .bm-items { flex: 1; min-width: 0; display: flex; align-items: center; gap: 1px; overflow: hidden; }
+    .bm-items .bm-hint { color: var(--ink-3); font-size: 12px; padding: 0 8px; white-space: nowrap; }
+    .bm { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; max-width: 190px; height: 26px; padding: 0 9px 0 6px; border-radius: 7px; color: var(--ink-2); font-size: 12.5px; transition: background .1s, color .1s; }
+    .bm:hover { background: var(--hover); color: var(--ink); }
+    .bm:active { background: var(--press); }
+    .bm span.t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bm .ico { width: 16px; height: 16px; border-radius: 4px; display: grid; place-items: center; flex-shrink: 0; font-size: 10px; font-weight: 700; line-height: 1;
+      background: hsl(var(--h, 30) 38% 50% / .24); color: hsl(var(--h, 30) 40% 42%); }
+    :root[data-mode="dark"] .bm .ico { color: hsl(var(--h, 30) 55% 70%); }
+    @media (prefers-color-scheme: dark) { :root:not([data-mode="light"]) .bm .ico { color: hsl(var(--h, 30) 55% 70%); } }
+    .bm.folder .ico { background: none; color: var(--ink-3); }
+    .bm.folder .ico svg.i { width: 16px; height: 16px; }
+    .bm.drop-before { box-shadow: inset 2px 0 0 var(--accent); }
+    .bm.drop-into { background: var(--tint); }
+    .bm.dragging { opacity: .45; }
+    .bm-more, .bm-all { flex: 0 0 auto; height: 26px; border-radius: 7px; color: var(--ink-2); display: flex; align-items: center; gap: 6px; padding: 0 7px; font-size: 12.5px; }
+    .bm-more { width: 26px; justify-content: center; padding: 0; }
+    .bm-more[hidden] { display: none; }
+    .bm-more:hover, .bm-all:hover { background: var(--hover); color: var(--ink); }
+    .bm-all { border-left: 1px solid var(--line); border-radius: 0 7px 7px 0; margin-left: 2px; padding-left: 10px; }
+    .bm-all svg.i { width: 15px; height: 15px; }
+    body.bar-on .tray { top: 124px; }
+    body.bar-on.find-open #toast { top: 178px; }
+
+    /* Private window: a quiet violet wash and a label, nothing louder */
+    .priv-pill { display: none; align-self: center; align-items: center; gap: 6px; height: 26px; margin: 0 6px 0 0; padding: 0 10px 0 8px; border-radius: 13px; flex-shrink: 0; font-size: 12px; font-weight: 600; color: #5c4b8f; background: rgba(120, 98, 190, .16); app-region: no-drag; }
+    :root[data-mode="dark"] .priv-pill { color: #cdbdf5; background: rgba(150, 126, 220, .22); }
+    @media (prefers-color-scheme: dark) { :root:not([data-mode="light"]) .priv-pill { color: #cdbdf5; background: rgba(150, 126, 220, .22); } }
+    .priv-pill svg.i { width: 15px; height: 15px; }
+    body.private .priv-pill { display: flex; }
+    body.private .titlebar { background: color-mix(in srgb, #7a64c2 16%, var(--bg-sunk)); }
+
+    /* Find and permission cards: float over the page (the host clips this strip to them), so
+       opening one never moves or resizes the page underneath. */
+    .tray { position: fixed; z-index: 20; top: 90px; display: none; align-items: center; gap: 8px; height: 46px; padding: 0 10px 0 14px; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 12px; }
+    .tray.open { display: flex; animation: tray-in .18s cubic-bezier(.2, .8, .2, 1); }
+    .tray.open.leaving { animation: tray-out .13s ease-in forwards; }
+    @keyframes tray-in { from { opacity: 0; transform: translateY(-10px) scale(.97); } }
+    @keyframes tray-out { to { opacity: 0; transform: translateY(-8px) scale(.97); } }
+    #findBar { right: 12px; transform-origin: top right; }
+    #permissionBar { left: 12px; max-width: calc(100vw - 24px); transform-origin: top left; }
+    #findInput { width: 240px; height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font: inherit; outline: none; user-select: text; }
+    #findInput:focus { border-color: var(--accent); }
+    #findCount { min-width: 48px; text-align: center; font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+    #permissionBar { justify-content: space-between; }
+    .perm-msg { display: flex; align-items: center; gap: 10px; color: var(--ink); }
+    .perm-msg svg.i { color: var(--accent); }
+    .pill { height: 26px; padding: 0 14px; border-radius: 6px; font-size: 12px; font-weight: 500; }
+    .pill.primary { background: var(--tone); color: var(--on-tone); }
+    .pill.primary:hover { filter: brightness(.96); }
+    .pill.quiet { background: var(--surface-2); }
+    .pill.quiet:hover { background: var(--press); }
+
+    /* Loading: a small crane flaps in the tab, and a brush stroke crosses the toolbar */
+    .tab-crane { display: none; width: 18px; height: 18px; flex-shrink: 0; }
+    /* Stepped, not smooth: a page that loads for a long time keeps these running, and a smooth
+       60 fps animation next to the title bar's drag regions made the browser's UI thread work
+       flat out (a whole core, window "not responding") with several tabs open. */
+    .tab.loading .tab-crane { animation: pet-waddle .7s steps(6, end) infinite alternate; }
+    .tab.loading .tab-crane path:nth-of-type(2), .tab.loading .tab-crane path:nth-of-type(3) { animation: pet-flap .3s steps(3, end) infinite alternate; }
+    .tab .zz { display: none; position: absolute; left: 26px; top: 4px; font: italic 600 11px var(--font-display); color: var(--ink-3); pointer-events: none; }
+    .tab.asleep .zz { display: block; animation: zz 2.6s ease-in-out infinite; }
+    .tab.asleep .favicon { opacity: .55; filter: grayscale(.8); }
+    .tab.asleep .title { color: var(--ink-3); }
+    @keyframes zz { 0%, 100% { opacity: 0; transform: translate(0, 3px); } 50% { opacity: 1; transform: translate(2px, -1px); } }
+    .tab.loading .favicon { display: none; }
+    .tab.loading .tab-crane { display: block; }
+    .nav { position: relative; }
+    .nav::after { content: ""; position: absolute; left: 0; bottom: -1px; height: 2px; width: 34%; border-radius: 2px; opacity: 0; pointer-events: none;
+      background: linear-gradient(90deg, transparent, var(--tone) 35%, var(--accent) 80%, transparent); }
+    body.loading .nav::after { opacity: 1; animation: brush 1.5s cubic-bezier(.45, 0, .25, 1) infinite; }
+    @keyframes brush { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+    #btnReload .x { display: none; }
+    body.loading #btnReload .reload { display: none; }
+    body.loading #btnReload .x { display: block; }
+
+    /* Closing a tab folds it away */
+
+    /* The site seal: a small vermilion stamp that presses in when a secure page has loaded */
+    .lock .seal, .lk .seal { display: grid; place-items: center; width: 17px; height: 17px; border-radius: 4px; border: 1.5px solid var(--seal); color: var(--seal);
+      font: 700 10.5px/1 "Yu Mincho", "MS Mincho", "Hiragino Mincho ProN", serif; letter-spacing: 0; }
+    .lock .seal.stamp, .lk .seal.stamp { animation: stamp .42s cubic-bezier(.2, 1.5, .4, 1) both; }
+    @keyframes stamp { 0% { opacity: 0; transform: scale(1.9) rotate(-14deg); } 55% { opacity: 1; transform: scale(.92) rotate(2deg); } 100% { transform: none; } }
+    :root { --seal: #b8433b; }
+    :root[data-mode="dark"] { --seal: #e0706a; }
+    @media (prefers-color-scheme: dark) { :root:not([data-mode="light"]) { --seal: #e0706a; } }
+
+    /* A small card with the crane, for things worth a word: a finished download, a koan */
+    #toast { right: 12px; transform-origin: top right; max-width: min(460px, calc(100vw - 24px)); gap: 10px; }
+    body.find-open #toast { top: 144px; }
+    #toast .crane { width: 30px; height: 30px; flex-shrink: 0; }
+    #toast .msg { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+    #toast .msg b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #toast .msg span { color: var(--ink-3); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* A letter from the crane: a newer Shoji. A sealed letter waits in the toolbar (the seal is the
+       vermilion of the site stamp); its card unfolds below it once, and folds back into it. */
+    #btnLetter[hidden] { display: none; }
+    #btnLetter .knot { fill: var(--seal); stroke: var(--seal); }
+    #btnLetter.arrive { animation: letter-drop .9s cubic-bezier(.3, 1.4, .5, 1) both; }
+    #btnLetter:hover svg { animation: letter-wiggle .5s ease-in-out; }
+    @keyframes letter-drop { 0% { opacity: 0; transform: translate(10px, -22px) rotate(-28deg); } 60% { opacity: 1; transform: translate(0, 2px) rotate(6deg); } 100% { transform: none; } }
+    @keyframes letter-wiggle { 30% { transform: rotate(-9deg); } 70% { transform: rotate(6deg); } }
+    #letter { right: 12px; width: 340px; max-width: calc(100vw - 24px); height: auto; flex-direction: column; align-items: stretch; gap: 0; padding: 14px 14px 12px 16px; transform-origin: calc(100% - 52px) -8px;
+      background-image: linear-gradient(90deg, transparent calc(50% - .5px), color-mix(in srgb, var(--line) 55%, transparent) 50%, transparent calc(50% + .5px)); }
+    #letter.open { animation: letter-unfold .42s cubic-bezier(.2, .9, .25, 1) both; }
+    #letter.open.leaving { animation: letter-fold .32s cubic-bezier(.5, 0, .75, .4) forwards; }
+    @keyframes letter-unfold { 0% { opacity: 0; transform: scale(.12, .04); } 45% { opacity: 1; transform: scale(.5, .1); } 100% { transform: none; } }
+    @keyframes letter-fold { 55% { transform: scale(.5, .08); opacity: 1; } 100% { transform: scale(.08, .03); opacity: 0; } }
+    #letter.open > * { animation: lt-rise .3s .22s ease both; }
+    @keyframes lt-rise { from { opacity: 0; transform: translateY(4px); } }
+    .lt-top { display: flex; align-items: center; gap: 12px; }
+    .lt-top .crane { width: 34px; height: 34px; flex-shrink: 0; }
+    .lt-msg { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.35; }
+    .lt-msg b { font-family: var(--font-display); font-weight: 500; font-size: 14.5px; }
+    .lt-msg span { color: var(--ink-3); font-size: 12px; }
+    .lt-x { width: 26px; height: 26px; align-self: flex-start; margin: -4px -4px 0 0; }
+    .lt-x .i { width: 15px; height: 15px; }
+    .lt-notes { list-style: none; margin: 11px 0 0; padding: 8px 11px; border-radius: 9px; background: var(--surface-2); font-size: 12px; line-height: 1.6; color: var(--ink-2); }
+    .lt-notes:empty { display: none; }
+    .lt-notes li { display: flex; gap: 8px; }
+    .lt-notes li::before { content: ""; flex-shrink: 0; width: 4px; height: 4px; margin-top: .62em; border-radius: 1px; background: var(--seal); transform: rotate(45deg); }
+    .lt-notes li.read::before { display: none; }
+    .lt-notes .read button { margin-top: 2px; padding: 0; border: 0; background: none; color: var(--ink-3); font: inherit; font-size: 11.5px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+    .lt-notes .read button:hover { color: var(--ink); }
+    .lt-bar { height: 3px; margin: 12px 0 2px; border-radius: 2px; background: var(--line); overflow: hidden; }
+    .lt-bar i { display: block; height: 100%; width: 0; background: var(--tone); transition: width .3s ease; }
+    .lt-bar[hidden], .lt-acts:empty, .lt-foot:empty, .lt-err[hidden] { display: none; }
+    .lt-err { margin-top: 10px; padding: 7px 10px; border-radius: 8px; background: var(--tint-soft); color: var(--ink-2); font-size: 11.5px; line-height: 1.45; }
+    .lt-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+    .lt-acts .pill { height: 28px; padding: 0 12px; }
+    .lt-acts .pill.plain { background: none; color: var(--ink-2); }
+    .lt-acts .pill.plain:hover { background: var(--hover); color: var(--ink); }
+    .lt-foot { margin-top: 8px; text-align: right; }
+    .lt-foot button { padding: 0; border: 0; background: none; color: var(--ink-3); font: inherit; font-size: 11.5px; cursor: pointer; }
+    .lt-foot button:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+
+    /* Tab groups: a coloured label ahead of the first tab, and a coloured line under each tab */
+    .group-chip { align-self: center; flex: 0 0 auto; display: block; line-height: 28px; max-width: 150px; height: 28px; margin: 0 3px 0 8px; padding: 0 13px; border-radius: 14px; font-size: 12.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--g-on, #fff); background: var(--g-deep, var(--g, var(--tone))); box-shadow: 0 1px 0 rgba(0,0,0,.18); app-region: no-drag; cursor: default; }
+    .tab[data-group] { background: color-mix(in srgb, var(--g-deep, var(--g)) 16%, var(--tab-bg)); }
+    .tab.active[data-group] { background: color-mix(in srgb, var(--g-deep, var(--g)) 9%, var(--surface)); }
+    .tab[data-group]::before { content: ""; position: absolute; left: 6px; right: 6px; bottom: 0; height: 4px; border-radius: 3px 3px 0 0; background: var(--g-deep, var(--g)); }
+    .tab.active[data-group]::before { top: auto; left: 6px; right: 6px; height: 4px; background: var(--g-deep, var(--g)); }
+    .tab .audio { display: none; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 7px; background: none; color: var(--tab-ink-dim); flex-shrink: 0; align-items: center; justify-content: center; pointer-events: auto; }
+    .tab .audio:hover { background: var(--hover); color: var(--ink); }
+    .tab .audio .i { width: 17px; height: 17px; }
+    .tab .audio .off { display: none; }
+    .tab.sound .audio { display: flex; }
+    .tab.muted .audio { display: flex; }
+    .tab.muted .audio .on { display: none; }
+    .tab.muted .audio .off { display: inline; }
+    .tab.pinned { width: 48px; flex: 0 0 48px; min-width: 48px; padding: 0; justify-content: center; }
+    .tab.pinned .title, .tab.pinned .close, .tab.pinned .zz { display: none; }
+    .tab.pinned .audio { position: absolute; right: -2px; bottom: 2px; width: 20px; height: 20px; border-radius: 10px; background: var(--surface); box-shadow: 0 0 0 1px var(--tab-edge); }
+    .tab.pinned .audio .i { width: 13px; height: 13px; }
+    /* Split view: one combined tab. Each pane is an ordinary tab (favicon, title, mute, close) inside a shared
+       pill; a badge on the seam between neighbours (L|R, or 1|2, 2|3...) tells the panes apart without
+       touching a favicon. The usual accent bar runs over the whole pill; under the selected pane it drops
+       down both seams and runs beneath that pane instead. */
+    .split-tab { --sd: var(--accent); --sbg: color-mix(in srgb, var(--sd) 13%, var(--bg-sunk)); position: relative; display: flex; align-items: stretch; align-self: flex-end; flex: 0 1 auto; min-width: calc(var(--n, 2) * 54px + (var(--n, 2) - 1) * 24px); height: 36px; margin: 0 1px; border-radius: 10px 10px 0 0; background: var(--sbg); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--sd) 70%, var(--tab-edge)); app-region: no-drag; overflow: hidden; }
+    .split-tab::before { content: ""; position: absolute; left: 10px; right: 10px; top: 0; height: 2px; border-radius: 0 0 2px 2px; background: var(--sd); opacity: .55; pointer-events: none; z-index: 1; }
+    .split-tab > .tab { width: 200px; flex: 1 1 200px; min-width: 54px; margin: 0; padding: 0 8px 0 12px; border-radius: 0; background: transparent; box-shadow: none; container-type: inline-size; }
+    .split-tab > .tab:first-child { border-top-left-radius: 10px; }
+    .split-tab > .tab:last-child { border-top-right-radius: 10px; }
+    .split-tab > .tab:hover:not(.active) { background: color-mix(in srgb, var(--sd) 12%, transparent); }
+    .split-tab > .tab.active { background: var(--surface); box-shadow: none; }
+    .split-tab > .tab.active::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--sd); z-index: 2; }
+    .seam { position: relative; flex: 0 0 24px; align-self: stretch; cursor: pointer; z-index: 3; }
+    .seam::before { content: ""; position: absolute; left: 50%; top: 7px; bottom: 7px; width: 1px; margin-left: -.5px; background: color-mix(in srgb, var(--sd) 55%, transparent); }
+    .seam .badge { position: absolute; left: 50%; top: 50%; width: 20px; height: 20px; margin: -10px 0 0 -10px; box-sizing: border-box; display: grid; grid-template-columns: 1fr 1fr; align-items: center; border-radius: 50%; overflow: hidden; background: var(--surface); box-shadow: 0 0 0 1.5px var(--sd); font: 700 8.5px/1 var(--font); color: var(--ink); z-index: 3; transition: transform .16s cubic-bezier(.22, 1, .36, 1); }
+    .seam .badge i { font-style: normal; text-align: center; }
+    .seam .badge::after { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; margin-left: -.5px; background: var(--sd); }
+    .seam:hover .badge { transform: scale(1.18); }
+    .split-tab.dense .seam { flex-basis: 18px; }
+    .split-tab.dense .seam .badge { width: 16px; height: 16px; margin: -8px 0 0 -8px; font-size: 7px; }
+    .split-tab > .tab .title { }
+    /* Narrow panes keep favicon and close; narrower still, only the favicon */
+    @container (max-width: 112px) { .title, .tab-crane + .zz { display: none; } .audio { display: none !important; } }
+    @container (max-width: 64px) { .close { display: none !important; } }
+    .split-tab.merging { animation: split-merge .5s cubic-bezier(.22, 1, .36, 1); }
+    .split-tab.merging .seam .badge { animation: badge-pop .5s cubic-bezier(.34, 1.56, .64, 1); }
+    @keyframes split-merge { from { box-shadow: inset 0 0 0 1px transparent; background: transparent; } }
+    @keyframes badge-pop { from { transform: scale(0); } 60% { transform: scale(1.25); } }
+    .split-tab.join-target { box-shadow: inset 0 0 0 2px var(--sd), 0 0 0 3px color-mix(in srgb, var(--sd) 35%, transparent); }
+    .tab[data-group]:not(.active) { color: var(--tab-ink); }
+    .split-ctl { display: flex; align-items: center; gap: 1px; height: 26px; padding: 0 3px; border-radius: 7px; background: var(--surface-2); border: 1px solid var(--line); flex-shrink: 0; }
+    .split-ctl[hidden] { display: none; }
+    .split-ctl button { height: 22px; padding: 0 6px; border-radius: 5px; font-size: 11px; color: var(--ink-2); display: flex; align-items: center; gap: 4px; }
+    .split-ctl button:hover { background: var(--hover); color: var(--ink); }
+    .split-ctl svg.i { width: 14px; height: 14px; }
+
+
+    /* Split view toolbars: one bar above each pane (back, forward, reload, address, favourite, dark mode),
+       and the window-wide buttons move up beside the window controls. */
+    #paneBars { display: none; position: absolute; inset: 0; }
+    .tools-host { display: none; align-items: center; gap: 2px; height: 100%; padding: 0 6px; flex-shrink: 0; align-self: flex-start; }
+    .tools-host, .tools-host * { app-region: no-drag; }
+    .tools-host .btn { height: 32px; }
+    body.splitbars .tools-host { display: flex; }
+    body.splitbars #paneBars { display: block; }
+    body.splitbars .nav { position: relative; padding: 0; gap: 0; }
+    body.splitbars #btnBack, body.splitbars #btnForward, body.splitbars #btnReload, body.splitbars .omni, body.splitbars #btnFav, body.splitbars #btnDark, body.splitbars #btnReader, body.splitbars #btnPip, body.splitbars #btnShield { display: none; }
+    .pbar { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; gap: 2px; padding: 0 5px; box-sizing: border-box; min-width: 0; overflow: visible; border-left: 1px solid var(--line); }
+    .pbar:first-child { border-left: 0; }
+    .pbar::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--sd, var(--accent)); opacity: 0; transition: opacity .15s; }
+    .pbar.active::after { opacity: 1; }
+    .pb { position: relative; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 6px; color: var(--ink-2); flex-shrink: 0; transition: background .12s, color .12s; }
+    .pb:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
+    .pb:disabled { opacity: .35; cursor: default; }
+    .pb svg.i { width: 17px; height: 17px; }
+    .pb[hidden] { display: none; }
+    .pb.on { color: var(--accent); }
+    .pb.shield[data-state="off"], .pb.shield[data-state="paused"] { color: var(--ink-3); }
+    .pb.shield .slash { display: none; }
+    .pb.shield[data-state="off"] .slash, .pb.shield[data-state="paused"] .slash { display: inline; }
+    .pb.shield[data-state="off"] .check, .pb.shield[data-state="paused"] .check { display: none; }
+    .pb .cnt { position: absolute; top: 0; right: -2px; min-width: 13px; height: 13px; padding: 0 3px; border-radius: 7px; background: var(--ink); color: var(--surface); font-size: 9px; font-weight: 600; line-height: 13px; text-align: center; pointer-events: none; }
+    .pb .cnt[hidden] { display: none; }
+    .pb.reload .x { display: none; }
+    .pbar.loading .pb.reload .x { display: block; }
+    .pbar.loading .pb.reload .rl { display: none; }
+    .pa { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; }
+    .pa .lk { position: absolute; left: 4px; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 5px; color: var(--ink-3); z-index: 1; }
+    .pa .lk svg.i { width: 14px; height: 14px; }
+    .pa .lk svg.eng { width: 16px; height: 16px; }
+    .pa .pb.shield { position: absolute; right: 4px; width: 24px; height: 24px; z-index: 1; border-radius: 6px; }
+    .pa .pb.shield svg.i { width: 15px; height: 15px; }
+    .pa .pb.shield:not([hidden]) { display: grid; }
+    .pa .pb.shield .cnt { top: -3px; right: -5px; }
+    .pa .lk.insecure { color: var(--warn); }
+    .paddr { width: 100%; height: 34px; padding: 0 34px 0 34px; border-radius: 8px; border: 1px solid transparent; background: var(--surface-2); color: var(--ink); font: inherit; font-size: 13px; outline: none; user-select: text; text-overflow: ellipsis; transition: border-color .15s, background .15s, box-shadow .15s; }
+    .paddr:hover { border-color: var(--line); }
+    .paddr:focus { background: var(--surface); border-color: var(--accent); box-shadow: 0 0 0 3px var(--tint-soft); }
+    .pbar.tiny .lk, .pbar.tiny .pb.shield { display: none; }
+    .pbar.tiny .paddr { padding: 0 8px; }
+    .pmenu { position: fixed; z-index: 30; min-width: 170px; padding: 4px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line-strong); box-shadow: 0 10px 30px rgba(0,0,0,.35); animation: tray-in .14s cubic-bezier(.2, .8, .2, 1); }
+    .pmenu button { display: flex; align-items: center; gap: 9px; width: 100%; height: 30px; padding: 0 10px; border-radius: 6px; color: var(--ink); font-size: 12.5px; text-align: left; }
+    .pmenu button:hover { background: var(--hover); }
+    .pmenu button:disabled { opacity: .4; }
+    .pmenu svg.i { width: 15px; height: 15px; flex-shrink: 0; }
+
+    /* Favourite / reader / picture-in-picture buttons */
+    #btnFav.on { color: var(--accent); }
+    #btnReader.on { background: var(--tint); color: var(--ink); }
+    #btnPip[hidden], #btnReader[hidden] { display: none; }
+
+    /* Byobu shield: outline when idle, filled chip with a count while it is blocking */
+    #btnShield[data-state="off"], #btnShield[data-state="paused"] { color: var(--ink-3); }
+    #btnShield .slash { display: none; }
+    #btnShield[data-state="off"] .slash, #btnShield[data-state="paused"] .slash { display: inline; }
+    #btnShield[data-state="off"] .check, #btnShield[data-state="paused"] .check { display: none; }
+    #btnShield.busy { background: var(--tint); color: var(--ink); }
+    #btnShield .count { position: absolute; top: -2px; right: -3px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--ink); color: var(--surface); font-size: 9.5px; font-weight: 600; line-height: 14px; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; }
+    #btnShield .count[hidden] { display: none; }
+
+    /* Page-tinted toolbar: a soft wash of the site's own colour over the toolbar rows */
+    html[data-tint] .nav { background: color-mix(in srgb, var(--page-tint) 16%, var(--surface)); }
+    html[data-tint] body { background: color-mix(in srgb, var(--page-tint) 22%, var(--bg-sunk)); }
+    html[data-tint] .tab.active { background: color-mix(in srgb, var(--page-tint) 16%, var(--surface)); }
+    html[data-tint] .tab:not(.active):not([data-group]) { background: color-mix(in srgb, var(--page-tint) 10%, var(--tab-bg)); }
+    .nav, .tray, body, .tab.active { transition: background-color .25s; }
+
+    /* Windows 11 frosted toolbar: the window's Mica backdrop shows through */
+    html[data-frost="1"], html[data-frost="1"] body { background: var(--bg-sunk); }
+    html[data-frost="1"] .nav { background: color-mix(in srgb, var(--surface) 60%, transparent); border-bottom-color: transparent; }
+    html[data-frost="1"] .tab.active { background: color-mix(in srgb, var(--surface) 82%, transparent); }
+    html[data-frost="1"] .tab:not(.active):not([data-group]) { background: color-mix(in srgb, var(--ink) 12%, transparent); }
+    html[data-frost="1"] #omnibox { background: color-mix(in srgb, var(--surface-2) 70%, transparent); }
+  </style>
+</head>
+<body class="{{BODY_CLASS}}">
+  <div class="titlebar">
+    <div class="resize-top" onmousedown="if (event.button === 0) post('StartWindowResize')"></div>
+    <div class="tab-strip" id="tabStrip">
+      <div class="priv-pill" title="Private window: cookies, history and sign-ins are not kept">
+        <svg class="i" viewBox="0 0 24 24"><path d="M4 11c1.5-4 3.5-5.5 8-5.5S18.500 7 20 11M3 11h18M7 17.500a2.500 2.500 0 1 0 0-5 2.500 2.500 0 0 0 0 5zM17 17.500a2.500 2.500 0 1 0 0-5 2.500 2.500 0 0 0 0 5zM9.500 15h5"/></svg>Private
+      </div>
+      <button class="ws-pill" id="wsPill" onclick="post('ToggleWorkspacesSidebar')" oncontextmenu="event.preventDefault(); openWsMenu(event)" title="Spaces (Alt+W)" aria-label="Workspace">
+        <span class="ws-dot" id="wsDot"></span>
+        <span id="wsName">Main</span>
+      </button>
+      <div id="tabs" role="tablist" aria-label="Tabs"></div>
+      <button class="new-tab" onclick="post('CreateTab', { url: null })" title="New tab (Ctrl+T)" aria-label="New tab">
+        <svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <div class="drag" id="dragArea"></div>
+    </div>
+    <div class="tools-host" id="toolsHost"></div>
+    <div class="caption">
+      <button id="winMin" onclick="post('MinimizeWindow')" title="Minimize" aria-label="Minimize">&#xE921;</button>
+      <button id="winMax" onclick="post('ToggleMaximize')" title="Maximize" aria-label="Maximize">&#xE922;</button>
+      <button id="winClose" onclick="post('CloseWindow')" title="Close" aria-label="Close">&#xE8BB;</button>
+    </div>
+  </div>
+
+  <div class="nav" role="toolbar" aria-label="Navigation">
+    <div id="paneBars"></div>
+    <button class="btn" id="btnBack" onclick="post('GoBack')" disabled title="Back (Alt+Left)" aria-label="Back">
+      <svg class="i arrow back" viewBox="0 0 24 24"><path d="M3.6 9.5h8.1V5.7c0-.9 1.1-1.4 1.8-.8l7 6.1c.5.5.5 1.1 0 1.6l-7 6.1c-.7.6-1.8.1-1.8-.8v-3.8H3.6c-.6 0-1.1-.5-1.1-1.1v-3.2c0-.6.5-1.1 1.1-1.1z"/></svg>
+    </button>
+    <button class="btn" id="btnForward" onclick="post('GoForward')" disabled title="Forward (Alt+Right)" aria-label="Forward">
+      <svg class="i arrow" viewBox="0 0 24 24"><path d="M3.6 9.5h8.1V5.7c0-.9 1.1-1.4 1.8-.8l7 6.1c.5.5.5 1.1 0 1.6l-7 6.1c-.7.6-1.8.1-1.8-.8v-3.8H3.6c-.6 0-1.1-.5-1.1-1.1v-3.2c0-.6.5-1.1 1.1-1.1z"/></svg>
+    </button>
+    <button class="btn" id="btnReload" onclick="post(document.body.classList.contains('loading') ? 'Stop' : 'Reload')" title="Reload (Ctrl+R)" aria-label="Reload">
+      <svg class="i reload" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>
+      <svg class="i x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+
+    <div class="omni">
+      <button class="lock" id="btnLock" onclick="lockClick(this)" title="Site information" aria-label="Site information">
+        <svg class="i" viewBox="0 0 24 24" id="lockIcon"></svg>
+      </button>
+      <button class="inshield" id="btnShield" onclick="post('ToggleShieldPanel')" title="Byōbu shield" aria-label="Byōbu shield">
+      <svg class="i" viewBox="0 0 24 24"><path d="M12 3l7 3v5.5c0 4.3-3 7.7-7 9.5-4-1.8-7-5.2-7-9.5V6z"/><path class="check" d="M9 12l2 2 4-4"/><path class="slash" d="M5 4l14 16"/></svg>
+      <span class="count" id="shieldCount">0</span>
+    </button>
+      <input id="omnibox" type="text" spellcheck="false" autocomplete="off" aria-label="Address and search"
+             placeholder="Search {{SEARCH_ENGINE_NAME}} or type a URL" onkeydown="omniKey(event)"
+             oninput="curOmni = this; omniInput()" onfocus="omniFocus(this)" onblur="omniBlur(this)">
+      <div class="zoom" id="zoom" hidden onmouseenter="this.classList.add('expanded')" onmouseleave="this.classList.remove('expanded')">
+        <button class="step" onclick="post('ZoomOut')" title="Zoom out (Ctrl+-)">−</button>
+        <button onclick="post('ZoomReset')" id="zoomReset" title="Reset zoom (Ctrl+0)">100%</button>
+        <button class="step" onclick="post('ZoomIn')" title="Zoom in (Ctrl++)">+</button>
+      </div>
+    </div>
+
+    <div class="split-ctl" id="splitCtl" hidden>
+      <button id="btnSplitOrient" onclick="post('ToggleSplitOrientation')" ondblclick="post('ResetSplitRatio')" title="Flip split orientation (Alt+Shift+S)" aria-label="Flip split orientation">
+        <svg class="i" viewBox="0 0 24 24" id="splitOrientIcon"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg>
+        <span id="splitRatioText">50/50</span>
+      </button>
+      <button onclick="post('ResetSplitRatio')" title="Even out the panes" aria-label="Even out the panes">=</button>
+      <button onclick="post('ToggleSplit')" title="Add a tab to this split (Ctrl+Shift+S)" aria-label="Add a tab to this split">
+        <svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <button onclick="post('SplitWith', { tab_id: null })" title="Exit split view (Ctrl+Shift+S)" aria-label="Exit split view">
+        <svg class="i" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg>
+      </button>
+    </div>
+
+    <button class="btn" id="btnFav" onclick="post('ToggleFavourite')" title="Bookmark this tab (Ctrl+D)" aria-label="Bookmark this tab">
+      <svg class="i" viewBox="0 0 24 24" id="favIcon"></svg>
+    </button>
+    <button class="btn" id="btnReader" onclick="post('ToggleReader')" title="Reader view (F9)" aria-label="Reader view">
+      <svg class="i" viewBox="0 0 24 24"><path d="M4 5.5C6.5 4.5 9.5 4.5 12 6c2.5-1.5 5.5-1.5 8-.5v13c-2.5-1-5.5-1-8 .5-2.5-1.5-5.5-1.5-8-.5z"/><path d="M12 6v13.5"/></svg>
+    </button>
+    <button class="btn" id="btnPip" onclick="post('TogglePictureInPicture')" title="Picture in picture" aria-label="Picture in picture" hidden>
+      <svg class="i" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><rect x="12" y="11" width="7" height="5" rx="1" fill="currentColor"/></svg>
+    </button>
+    <button class="btn" id="btnDark" onclick="post('ToggleDarkPanel')" oncontextmenu="event.preventDefault(); toggleDarkSite()" aria-label="Dark websites">
+      <svg class="i" viewBox="0 0 24 24" id="darkIcon"></svg>
+    </button>
+    <button class="btn" id="btnPanel" onclick="post('RunAction', { value: 'bookmarks-panel' })" title="Bookmarks panel" aria-label="Bookmarks panel" hidden>
+      <svg class="i" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M9.5 5v14"/></svg>
+    </button>
+    <button class="btn" id="btnNotes" onclick="post('ToggleNotes')" title="Quick note" aria-label="Quick note">
+      <svg class="i" viewBox="0 0 24 24"><path d="M7 3.5h8.5L19 7v13.5H7z"/><path d="M15.5 3.5V7H19M10 11h6M10 14.5h6M10 18h3.5"/><path d="M4.5 6v15"/></svg>
+    </button>
+    <button class="btn" id="btnDownloads" onclick="post('ToggleDownloadsSidebar')" title="Downloads (Ctrl+J)" aria-label="Downloads">
+      <svg class="i" viewBox="0 0 24 24" id="dlIdle"><path d="M4 13.5l2.2-7.1A2 2 0 0 1 8.1 5h7.8a2 2 0 0 1 1.9 1.4l2.2 7.1V18a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18z"/><path d="M4 13.5h4.5l1 2h5l1-2H20"/></svg>
+      <svg class="i" viewBox="0 0 24 24" id="dlActive" style="display:none"><path d="M12 6.5v9M8.5 12l3.5 3.5 3.5-3.5"/></svg>
+      <svg class="dl-ring" id="dlRing" viewBox="0 0 26 26" style="display:none"><circle class="track" cx="13" cy="13" r="11"/><circle class="fill" id="dlRingFill" cx="13" cy="13" r="11"/></svg>
+      <span class="dl-count" id="dlCount" hidden>0</span>
+    </button>
+    <button class="btn" id="btnLetter" onclick="toggleLetter()" title="A letter from the crane" aria-label="A letter: a new version of Shoji" hidden>
+      <svg class="i" viewBox="0 0 24 24"><rect x="3.5" y="6" width="17" height="12.5" rx="2"/><path d="M4.2 7l7.8 6 7.8-6"/><circle class="knot" cx="12" cy="13" r="2.2"/></svg>
+    </button>
+    <button class="btn" id="btnMenu" onclick="post('ToggleMenuPanel')" title="Menu" aria-label="Menu">
+      <svg class="i" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h14"/></svg>
+    </button>
+  </div>
+
+  <div class="bmbar" id="bmBar" role="toolbar" aria-label="Bookmarks" hidden>
+    <div class="bm-items" id="bmItems"></div>
+    <button class="bm-more" id="bmMore" title="More bookmarks" aria-label="More bookmarks" hidden>
+      <svg class="i" viewBox="0 0 24 24"><path d="M7 7l5 5-5 5M13 7l5 5-5 5"/></svg>
+    </button>
+    <button class="bm-all" id="bmAll" title="Bookmark manager (Ctrl+Shift+O)" aria-label="Bookmark manager">
+      <svg class="i" viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg>
+      <span>All bookmarks</span>
+    </button>
+  </div>
+
+  <div class="tray" id="findBar">
+    <input id="findInput" type="text" spellcheck="false" placeholder="Find in page" oninput="find(true)" onkeydown="findKey(event)">
+    <span id="findCount">0/0</span>
+    <button class="btn" onclick="find(false)" title="Previous (Shift+Enter)" aria-label="Previous match"><svg class="i" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>
+    <button class="btn" onclick="find(true)" title="Next (Enter)" aria-label="Next match"><svg class="i" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+    <button class="btn" onclick="closeFind()" title="Close (Esc)" aria-label="Close find"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+
+  <div class="tray" id="toast" role="status">
+    {{CRANE_MARK}}
+    <div class="msg"><b id="toastTitle"></b><span id="toastText"></span></div>
+    <span id="toastActs" style="display:flex;gap:6px;margin-left:6px"></span>
+  </div>
+
+  <div class="tray" id="letter" role="dialog" aria-labelledby="ltTitle">
+    <div class="lt-top">
+      {{CRANE_LETTER}}
+      <div class="lt-msg"><b id="ltTitle"></b><span id="ltSub"></span></div>
+      <button class="btn lt-x" onclick="foldLetter()" title="Fold it away" aria-label="Fold it away"><svg class="i" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <ul class="lt-notes" id="ltNotes"></ul>
+    <div class="lt-bar" id="ltBar" hidden><i id="ltFill"></i></div>
+    <div class="lt-err" id="ltErr" hidden></div>
+    <div class="lt-acts" id="ltActs"></div>
+    <div class="lt-foot" id="ltFoot"></div>
+  </div>
+
+  <div class="tray" id="permissionBar">
+    <div class="perm-msg">
+      <svg class="i" viewBox="0 0 24 24" id="permIcon"></svg>
+      <span id="permMsg"></span>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <button class="pill quiet" onclick="resolvePermission(false)">Block</button>
+      <button class="pill primary" onclick="resolvePermission(true)">Allow</button>
+    </div>
+  </div>
+
+  <script>
+{{PET_JS}}
+    const Pet_calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const ICONS = {
+      lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+      open: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/>',
+      shoji: '<rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M12 4v16M4 12h16"/>',
+      camera: '<rect x="3" y="7" width="13" height="10" rx="2"/><path d="M16 11l5-3v8l-5-3"/>',
+      mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+      location: '<path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>',
+      bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20a2 2 0 0 0 4 0"/>',
+      info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>'
+    };
+    const SHOJI_FAVICON = "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#8f897e" stroke-width="1.6"><rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M12 4v16M4 12h16"/></svg>');
+    const INTERNAL_TITLES = { 'shoji://newtab': 'New tab', 'shoji://settings': 'Settings', 'shoji://welcome': 'Welcome', 'about:blank': 'New tab' };
+
+    let prefs = {{PREFS_JSON}};
+    let activeTabId = null;
+    let pdrag = null;
+    let justDragged = false;
+    let lastCenters = '';
+
+    function post(action, payload = null) {
+      if (window.ipc) window.ipc.postMessage(JSON.stringify({ action, payload }));
+    }
+    const $ = id => document.getElementById(id);
+    const isInternal = url => url.startsWith('shoji://') || url === 'about:blank';
+
+    const ACCENTS = {{ACCENTS_JSON}};
+    const toneOf = id => (ACCENTS.find(a => a.id === id) || ACCENTS[0]).tone;
+    const deepOf = id => (ACCENTS.find(a => a.id === id) || ACCENTS[0]).deep;
+    // Black or white text, whichever reads better on a background colour.
+    const onColor = hex => {
+      const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(v => v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4);
+      const l = .2126 * c[0] + .7152 * c[1] + .0722 * c[2];
+      return (1.05 / (l + .05)) >= ((l + .05) / .0505) ? '#fff' : '#1d1b17';
+    };
+    const tintGroup = (el, color) => {
+      const d = deepOf(color);
+      el.style.setProperty('--g', toneOf(color));
+      el.style.setProperty('--g-deep', d);
+      el.style.setProperty('--g-on', onColor(d));
+    };
+    const hostOf = url => { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; } };
+    let state = { tabs: [], groups: [], split: null, split_state: null, splits: [], workspaces: [], active_workspace_id: 1, inactive_tabs: [] };
+    let data = { favs: [], recent: [] };
+    let suggestions = [], sel = -1, suggestTimer = 0, suggestSeq = 0;
+
+    function openWsMenu(e) {
+      e.preventDefault();
+      const r = $('wsPill').getBoundingClientRect();
+      post('WorkspaceMenu', { workspace_id: state.active_workspace_id || 1, x: r.left, y: 44 });
+    }
+    const wsPill = $('wsPill');
+
+    /* Address bar: compact (domain only) until clicked, with suggestions while typing */
+    function shownUrl(full, focused) {
+      if (!full) return '';
+      if (focused || !prefs.compactAddress) return full;
+      return hostOf(full) || full;
+    }
+    function omniFocus(o) {
+      o = o && o.tagName ? o : $('omnibox');
+      curOmni = o;
+      if (o.dataset.url) o.value = o.dataset.url;
+      o.select();
+    }
+    function omniBlur(o) {
+      o = o && o.tagName ? o : $('omnibox');
+      closeSuggest();
+      o.value = shownUrl(o.dataset.url || '', false);
+    }
+    function closeSuggest() {
+      clearTimeout(suggestTimer);
+      suggestSeq++;
+      if (suggestions.length || sel !== -1) post('SuggestClose');
+      suggestions = []; sel = -1;
+    }
+    function localSuggestions(q) {
+      const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+      const match = (t, u) => { const h = (t + ' ' + u).toLowerCase(); return words.every(w => h.includes(w)); };
+      const out = [], seen = new Set();
+      const add = it => { if (!seen.has(it.value) && out.length < 8) { seen.add(it.value); out.push(it); } };
+      state.tabs.forEach(t => {
+        if (!isInternal(t.url) && match(t.title || '', t.url)) add({ kind: 'tab', value: String(t.id), label: t.title || t.url, sub: 'Switch to tab \u00b7 ' + hostOf(t.url) });
+      });
+      data.favs.forEach(f => { if (match(f.title, f.url)) add({ kind: 'url', value: f.url, label: f.title, sub: f.url, color: 'var(--accent)' }); });
+      data.recent.forEach(r => { if (match(r.title || '', r.url)) add({ kind: 'url', value: r.url, label: r.title || r.url, sub: 'Recently closed \u00b7 ' + hostOf(r.url) }); });
+      return out;
+    }
+    // What the user typed: the address bar's text without the part completed from history.
+    function typedText() {
+      const o = curOmni || $('omnibox');
+      const v = o.value;
+      return (o.selectionEnd > o.selectionStart && o.selectionEnd === v.length ? v.slice(0, o.selectionStart) : v).trim();
+    }
+    function showSuggest(items) {
+      const typed = typedText();
+      if (typed && !items.some(i => i.typed)) {
+        const urlish = /^[a-z][a-z0-9+.-]*:\/\//i.test(typed) || (!/\s/.test(typed) && /^[^\s/]+\.[a-z]{2,}(\/|:|$)/i.test(typed)) || /^localhost(:|\/|$)/i.test(typed);
+        items = [{ kind: 'url', value: typed, label: typed, sub: urlish ? 'Open address' : 'Search ' + engineName, typed: true }].concat(items.filter(i => i.value !== typed));
+      }
+      // The site you most likely mean (from how often you visit it) comes first and is selected.
+      if (autoRow && !items.some(i => i.auto)) items = [autoRow].concat(items.filter(i => i.value !== autoRow.value));
+      suggestions = items; sel = items.length ? 0 : -1;
+      if (!items.length) { post('SuggestClose'); return; }
+      const r = (curOmni || $('omnibox')).getBoundingClientRect();
+      post('SuggestShow', { items, x: r.left, width: r.width });
+    }
+    let histItems = [], autoRow = null, canInline = false;
+    // History matches arrive from the host a moment after the local ones; `auto` is the site the
+    // typed start most likely belongs to, which is also completed inside the address bar.
+    window.__historyResults = (seq, items, auto) => {
+      if (seq !== suggestSeq) return;
+      const o = curOmni || $('omnibox');
+      const seen = new Set(suggestions.map(s => s.value));
+      histItems = (items || []).filter(h => !seen.has(h.url)).map(h => ({ kind: 'url', value: h.url, label: h.title || h.url, sub: 'History \u00b7 ' + hostOf(h.url) }));
+      if (auto) {
+        autoRow = { kind: 'url', value: auto[0], label: auto[1], sub: 'Visit \u00b7 from your history', auto: true };
+        const typed = o.value;
+        if (canInline && typed && typed === typed.trim() && !/^[a-z]+:\/\//i.test(typed) && !/^www\./i.test(typed)
+            && auto[1].toLowerCase().startsWith(typed.toLowerCase()) && auto[1].length > typed.length && o.selectionStart === typed.length) {
+          o.value = typed + auto[1].slice(typed.length);
+          o.setSelectionRange(typed.length, o.value.length);
+        }
+      }
+      if (autoRow || histItems.length) showSuggest(suggestions.concat(histItems).slice(0, 8));
+    };
+    // The engine's own suggestions arrive from the host (a page may not fetch them itself).
+    window.__suggestWords = (seq, words) => {
+      if (seq !== suggestSeq || !words.length) return;
+      const q = typedText();
+      const merged = localSuggestions(q).slice(0, 4).concat(histItems.slice(0, 2)).concat(words.map(w => ({ kind: 'search', value: w, label: w, sub: 'Search' })));
+      showSuggest(merged);
+    };
+    function omniInput() {
+      const q = (curOmni || $('omnibox')).value.trim();
+      autoRow = null;
+      canInline = !/^delete/.test((window.event && window.event.inputType) || '');
+      clearTimeout(suggestTimer);
+      if (!q) { closeSuggest(); return; }
+      const seq = ++suggestSeq;
+      const local = localSuggestions(q);
+      histItems = [];
+      showSuggest(local);
+      if (!/^[a-z]+:\/\//i.test(q)) post('SearchHistory', { query: q, seq });
+      // Optional: ask the search engine too (off unless enabled in Settings).
+      if (prefs.searchSuggestions && prefs.suggestUrl && q.length > 1 && !/^[a-z]+:\/\//i.test(q)) {
+        suggestTimer = setTimeout(() => post('SuggestQuery', { query: q, seq }), 120);
+      }
+    }
+    function omniKey(e) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (!suggestions.length) return;
+        e.preventDefault();
+        const n = suggestions.length;
+        sel = e.key === 'ArrowDown' ? (sel + 1 >= n ? 0 : sel + 1) : (sel - 1 < 0 ? n - 1 : sel - 1);
+        post('SuggestHighlight', { index: sel });
+      } else if (e.key === 'Enter') {
+        const picked = suggestions[sel];
+        const val = e.target.value.trim();
+        closeSuggest();
+        if (picked && !picked.typed) post('OverlayChoose', { kind: picked.kind, value: picked.value });
+        else if (val) post('Navigate', { url: val });
+        e.target.blur();
+      } else if (e.key === 'Escape') {
+        closeSuggest();
+        e.target.value = e.target.dataset.url || '';
+        e.target.blur();
+      }
+    }
+    window.__setData = d => { data = d; paintBars(); renderBar(); };
+    window.__syncFav = on => {
+      $('btnFav').classList.toggle('on', on);
+      $('favIcon').innerHTML = STAR + (on ? '' : '');
+      $('favIcon').querySelector('path').setAttribute('fill', on ? 'currentColor' : 'none');
+      $('btnFav').title = on ? 'Remove bookmark (Ctrl+D)' : 'Bookmark this tab (Ctrl+D)';
+    };
+    const STAR = '<path d="M12 3.8l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 17.1l-5.2 2.8 1-5.8L3.5 10l5.9-.9z"/>';
+    // The toolbar takes a hint of the page's colour, but never against its own theme: a light page
+    // (or the light version of a page that is being darkened, which is what a site reports) must
+    // not wash a dark toolbar out, nor a near-black page muddy a light one.
+    const tintLightness = c => {
+      const cv = tintLightness.cv || (tintLightness.cv = document.createElement('canvas').getContext('2d', { willReadFrequently: true }));
+      cv.clearRect(0, 0, 1, 1);
+      cv.fillStyle = '#010203';
+      cv.fillStyle = c;
+      if (cv.fillStyle === '#010203') return null;
+      cv.fillRect(0, 0, 1, 1);
+      const [r, g, b, a] = cv.getImageData(0, 0, 1, 1).data;
+      if (a < 128) return null;
+      const lin = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+      return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+    };
+    let lastTint = null;
+    window.__tint = c => {
+      lastTint = c;
+      const r = document.documentElement;
+      let use = !!(c && prefs.tintToolbar);
+      if (use) {
+        const mode = r.dataset.mode;
+        const dark = mode === 'dark' || (mode !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+        const l = tintLightness(c);
+        if (l === null || (dark && l > 0.18) || (!dark && l < 0.03)) use = false;
+      }
+      if (use) { r.style.setProperty('--page-tint', c); r.dataset.tint = '1'; }
+      else { r.removeAttribute('data-tint'); }
+    };
+    window.__shieldSync = d => {
+      const b = $('btnShield');
+      b.dataset.state = d.state === 'none' ? 'off' : d.state;
+      const n = d.blocked + d.replaced;
+      const shown = d.state === 'on' && n > 0;
+      $('shieldCount').hidden = !shown;
+      $('shieldCount').textContent = n > 999 ? '999+' : String(n);
+      b.classList.toggle('busy', shown);
+      b.title = d.state === 'paused' ? 'Byōbu is paused on this site'
+        : d.state === 'off' ? 'Byōbu is off'
+        : n > 0 ? `Byōbu blocked ${n} on this page` : 'Byōbu shield';
+    };
+    window.__syncPage = d => {
+      $('btnPip').hidden = !d.hasVideo;
+      $('btnReader').classList.toggle('on', !!d.reader);
+      $('btnReader').title = d.reader ? 'Exit reader view (F9)' : 'Reader view (F9)';
+    };
+
+
+    /* Tabs: create each element once, then patch only what changed */
+    const CRANE_MARK = `{{CRANE_MARK_TAB}}`;
+    function buildTab(id) {
+      const el = document.createElement('div');
+      el.className = 'tab';
+      el.id = 'tab-' + id;
+      el.setAttribute('role', 'tab');
+      el.innerHTML = '<img class="favicon" alt="">' + CRANE_MARK + '<span class="zz">z</span><span class="title"></span>' +
+        '<button class="audio" tabindex="-1" aria-label="Mute tab"><svg class="i" viewBox="0 0 24 24"><path d="M4 10v4h4l5 4V6l-5 4z"/><path class="on" d="M16.5 9a4 4 0 0 1 0 6M19 6.5a8 8 0 0 1 0 11"/><path class="off" d="M17 9l5 6M22 9l-5 6"/></svg></button>' +
+        '<button class="close" tabindex="-1" aria-label="Close tab"><svg class="i" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg></button>';
+      el.querySelector('.favicon').onerror = function () { this.src = SHOJI_FAVICON; };
+      el.onmousedown = e => { if (e.button === 1) { e.preventDefault(); post('CloseTab', { id }); } };
+      el.onclick = () => { if (!justDragged) post('SwitchTab', { id }); };
+      el.oncontextmenu = e => { e.preventDefault(); post('TabMenu', { tab_id: id, x: e.clientX, y: 44 }); };
+      el.querySelector('.audio').onclick = e => { e.stopPropagation(); post('ToggleMuteTab', { tab_id: id }); };
+      el.querySelector('.close').onclick = e => { e.stopPropagation(); post('CloseTab', { id }); };
+      el.onpointerdown = e => tabPointerDown(e, el);
+      el.onpointermove = tabPointerMove;
+      el.onpointerup = e => tabPointerUp(e, false);
+      el.onpointercancel = e => tabPointerUp(e, true);
+      return el;
+    }
+    /* Dragging a tab: reorder inside the strip; drag it away and the host takes over, moving the tab's
+       real window with the cursor (drop it in another strip, on a window's edge, or anywhere). */
+    function stripTabs() { return [...document.querySelectorAll('#tabs .tab')]; }
+    /* What moves as one piece in the strip: a lone tab, or a whole split pill */
+    function stripUnits() { return [...$('tabs').children].filter(e => e.classList.contains('tab') || e.classList.contains('split-tab')); }
+    const tabCount = u => u.classList.contains('split-tab') ? u.querySelectorAll('.tab').length : 1;
+    /* Position in the window from layout, ignoring any transform in flight */
+    function layoutLeft(el) { let x = 0; for (let e = el; e && e !== document.body; e = e.offsetParent) x += e.offsetLeft; return x - $('tabs').scrollLeft; }
+    function tabPointerDown(e, el) {
+      if (e.button !== 0 || e.target.closest('.close, .audio')) return;
+      const unit = el.parentElement.classList.contains('split-tab') ? el.parentElement : el;
+      const r = el.getBoundingClientRect();
+      pdrag = { id: +el.id.slice(4), el, unit, pid: e.pointerId, x0: e.clientX, y0: e.clientY, gx: e.clientX - r.left, gy: e.clientY - r.top, moved: false, w: unit.getBoundingClientRect().width, to: -1, join: 0, pinned: el.classList.contains('pinned'), single: unit === el };
+      try { el.setPointerCapture(e.pointerId); } catch {}
+    }
+    function tabPointerMove(e) {
+      const d = pdrag;
+      if (!d || e.pointerId !== d.pid) return;
+      const dx = e.clientX - d.x0, dy = e.clientY - d.y0;
+      if (!d.moved) {
+        if (Math.hypot(dx, dy) < 5) return;
+        d.moved = true;
+        d.units = stripUnits();
+        d.rects = d.units.map(t => t.getBoundingClientRect());
+        d.index = d.units.indexOf(d.unit);
+        d.unit.classList.add('dragging');
+      }
+      const torn = prefs.tearoff && (e.clientY > 44 + 24 || e.clientY < -24 || e.clientX < -28 || e.clientX > innerWidth + 28);
+      if (torn) {
+        const id = d.id, gx = d.gx, gy = d.gy;
+        endTabDrag();
+        post('TabDragStart', { tab_id: id, grab_dx: gx, grab_dy: gy, strip_left: $('tabs').getBoundingClientRect().left });
+        return;
+      }
+      const pill = $('wsPill').getBoundingClientRect();
+      $('wsPill').classList.toggle('drop-ws', pill.width > 0 && e.clientX >= pill.left && e.clientX <= pill.right && e.clientY >= pill.top && e.clientY <= pill.bottom);
+      if (!prefs.reorder || d.index < 0) return;
+      // The dragged tab stays wholly inside the strip: never clipped at its edges.
+      const box = $('tabs').getBoundingClientRect(), r0 = d.rects[d.index];
+      const cdx = Math.max(Math.min(0, box.left - r0.left), Math.min(dx, Math.max(0, box.right - r0.right)));
+      d.unit.style.transform = `translateX(${cdx}px)`;
+      // A single tab held over the middle of a split pill joins it instead of reordering.
+      let join = 0;
+      if (d.single && !d.pinned) {
+        d.units.forEach((u, i) => {
+          if (i === d.index || !u.classList.contains('split-tab')) return;
+          const r = d.rects[i];
+          if (e.clientX > r.left + r.width * .2 && e.clientX < r.right - r.width * .2) join = +u.id.slice(4);
+        });
+      }
+      if (join !== d.join) {
+        d.join = join;
+        d.units.forEach(u => u.classList.toggle('join-target', !!join && u.id === 'spl-' + join));
+      }
+      const mid = d.rects[d.index].left + d.rects[d.index].width / 2 + cdx;
+      let to = 0;
+      d.rects.forEach((r, i) => { if (i !== d.index && r.left + r.width / 2 < mid) to++; });
+      if (join) to = d.index;
+      d.to = to;
+      const step = d.w + 2;
+      d.units.forEach((t, i) => {
+        if (i === d.index) return;
+        let shift = 0;
+        if (i > d.index && i <= to) shift = -step;
+        else if (i < d.index && i >= to) shift = step;
+        t.style.transition = 'transform .14s';
+        t.style.transform = shift ? `translateX(${shift}px)` : '';
+      });
+    }
+    function endTabDrag(keep) {
+      const d = pdrag;
+      pdrag = null;
+      $('wsPill').classList.remove('drop-ws');
+      if (!d) return;
+      d.unit.classList.remove('dragging');
+      (d.units || []).forEach(u => u.classList.remove('join-target'));
+      const clear = () => (d.units || []).forEach(t => { t.style.transform = ''; t.style.transition = ''; });
+      // A reorder keeps the tabs where they were drawn: the update that follows slides them home.
+      if (keep) setTimeout(clear, 300); else clear();
+      try { d.el.releasePointerCapture(d.pid); } catch {}
+    }
+    function tabPointerUp(e, cancelled) {
+      const d = pdrag;
+      if (!d || e.pointerId !== d.pid) return;
+      const moved = d.moved;
+      const to = d.to, index = d.index, id = d.id, join = d.join, units = d.units || [];
+      const pill = $('wsPill').getBoundingClientRect();
+      const onPill = pill.width > 0 && e.clientX >= pill.left && e.clientX <= pill.right && e.clientY >= pill.top && e.clientY <= pill.bottom;
+      endTabDrag(!cancelled && !onPill && d.moved && prefs.reorder && !join && to >= 0 && to !== index);
+      if (!moved) return;
+      justDragged = true;
+      setTimeout(() => { justDragged = false; }, 0);
+      if (cancelled) return;
+      if (onPill) {
+        const others = (state.workspaces || []).filter(w => w.id !== state.active_workspace_id);
+        if (others.length === 1) post('MoveTabToWorkspace', { tab_id: id, workspace_id: others[0].id });
+        else post('ToggleWorkspacesSidebar');
+        return;
+      }
+      if (join) { post('SplitAdd', { split_id: join, tab_id: id }); return; }
+      if (prefs.reorder && to >= 0 && to !== index) {
+        const counts = units.map(tabCount);
+        const sum = (arr, n) => arr.slice(0, n).reduce((a, b) => a + b, 0);
+        const from = sum(counts, index), n = counts[index];
+        const toStart = sum(counts.filter((_, i) => i !== index), to);
+        if (n === 1) post('ReorderTab', { from_index: from, to_index: toStart });
+        else post('ReorderGroup', { from_index: from, count: n, to_index: toStart });
+      }
+    }
+    /* Where a tab dragged in from another window would land: a bar between the tabs */
+    let dropPending = false, dropTimer = 0, lastZones = '';
+    window.__dropJoin = id => { document.querySelectorAll('.split-tab').forEach(u => u.classList.toggle('join-target', id != null && u.id === 'spl-' + id)); };
+    function settleDrop() {
+      dropPending = false;
+      const bar = $('dropBar');
+      stripUnits().forEach(t => { t.classList.add('parting'); t.style.transform = ''; t._shift = 0; });
+      if (bar) { bar.classList.remove('on'); setTimeout(() => { if (!bar.classList.contains('on')) bar.hidden = true; }, 240); }
+      const g = $('dropGhost');
+      if (g) { g.classList.remove('on', 'settle'); setTimeout(() => { if (!g.classList.contains('on')) g.hidden = true; }, 200); }
+    }
+    function dropGhost() {
+      let g = $('dropGhost');
+      if (!g) {
+        g = document.createElement('div'); g.id = 'dropGhost'; g.hidden = true;
+        g.innerHTML = '<img alt=""><span></span>';
+        g.querySelector('img').onerror = function () { this.src = SHOJI_FAVICON; };
+        document.querySelector('.titlebar').appendChild(g);
+      }
+      return g;
+    }
+    let ghostX = 0;
+    /* The pointer's position along the strip (window px): the preview tab rides under it */
+    window.__dropMove = x => {
+      const g = dropGhost(), box = $('tabs').getBoundingClientRect();
+      const w = g.offsetWidth || 200;
+      ghostX = Math.max(box.left, Math.min(x - w / 2, Math.max(box.left, box.right - w)));
+      g.style.setProperty('--gx', ghostX + 'px');
+    };
+    window.__dropMark = (idx, title, dropped, favicon) => {
+      let bar = $('dropBar');
+      const ts = stripUnits();
+      const ghost = dropGhost();
+      const shift = (t, dx) => {
+        t.classList.add('parting');
+        t.style.transform = dx ? `translateX(${dx}px)` : '';
+        t._shift = dx;
+      };
+      if (idx == null) {
+        if (dropped) {
+          // The drag ended. If the tab joins this strip, the update that carries it arrives in a
+          // moment and takes over from the open gap; if not, the gap closes.
+          dropPending = true;
+          clearTimeout(dropTimer);
+          dropTimer = setTimeout(settleDrop, 260);
+          // The preview glides into the gap it is about to fill.
+          if (bar && !bar.hidden) {
+            ghost.classList.add('settle');
+            ghost.style.setProperty('--gx', bar.style.left);
+          }
+          return;
+        }
+        dropPending = false;
+        clearTimeout(dropTimer);
+        ts.forEach(t => shift(t, 0));
+        ghost.classList.remove('on');
+        setTimeout(() => { if (!ghost.classList.contains('on')) { ghost.hidden = true; ghost.classList.remove('settle'); } }, 200);
+        if (bar) {
+          bar.classList.remove('on');
+          setTimeout(() => { if (!bar.classList.contains('on')) bar.hidden = true; }, 240);
+        }
+        return;
+      }
+      dropPending = false;
+      clearTimeout(dropTimer);
+      if (!bar) { bar = document.createElement('div'); bar.id = 'dropBar'; document.querySelector('.titlebar').appendChild(bar); }
+      // Room for one more tab: the others narrow a little, but a full slot is a good stand-in.
+      const w = Math.min(200, Math.max(96, ts.length ? ts[0].offsetWidth - 20 : 200));
+      // The host counts tabs; a split pill counts as one piece, so find the piece that starts there.
+      let seen = 0, at = ts.length;
+      for (let i = 0; i < ts.length; i++) { if (seen >= idx) { at = i; break; } seen += tabCount(ts[i]); }
+      // Layout positions, not drawn ones: tabs may be halfway through sliding.
+      const x = !ts.length ? 8 : at >= ts.length ? layoutLeft(ts[ts.length - 1]) + ts[ts.length - 1].offsetWidth + 1 : layoutLeft(ts[at]);
+      ts.forEach((t, i) => shift(t, i >= at ? w + 2 : 0));
+      bar.style.width = w + 'px';
+      bar.style.left = x + 'px';
+      // The preview tab: same title and icon as the tab being dragged
+      if (ghost.hidden) {
+        ghost.classList.remove('settle', 'on');
+        ghost.style.width = Math.min(220, Math.max(120, w + 16)) + 'px';
+        ghost.querySelector('span').textContent = title || '';
+        const img = ghost.querySelector('img');
+        img.src = favicon || SHOJI_FAVICON;
+        ghost.style.setProperty('--gx', Math.max(0, x) + 'px');
+        ghost.hidden = false;
+        ghost.getBoundingClientRect();
+        ghost.classList.add('on');
+      }
+      const wasHidden = bar.hidden;
+      bar.hidden = false;
+      if (wasHidden) bar.getBoundingClientRect();
+      bar.classList.add('on');
+    };
+    /* Tell the host where the tabs are, so it can turn a drop position into an insertion index */
+    function reportCenters() {
+      // A tab inside a split pill reports the pill's centre, so a drop never lands inside it.
+      const c = stripTabs().map(t => { const u = t.parentElement.classList.contains('split-tab') ? t.parentElement : t; const r = u.getBoundingClientRect(); return Math.round((r.left + r.width / 2) * 10) / 10; });
+      const j = JSON.stringify(c);
+      if (j !== lastCenters) { lastCenters = j; post('TabCenters', { centers: c }); }
+      const zones = [...$('tabs').querySelectorAll('.split-tab')].map(u => { const r = u.getBoundingClientRect(); return [+u.id.slice(4), Math.round(r.left * 10) / 10, Math.round(r.right * 10) / 10]; });
+      const zj = JSON.stringify(zones);
+      if (zj !== lastZones) { lastZones = zj; post('SplitZones', { zones }); }
+    }
+    function clearDropMarks() {
+      document.querySelectorAll('.drop-left, .drop-right').forEach(t => t.classList.remove('drop-left', 'drop-right'));
+    }
+    function setText(el, text) { if (el.textContent !== text) el.textContent = text; }
+    function setAttr(el, name, value) { if (el.getAttribute(name) !== value) el.setAttribute(name, value); }
+
+    /* Whatever changes in the strip (a tab closed, added, moved, dropped in) glides into place
+       instead of jumping: each tab remembers where it was drawn and slides from there. */
+    window.__shellUpdate = function (msg) {
+      const box = $('tabs');
+      const stripEls = () => [...box.querySelectorAll('.tab, .split-tab, .group-chip')];
+      const before = new Map(stripEls().map(e => [e.id, e.getBoundingClientRect()]));
+      const dropping = dropPending;
+      shellUpdateInner(msg);
+      if (dropping) {
+        dropPending = false;
+        clearTimeout(dropTimer);
+        const bar = $('dropBar');
+        if (bar) { bar.classList.remove('on'); bar.hidden = true; }
+        const g = $('dropGhost');
+        if (g) { g.classList.remove('on', 'settle'); g.hidden = true; }
+      }
+      if (!before.size || Pet_calm || document.hidden) return;
+      const jobs = [];
+      const deltas = new Map();
+      for (const el of stripEls()) {
+        const was = before.get(el.id);
+        if (!was) {
+          if (el.classList.contains('tab') && el.parentElement === box) {
+            el.classList.add('arriving');
+            setTimeout(() => el.classList.remove('arriving'), 300);
+          }
+          continue;
+        }
+        el.classList.remove('parting');
+        el.style.transform = '';
+        el._shift = 0;
+      }
+      // After the clear, measure how far each element moved. A tab inside a pill that moved too is
+      // already carried by the pill, so only its own extra movement is animated.
+      for (const el of stripEls()) {
+        const was = before.get(el.id);
+        if (!was) continue;
+        const dx = was.left - el.getBoundingClientRect().left;
+        deltas.set(el, dx);
+      }
+      for (const [el, dx] of deltas) {
+        const parent = el.parentElement.classList.contains('split-tab') ? deltas.get(el.parentElement) || 0 : 0;
+        const own = dx - parent;
+        if (Math.abs(own) > 0.5) jobs.push([el, own]);
+      }
+      if (!jobs.length) return;
+      jobs.forEach(([el, dx]) => { el.style.transition = 'none'; el.style.transform = `translateX(${dx}px)`; });
+      box.getBoundingClientRect();
+      jobs.forEach(([el]) => { el.style.transition = ''; el.classList.add('parting'); el.style.transform = ''; });
+      setTimeout(() => jobs.forEach(([el]) => el.classList.remove('parting')), 260);
+    };
+
+    function shellUpdateInner(msg) {
+      const incoming = msg && (msg.data || msg);
+      if (!incoming || !incoming.tabs) return;
+      state = {
+        tabs: incoming.tabs,
+        groups: incoming.groups || [],
+        split: incoming.split || null,
+        split_state: incoming.split_state || null,
+        splits: incoming.splits || [],
+        split_rects: state.split_rects || [],
+        workspaces: incoming.workspaces || [],
+        active_workspace_id: incoming.active_workspace_id || 1,
+        inactive_tabs: incoming.inactive_tabs || []
+      };
+      const state_ = incoming;
+      const ws = state.workspaces.find(w => w.id === state.active_workspace_id) || state.workspaces[0];
+      if (ws) {
+        setText($('wsName'), ws.name);
+        $('wsPill').style.setProperty('--ws', toneOf(ws.color));
+        $('wsPill').title = `${ws.name} \u2014 Spaces (Alt+W)`;
+      }
+      // The space pill only takes room once there is more than one space to tell apart.
+      $('wsPill').hidden = state.workspaces.length < 2;
+      const sp = state.split_state;
+      $('splitCtl').hidden = !sp;
+      if (sp) {
+        const w = sp.weights || [];
+        const pct = w.length === 2 ? Math.round(w[0] / (w[0] + w[1]) * 100) : 0;
+        setText($('splitRatioText'), w.length === 2 ? `${pct}/${100 - pct}` : `${sp.panes.length} panes`);
+        $('splitCtl').title = (sp.name || 'Split view') + ' — flip, even out the panes, add a tab, or ungroup';
+        const vert = sp.orientation !== 'horizontal';
+        $('splitOrientIcon').innerHTML = '<rect x="3" y="4" width="18" height="16" rx="2"/>' +
+          (vert ? '<path d="M12 4v16"/>' : '<path d="M3 12h18"/>');
+      }
+      const container = $('tabs');
+      const switched = activeTabId !== state_.active_tab_id;
+      activeTabId = state_.active_tab_id;
+      const groupById = new Map(state.groups.map(g => [g.id, g]));
+      // Rebuild the strip order: group chips, lone tabs, and one pill per split group.
+      const order = [];
+      const chipped = new Set();
+      const splitOf = new Map();
+      state.splits.forEach(sp => sp.panes.forEach((id, i) => splitOf.set(id, { sp, side: i })));
+      const tabById = new Map(state.tabs.map(t => [t.id, t]));
+      const emitted = new Set();
+      state.tabs.forEach(tab => {
+        const memb = splitOf.get(tab.id);
+        if (memb && emitted.has(memb.sp.id)) return;
+        if (tab.group != null && groupById.has(tab.group) && !chipped.has(tab.group)) {
+          chipped.add(tab.group);
+          order.push({ chip: groupById.get(tab.group), first: tab.id });
+        }
+        if (memb) {
+          emitted.add(memb.sp.id);
+          order.push({ unit: memb.sp });
+          return;
+        }
+        order.push({ tab });
+      });
+      const seq = [];
+      /* Put `list` in `parent` in this order, dropping whatever else was there */
+      const syncChildren = (parent, list) => {
+        const want = new Set(list);
+        for (const c of [...parent.children]) if (!want.has(c)) c.remove();
+        list.forEach((el, i) => { if (parent.children[i] !== el) parent.insertBefore(el, parent.children[i] || null); });
+      };
+      const renderTab = tab => {
+        const index = state.tabs.indexOf(tab);
+        const el = $('tab-' + tab.id) || buildTab(tab.id);
+        el.dataset.index = index;
+        const g = tab.group != null ? groupById.get(tab.group) : null;
+        if (g) { el.dataset.group = g.id; tintGroup(el, g.color); }
+        else { delete el.dataset.group; el.style.removeProperty('--g'); el.style.removeProperty('--g-deep'); el.style.removeProperty('--g-on'); }
+        const memb = splitOf.get(tab.id);
+        el.classList.toggle('split-pane', !!memb);
+        if (memb) el.dataset.split = memb.sp.id; else { delete el.dataset.split; delete el.dataset.pos; }
+        // A page that never reports completion (a download, a cancelled load) stops looking
+        // busy after a while rather than flapping for ever.
+        if (tab.is_loading) { if (!el.dataset.ls) el.dataset.ls = Date.now(); } else { delete el.dataset.ls; }
+        const busy = !!tab.is_loading && Date.now() - (+el.dataset.ls || Date.now()) < 30000;
+        el.classList.toggle('loading', busy);
+        el.classList.toggle('asleep', tab.status === 'Suspended');
+        el.classList.toggle('pinned', !!tab.pinned);
+        el.classList.toggle('sound', !!tab.is_audio_playing && !tab.is_muted);
+        el.classList.toggle('muted', !!tab.is_muted);
+        setAttr(el.querySelector('.audio'), 'aria-label', tab.is_muted ? 'Unmute tab' : 'Mute tab');
+        const active = tab.id === state_.active_tab_id;
+        el.classList.toggle('active', active);
+        setAttr(el, 'aria-selected', String(active));
+        setAttr(el, 'tabindex', active ? '0' : '-1');
+        if (active && (switched || el.dataset.shown !== '1')) { el.dataset.shown = '1'; el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
+        const internal = isInternal(tab.url);
+        const title = (internal && INTERNAL_TITLES[tab.url]) || tab.title || tab.url;
+        setText(el.querySelector('.title'), title);
+        const shortcut = index < 8 ? index + 1 : (index === state.tabs.length - 1 ? 9 : 0);
+        setAttr(el, 'title', shortcut ? `${title}  (Ctrl+${shortcut})` : title);
+        const icon = (!internal && tab.favicon_uri) || SHOJI_FAVICON;
+        const img = el.querySelector('.favicon');
+        if (img.dataset.src !== icon) { img.dataset.src = icon; img.src = icon; }
+        if (active) syncActive(tab, internal, switched);
+        return el;
+      };
+      const renderUnit = sp => {
+        let w = $('spl-' + sp.id);
+        const fresh = !w;
+        if (fresh) {
+          w = document.createElement('div');
+          w.className = 'split-tab'; w.id = 'spl-' + sp.id;
+          w.setAttribute('role', 'group');
+        }
+        const panes = sp.panes.map(id => tabById.get(id)).filter(Boolean);
+        const stacked = sp.orientation === 'horizontal';
+        const kids = [];
+        panes.forEach((t, i) => {
+          if (i) {
+            let seam = [...w.children].find(c => c.classList.contains('seam') && c.dataset.i === String(i));
+            if (!seam) {
+              seam = document.createElement('div');
+              seam.className = 'seam'; seam.dataset.i = i;
+              seam.innerHTML = '<div class="badge"><i></i><i></i></div>';
+              seam.onclick = e => { e.stopPropagation(); post('SplitSwapPair', { id: +w.id.slice(4), index: +seam.dataset.i - 1 }); };
+            }
+            const [a, b] = panes.length === 2 ? (stacked ? ['T', 'B'] : ['L', 'R']) : [String(i), String(i + 1)];
+            const lab = seam.querySelectorAll('i');
+            setText(lab[0], a); setText(lab[1], b);
+            setAttr(seam, 'title', `Swap pane ${i} and pane ${i + 1}`);
+            kids.push(seam);
+          }
+          const el = renderTab(t);
+          el.dataset.pos = panes.length < 2 ? '' : (i === 0 ? 'first' : (i === panes.length - 1 ? 'last' : 'mid'));
+          kids.push(el);
+        });
+        syncChildren(w, kids);
+        w.style.setProperty('--sd', deepOf(sp.color));
+        w.style.setProperty('--so', onColor(deepOf(sp.color)));
+        w.classList.toggle('dense', panes.length >= 8);
+            w.style.setProperty('--n', panes.length);
+        const nm = sp.name || ('Split ' + sp.id);
+        setAttr(w, 'aria-label', nm);
+        if (fresh) { w.classList.add('merging'); setTimeout(() => w.classList.remove('merging'), 560); }
+        return w;
+      };
+      order.forEach(o => {
+        let el;
+        if (o.unit) { seq.push(renderUnit(o.unit)); return; }
+        if (o.chip) {
+          el = $('grp-' + o.chip.id) || (() => {
+            const c = document.createElement('div');
+            c.className = 'group-chip'; c.id = 'grp-' + o.chip.id;
+            c.onclick = () => post('TabMenu', { tab_id: +c.dataset.first, x: c.getBoundingClientRect().left, y: 44 });
+            return c;
+          })();
+          el.dataset.first = o.first;
+          setText(el, o.chip.name);
+          tintGroup(el, o.chip.color);
+          seq.push(el);
+          return;
+        }
+        seq.push(renderTab(o.tab));
+      });
+      syncChildren(container, seq);
+      // One toolbar per pane while a split with room for it is showing
+      setSplitBars(!!sp && sp.panes.length >= 2);
+      paintBars();
+      requestAnimationFrame(reportCenters);
+      setTimeout(reportCenters, 260);
+    }
+
+
+    /* The search provider's mark, shown in the address field where a page's own icon would be on a new tab */
+    const ENGINE_LOGOS = {
+      google: '<path fill="#4285F4" d="M23.5 12.27c0-.85-.08-1.67-.22-2.45H12v4.64h6.46a5.52 5.52 0 0 1-2.4 3.62v3h3.88c2.27-2.09 3.56-5.17 3.56-8.81z"/><path fill="#34A853" d="M12 24c3.24 0 5.96-1.07 7.94-2.91l-3.88-3a7.2 7.2 0 0 1-10.7-3.77H1.4v3.09A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.36 14.32a7.2 7.2 0 0 1 0-4.64V6.59H1.4a12 12 0 0 0 0 10.82z"/><path fill="#EA4335" d="M12 4.75c1.76 0 3.34.6 4.58 1.8l3.44-3.44A11.5 11.5 0 0 0 12 0 12 12 0 0 0 1.4 6.59l3.96 3.09A7.2 7.2 0 0 1 12 4.75z"/>',
+      bing: '<path fill="#0C8484" d="M5 2l4 1.4v14.2l5.7-3.3-2.9-1.3-1.8-4.6 9 3.2v4.7L9 22.2l-4-2.3z"/>',
+      brave: '<path fill="#FB542B" d="M12 2l3.4 1.5L19.2 3l2.3 4.2-1 3.1 1.4 6.4L12 22.2 3.1 16.7l1.4-6.4-1-3.1L5.8 3l3.8.5z"/><path fill="#fff" d="M12 7.6l2.7 1.2 2-.3.7 1.6-1.3 3.3 1 2.2L12 18.6 6.9 15.6l1-2.2-1.3-3.3.7-1.6 2 .3z"/>',
+      ecosia: '<circle cx="12" cy="12" r="11" fill="#36ACB0"/><path fill="#fff" d="M12 5c-3.6 0-6 2.5-6 5.6 0 2.9 2.2 4.9 4.8 5V19l1.6-3.4c2.7-.2 4.6-2.2 4.6-5C17 7.4 14.9 5 12 5z"/>',
+      duckduckgo: '<circle cx="12" cy="12" r="11" fill="#DE5833"/><circle cx="12" cy="12" r="8.6" fill="#fff"/><circle cx="12" cy="12" r="6.2" fill="#DE5833"/><circle cx="10.2" cy="10.4" r="1.3" fill="#fff"/><circle cx="10.4" cy="10.4" r=".6" fill="#2D4F8E"/>'
+    };
+    let engineName = '{{SEARCH_ENGINE_NAME}}';
+    const engineMark = () => '<svg class="i eng" viewBox="0 0 24 24" id="lockIcon">' + (ENGINE_LOGOS[engineName.toLowerCase()] || ENGINE_LOGOS.duckduckgo) + '</svg>';
+
+    // The left icon: on a new tab it is the search engine's logo and opens the engine list;
+    // on a website it opens the site's information.
+    function lockClick(el) {
+      if (el.dataset.kind === 'shoji') {
+        const r = el.parentNode.getBoundingClientRect();
+        post('EngineMenu', { x: r.left, y: r.bottom + 4 });
+      } else post('ToggleSecurityPanel');
+    }
+    function syncActive(tab, internal, switched) {
+      const omni = $('omnibox');
+      const shown = internal ? '' : tab.url;
+      const focused = document.activeElement === omni;
+      if (omni.dataset.url !== shown) {
+        omni.dataset.url = shown;
+        if (switched || !focused) omni.value = shownUrl(shown, focused);
+      } else if (switched) {
+        omni.value = shownUrl(shown, focused);
+      }
+      try { activeHost = internal ? '' : new URL(tab.url).hostname.replace(/^www\./, ''); } catch { activeHost = ''; }
+      syncDark();
+      const act = $('tab-' + tab.id);
+      document.body.classList.toggle('loading', !!tab.is_loading && !!act && act.classList.contains('loading'));
+      $('btnBack').disabled = !tab.can_go_back;
+      $('btnForward').disabled = !tab.can_go_forward;
+      const kind = internal || tab.notice ? 'shoji' : (tab.url.startsWith('https://') ? 'lock' : 'open');
+      const lock = $('btnLock');
+      if (lock.dataset.kind !== kind) {
+        lock.dataset.kind = kind;
+        lock.className = 'lock' + (kind === 'open' ? ' insecure' : '');
+        if (kind === 'lock') {
+          // A secure page gets its seal: a vermilion stamp that presses in.
+          lock.innerHTML = '<span class="seal' + (Pet_calm ? '' : ' stamp') + '" aria-hidden="true">\u5B89</span>';
+        } else if (kind === 'shoji') {
+          lock.innerHTML = engineMark();
+        } else {
+          lock.innerHTML = '<svg class="i" viewBox="0 0 24 24" id="lockIcon">' + ICONS[kind] + '</svg>';
+        }
+        lock.title = kind === 'shoji' ? 'Searching with ' + engineName : (kind === 'lock' ? 'Connection is secure' : 'Connection is not secure');
+      }
+    }
+
+    window.__focusOmnibox = () => {
+      const bar = splitBarsOn ? [...$('paneBars').children].find(b => b.dataset.id === String(activeTabId)) : null;
+      const o = (bar && bar.querySelector('.paddr')) || $('omnibox');
+      o.focus(); o.select();
+    };
+    window.__syncSearchEngine = name => {
+      engineName = name;
+      $('omnibox').placeholder = `Search ${name} or type a URL`;
+      const lock = $('btnLock');
+      if (lock.dataset.kind === 'shoji') { lock.innerHTML = engineMark(); lock.title = 'Searching with ' + name; }
+      document.querySelectorAll('.pbar .lk').forEach(l => { if (l.dataset.kind === 'shoji') { l.querySelector('svg').innerHTML = ENGINE_LOGOS[name.toLowerCase()] || ENGINE_LOGOS.duckduckgo; } });
+      document.querySelectorAll('.paddr').forEach(i => { i.placeholder = `Search ${name} or type a URL`; });
+    };
+    window.__applyTheme = t => { const r = document.documentElement; r.dataset.accent = t.accent; if (t.mode) r.dataset.mode = t.mode; if (t.fonts) r.dataset.fonts = t.fonts; window.__tint && window.__tint(lastTint); };
+    window.__applyPrefs = p => {
+      prefs = p;
+      if (!prefs.zoomBadge) $('zoom').hidden = true;
+      renderDownloads(); syncDark();
+      const o = $('omnibox');
+      if (document.activeElement !== o) o.value = shownUrl(o.dataset.url || '', false);
+      if (!prefs.tintToolbar) window.__tint(null);
+      renderBar();
+      $('btnPanel').hidden = prefs.sidebar === 'off';
+      reportAnchors();
+    };
+
+    /* Dark websites: filled moon = on here, outline = off, outline with a stroke = skipped site */
+    const MOON = '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>';
+    let activeHost = '';
+    const siteListed = (list, host) => (list || []).some(p => {
+      p = p.replace(/^\*\./, '');
+      return host === p || host.endsWith('.' + p);
+    });
+    function syncDark() {
+      paintBars();
+      const btn = $('btnDark');
+      const never = !!activeHost && siteListed(prefs.darkExclude, activeHost);
+      const always = !!activeHost && !never && siteListed(prefs.darkInclude, activeHost);
+      const on = !never && (prefs.darkWebsites || always);
+      btn.classList.toggle('on', on);
+      $('darkIcon').innerHTML = on ? MOON.replace('<path', '<path fill="currentColor"')
+        : MOON + (never ? '<path d="M4 4l16 16"/>' : '');
+      btn.title = never ? 'Dark mode: never on ' + activeHost + '. Click to adjust, right-click to turn it on here'
+        : always ? 'Dark mode: always on ' + activeHost + '. Click to adjust, right-click to turn it off here'
+        : !prefs.darkWebsites ? 'Dark mode: off. Click to adjust, right-click to turn it on for this site'
+        : 'Dark mode: on. Click to adjust, right-click to turn it off for this site';
+    }
+    function toggleDarkSite() { if (activeHost) post('ToggleDarkSite', { host: activeHost }); }
+    window.__syncNotes = open => $('btnNotes').classList.toggle('open', open);
+
+    /* Zoom: a quiet pill in the address bar while not at 100%; hover for − / + */
+    window.__syncZoom = function (factor) {
+      const pct = Math.round(factor * 100);
+      setText($('zoomReset'), pct + '%');
+      $('zoom').hidden = pct === 100 || !prefs.zoomBadge;
+    };
+
+    /* Downloads */
+    const downloads = new Map();
+    window.__downloadProgress = function (d) {
+      downloads.set(d.download_id, d);
+      renderDownloads();
+    };
+    function renderDownloads() {
+      let received = 0, total = 0, active = 0;
+      for (const d of downloads.values()) {
+        if (d.state === 'InProgress') { active++; received += d.received_bytes; total += Math.max(d.total_bytes, 0); }
+      }
+      const show = active > 0 && prefs.downloadsRing;
+      // SVG elements have no .hidden property; toggle display instead.
+      const vis = (id, on) => { $(id).style.display = on ? '' : 'none'; };
+      vis('dlRing', show);
+      vis('dlIdle', active === 0);
+      vis('dlActive', active > 0);
+      $('dlCount').hidden = !show || active < 2;
+      setText($('dlCount'), String(active));
+      $('dlRingFill').style.strokeDashoffset = 69.1 * (1 - (total > 0 ? Math.min(1, received / total) : 0));
+    }
+
+    /* Find in page */
+    function reportTrays() {
+      const rect = id => {
+        const el = $(id);
+        return el.classList.contains('open') ? [el.offsetLeft, el.offsetTop, el.offsetWidth, el.offsetHeight] : null;
+      };
+      document.body.classList.toggle('find-open', $('findBar').classList.contains('open') && !$('findBar').classList.contains('leaving'));
+      post('TrayRects', { find: rect('findBar'), permission: rect('permissionBar'), toast: rect('toast'), letter: rect('letter') });
+    }
+
+    /* The crane's word: a card that appears, says something, and goes away by itself. */
+    let toastTimer = 0;
+    window.__toast = t => {
+      const el = $('toast');
+      clearTimeout(toastTimer);
+      if ($('letter').classList.contains('open')) foldLetter();
+      $('toastTitle').textContent = t.title || '';
+      $('toastText').textContent = t.text || '';
+      $('toastText').hidden = !t.text;
+      const acts = $('toastActs');
+      acts.textContent = '';
+      (t.actions || []).forEach(a => {
+        const b = document.createElement('button');
+        b.className = 'pill ' + (a.primary ? 'primary' : 'quiet');
+        b.textContent = a.label;
+        b.onclick = () => { post(a.action, a.payload || null); dismissToast(); };
+        acts.appendChild(b);
+      });
+      const pet = el.querySelector('.crane');
+      if (pet && window.Pet) Pet.pose(pet, t.pose || 'bow');
+      el.classList.remove('leaving');
+      el.classList.add('open');
+      reportTrays();
+      toastTimer = setTimeout(dismissToast, t.ms || 5200);
+    };
+    function dismissToast() {
+      clearTimeout(toastTimer);
+      if ($('toast').classList.contains('open')) leaveTray($('toast'), () => {});
+    }
+    $('toast').addEventListener('mouseenter', () => clearTimeout(toastTimer));
+    $('toast').addEventListener('mouseleave', () => { toastTimer = setTimeout(dismissToast, 1800); });
+    /* The letter: a newer Shoji. The host sends where things stand; nothing installs until a
+       button here (or in Settings) says so. */
+    let upd = null, letterTimer = 0;
+    const LT_ROLL = 25000;
+    window.__updateState = s => {
+      const had = upd && upd.letter;
+      upd = s;
+      const btn = $('btnLetter');
+      const show = !!s.letter && !(s.consent === 'now' && s.phase === 'ready');
+      btn.hidden = !show;
+      if (show) btn.title = 'A letter from the crane: Shoji ' + s.version;
+      if (show && !had) { btn.classList.remove('arrive'); void btn.offsetWidth; btn.classList.add('arrive'); }
+      if (!s.letter && $('letter').classList.contains('open')) foldLetter();
+      if ($('letter').classList.contains('open')) renderLetter();
+    };
+    function letterButton(label, choice, cls) {
+      const b = document.createElement('button');
+      b.className = 'pill ' + cls;
+      b.textContent = label;
+      b.onclick = () => {
+        if (choice === 'later') foldLetter();
+        post('UpdateAction', { choice });
+      };
+      return b;
+    }
+    function renderLetter() {
+      const s = upd;
+      if (!s || !s.version) return;
+      const v = s.version, acts = $('ltActs'), foot = $('ltFoot'), notes = $('ltNotes');
+      let title = 'A letter has arrived', sub = 'Shoji ' + v + ' is ready to fold in';
+      acts.textContent = ''; foot.textContent = ''; notes.textContent = '';
+      const downloading = s.phase === 'downloading';
+      if (downloading) {
+        title = 'On its way';
+        sub = 'The crane is carrying Shoji ' + v + (s.pct ? ' · ' + s.pct + '%' : '');
+      } else if (s.consent === 'close' && s.phase === 'ready') {
+        title = 'Ready when you are';
+        sub = 'Shoji ' + v + ' goes in when you close Shoji. Nothing changes until then.';
+        acts.append(letterButton('Restart now instead', 'now', 'quiet'));
+      } else if (s.consent === 'now') {
+        title = 'Folding it in';
+        sub = 'Shoji restarts in a moment, with your tabs.';
+      } else {
+        (s.notes || []).forEach(n => { const li = document.createElement('li'); li.textContent = n; notes.append(li); });
+        if (s.installable) {
+          acts.append(letterButton('Restart and update', 'now', 'primary'), letterButton('When I close Shoji', 'close', 'quiet'), letterButton('Later', 'later', 'plain'));
+        } else {
+          acts.append(letterButton('Later', 'later', 'plain'));
+        }
+        const skip = document.createElement('button');
+        skip.textContent = 'Skip this version';
+        skip.onclick = () => { foldLetter(); post('UpdateAction', { choice: 'skip' }); };
+        foot.append(skip);
+      }
+      if (s.page && !downloading && s.consent !== 'now') {
+        const li = document.createElement('li');
+        const read = document.createElement('button');
+        read.textContent = s.installable ? 'Read the whole letter' : 'This copy updates from its release page';
+        read.onclick = () => post('UpdateAction', { choice: 'notes' });
+        li.className = 'read';
+        li.append(read);
+        notes.append(li);
+      }
+      setText($('ltTitle'), title);
+      setText($('ltSub'), sub);
+      $('ltBar').hidden = !downloading;
+      $('ltFill').style.width = (s.pct || 0) + '%';
+      $('ltErr').hidden = !s.error;
+      setText($('ltErr'), s.error || '');
+      reportTrays();
+    }
+    function openLetter(byItself) {
+      const el = $('letter');
+      if (!upd || !upd.version) return;
+      dismissToast();
+      clearTimeout(letterTimer);
+      el.classList.remove('leaving');
+      el.classList.add('open');
+      renderLetter();
+      const pet = el.querySelector('.crane');
+      if (pet && window.Pet) Pet.pose(pet, byItself ? 'bow' : 'nod');
+      // Opened by itself and then ignored, it folds back into the toolbar letter.
+      if (byItself) letterTimer = setTimeout(foldLetter, LT_ROLL);
+    }
+    function foldLetter() {
+      clearTimeout(letterTimer);
+      const el = $('letter');
+      if (!el.classList.contains('open') || el.classList.contains('leaving')) return;
+      el.classList.add('leaving');
+      setTimeout(() => { el.classList.remove('open', 'leaving'); reportTrays(); }, 320);
+      const btn = $('btnLetter');
+      if (!btn.hidden) { btn.classList.remove('arrive'); void btn.offsetWidth; btn.classList.add('arrive'); }
+    }
+    function toggleLetter() {
+      if ($('letter').classList.contains('open')) foldLetter(); else openLetter(false);
+    }
+    window.__unfoldLetter = () => openLetter(true);
+    $('letter').addEventListener('mouseenter', () => clearTimeout(letterTimer));
+    $('letter').addEventListener('mouseleave', () => {
+      clearTimeout(letterTimer);
+      if (upd && upd.consent === '' && upd.phase !== 'downloading') letterTimer = setTimeout(foldLetter, 9000);
+    });
+
+    function leaveTray(el, then) {
+      if (el.classList.contains('leaving')) return;
+      el.classList.add('leaving');
+      setTimeout(() => { el.classList.remove('open', 'leaving'); reportTrays(); then(); }, 130);
+    }
+    function toggleFindBar() {
+      const bar = $('findBar');
+      if (bar.classList.contains('open') && !bar.classList.contains('leaving')) return closeFind();
+      bar.classList.remove('leaving');
+      bar.classList.add('open');
+      post('OpenFindInPage');
+      reportTrays();
+      const input = $('findInput');
+      input.focus();
+      input.select();
+      if (input.value) find(true);
+    }
+    function closeFind() {
+      if (!$('findBar').classList.contains('open')) return;
+      leaveTray($('findBar'), () => post('CloseFindInPage'));
+    }
+    function find(forward) {
+      const query = $('findInput').value;
+      if (!query) { setText($('findCount'), '0/0'); return; }
+      post('FindInPage', { query, forward });
+    }
+    function findKey(e) {
+      if (e.key === 'Enter') find(!e.shiftKey);
+      else if (e.key === 'Escape') closeFind();
+    }
+    window.__toggleFindBar = toggleFindBar;
+    window.__syncFindResult = d => setText($('findCount'), d.total > 0 ? `${d.current} of ${d.total}` : '0/0');
+
+    /* Permission tray */
+    let pendingPermission = null;
+    window.__permissionPrompt = function (d) {
+      pendingPermission = d.permission_id;
+      const k = (d.permission_kind || '').toLowerCase();
+      $('permIcon').innerHTML = k.includes('camera') ? ICONS.camera : k.includes('micro') ? ICONS.mic
+        : k.includes('geo') ? ICONS.location : k.includes('notif') ? ICONS.bell : ICONS.info;
+      $('permMsg').textContent = `${d.origin} wants to use your ${d.permission_kind.toLowerCase()}`;
+      $('permissionBar').classList.remove('leaving');
+      $('permissionBar').classList.add('open');
+      post('OpenPermissionPrompt');
+      reportTrays();
+    };
+    function resolvePermission(allow) {
+      if (pendingPermission !== null) post('PermissionResponse', { permission_id: pendingPermission, allow });
+      pendingPermission = null;
+      leaveTray($('permissionBar'), () => post('ClosePermissionPrompt'));
+    }
+
+    /* Bookmarks bar: folders first, then bookmarks; what does not fit goes behind the » button */
+    const hueOf = str => { let h = 7; for (const c of str) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+    const FOLDER_ICON = '<svg class="i" viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg>';
+    let dragUrl = null;
+    function bmButton(f) {
+      const b = document.createElement('button');
+      b.className = 'bm';
+      b.draggable = true;
+      b.dataset.url = f.url;
+      b.title = f.title + '\n' + f.url;
+      const ico = document.createElement('span');
+      ico.className = 'ico';
+      ico.style.setProperty('--h', hueOf(hostOf(f.url) || f.url));
+      ico.textContent = (hostOf(f.url) || f.title || '?').charAt(0).toUpperCase();
+      const t = document.createElement('span');
+      t.className = 't';
+      t.textContent = f.title || f.url;
+      b.append(ico, t);
+      b.onclick = e => post(e.ctrlKey || e.shiftKey ? 'CreateTab' : 'Navigate', { url: f.url });
+      b.onauxclick = e => { if (e.button === 1) post('CreateTab', { url: f.url }); };
+      b.oncontextmenu = e => { e.preventDefault(); e.stopPropagation(); post('BookmarkMenu', { url: f.url, from: 'bar', x: e.clientX, y: 0 }); };
+      b.ondragstart = e => { dragUrl = f.url; b.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', f.url); };
+      b.ondragend = () => { dragUrl = null; b.classList.remove('dragging'); clearDrop(); };
+      b.ondragover = e => { if (dragUrl && dragUrl !== f.url) { e.preventDefault(); clearDrop(); b.classList.add('drop-before'); } };
+      b.ondrop = e => { e.preventDefault(); const u = dragUrl; clearDrop(); if (u && u !== f.url) post('BookmarkMove', { url: u, folder: '', before: f.url }); };
+      return b;
+    }
+    function folderButton(path) {
+      const b = document.createElement('button');
+      b.className = 'bm folder';
+      b.dataset.folder = path;
+      b.title = path;
+      b.innerHTML = '<span class="ico">' + FOLDER_ICON + '</span><span class="t"></span>';
+      b.querySelector('.t').textContent = path;
+      b.onclick = () => post('BookmarkFolderMenu', { folder: path, x: Math.round(b.getBoundingClientRect().left) });
+      b.oncontextmenu = e => { e.preventDefault(); e.stopPropagation(); post('BookmarkMenu', { folder: path, from: 'bar', x: e.clientX, y: 0 }); };
+      b.ondragover = e => { if (dragUrl) { e.preventDefault(); clearDrop(); b.classList.add('drop-into'); } };
+      b.ondrop = e => { e.preventDefault(); const u = dragUrl; clearDrop(); if (u) post('BookmarkMove', { url: u, folder: path }); };
+      return b;
+    }
+    function clearDrop() { document.querySelectorAll('.bm.drop-before, .bm.drop-into').forEach(x => x.classList.remove('drop-before', 'drop-into')); }
+    function renderBar() {
+      const on = !!prefs.bookmarksBar;
+      document.body.classList.toggle('bar-on', on);
+      $('bmBar').hidden = !on;
+      if (!on) return;
+      const box = $('bmItems');
+      box.textContent = '';
+      const folders = (data.folders || []).filter(f => !f.includes(' / '));
+      const items = (data.favs || []).filter(f => !f.folder);
+      // Only as many as could ever fit are built; the » menu lists the rest.
+      const room = 60;
+      box.dataset.total = folders.length + items.length;
+      folders.slice(0, room).forEach(f => box.appendChild(folderButton(f)));
+      items.slice(0, Math.max(0, room - folders.length)).forEach(f => box.appendChild(bmButton(f)));
+      if (!folders.length && !items.length) {
+        const h = document.createElement('span');
+        h.className = 'bm-hint';
+        h.textContent = 'Bookmarks you add with Ctrl+D appear here';
+        box.appendChild(h);
+      }
+      fitBar();
+    }
+    function fitBar() {
+      const box = $('bmItems');
+      const kids = [...box.children].filter(k => k.classList.contains('bm'));
+      kids.forEach(k => { k.style.visibility = ''; k.style.display = ''; });
+      let shown = kids.length;
+      for (let i = 0; i < kids.length; i++) {
+        if (kids[i].offsetLeft + kids[i].offsetWidth > box.clientWidth + 1) { shown = i; break; }
+      }
+      kids.forEach((k, i) => { if (i >= shown) k.style.display = 'none'; });
+      $('bmMore').hidden = shown >= kids.length && (+box.dataset.total || 0) <= kids.length;
+      $('bmMore').dataset.skip = shown;
+    }
+    $('bmMore').onclick = () => post('BookmarkOverflow', { skip: +$('bmMore').dataset.skip || 0, x: Math.round($('bmMore').getBoundingClientRect().left) });
+    // The bookmarks button, and "All bookmarks" on the bar, drop the list down when the pointer rests
+    // on them. The host folds it away again once the pointer is off both; a click keeps it open
+    // (and "All bookmarks" then goes to the bookmark manager).
+    function dropOnHover(el, bar) {
+      let t = 0;
+      el.addEventListener('mouseenter', () => {
+        clearTimeout(t);
+        t = setTimeout(() => {
+          const r = el.getBoundingClientRect();
+          post('HoverBookmarks', { left: Math.round(r.left), right: Math.round(r.right), bar });
+        }, 120);
+      });
+      el.addEventListener('mouseleave', () => clearTimeout(t));
+    }
+    dropOnHover($('btnPanel'), false);
+    dropOnHover($('bmAll'), true);
+    $('bmAll').onclick = () => post('RunAction', { value: 'bookmark-manager' });
+    $('bmBar').oncontextmenu = e => { e.preventDefault(); post('BookmarkMenu', { from: 'bar', x: e.clientX, y: 0 }); };
+    $('bmItems').ondragover = e => { if (dragUrl && e.target === $('bmItems')) e.preventDefault(); };
+    $('bmItems').ondrop = e => { if (dragUrl && e.target === $('bmItems')) { e.preventDefault(); const u = dragUrl; clearDrop(); post('BookmarkMove', { url: u, folder: '' }); } };
+    addEventListener('resize', () => { if (prefs.bookmarksBar) fitBar(); });
+
+    /* Toolbar anchors: the dropdowns hang from the button that opened them. */
+    let anchorFrame = 0;
+    function reportAnchors() {
+      cancelAnimationFrame(anchorFrame);
+      anchorFrame = requestAnimationFrame(() => {
+        const items = {};
+        const activeBar = splitBarsOn ? [...$('paneBars').children].find(b => b.dataset.id === String(activeTabId)) : null;
+        const pick = (key, id) => {
+          if (activeBar && key === 'dark') { const d = activeBar.querySelector('.dark'); return d && !d.hidden ? d : activeBar.querySelector('.more'); }
+          if (activeBar && key === 'lock') return activeBar.querySelector('.lk');
+          if (activeBar && key === 'shield') { const d = activeBar.querySelector('.shield'); return d && !d.hidden ? d : activeBar.querySelector('.more'); }
+          return $(id);
+        };
+        for (const [key, id] of [['menu', 'btnMenu'], ['panel', $('btnPanel').hidden ? 'btnMenu' : 'btnPanel'], ['fav', 'btnFav'], ['downloads', 'btnDownloads'], ['dark', 'btnDark'], ['shield', 'btnShield'], ['lock', 'btnLock']]) {
+          const b = pick(key, id).getBoundingClientRect();
+          if (b.width > 0) items[key] = Math.round((b.left + b.width / 2) * 10) / 10;
+        }
+        post('ToolbarAnchors', { items });
+      });
+    }
+    addEventListener('resize', () => { reportAnchors(); reportTrays(); reportCenters(); });
+
+
+    /* ---------- Split view toolbars ---------- */
+    const toolIds = ['splitCtl', 'btnPanel', 'btnNotes', 'btnDownloads', 'btnMenu'];
+    const toolMarks = toolIds.map(id => { const n = $(id); const m = document.createComment(id); n.before(m); return [n, m]; });
+    let splitBarsOn = false, barsKey = '', curOmni = null;
+    const PB = {
+      back: '<path d="M3.6 9.5h8.1V5.7c0-.9 1.1-1.4 1.8-.8l7 6.1c.5.5.5 1.1 0 1.6l-7 6.1c-.7.6-1.8.1-1.8-.8v-3.8H3.6c-.6 0-1.1-.5-1.1-1.1v-3.2c0-.6.5-1.1 1.1-1.1z"/>',
+      fwd: '<path d="M3.6 9.5h8.1V5.7c0-.9 1.1-1.4 1.8-.8l7 6.1c.5.5.5 1.1 0 1.6l-7 6.1c-.7.6-1.8.1-1.8-.8v-3.8H3.6c-.6 0-1.1-.5-1.1-1.1v-3.2c0-.6.5-1.1 1.1-1.1z"/>',
+      reload: '<g class="rl"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></g><path class="x" d="M6 6l12 12M18 6L6 18"/>',
+      more: '<circle cx="5" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="19" cy="12" r="1.5" fill="currentColor"/>'
+    };
+    /* Move the window-wide buttons next to the window controls while panes have their own bars */
+    function setSplitBars(on) {
+      if (on === splitBarsOn) return;
+      splitBarsOn = on;
+      document.body.classList.toggle('splitbars', on);
+      toolMarks.forEach(([n, m]) => { if (on) $('toolsHost').appendChild(n); else m.after(n); });
+      if (!on) { $('paneBars').textContent = ''; barsKey = ''; }
+      reportAnchors();
+    }
+    const paneAct = (id, fn) => { if (id !== activeTabId) post('SwitchTab', { id }); fn(); };
+    function ensureBar(id) {
+      let bar = [...$('paneBars').children].find(b => b.dataset.id === String(id));
+      if (bar) return bar;
+      bar = document.createElement('div');
+      bar.className = 'pbar'; bar.dataset.id = id;
+      const btn = (cls, label, svg, fn) => {
+        const b = document.createElement('button');
+        b.className = 'pb ' + cls; b.setAttribute('aria-label', label); b.title = label;
+        b.innerHTML = '<svg class="i" viewBox="0 0 24 24">' + svg + '</svg>';
+        b.onclick = e => { e.stopPropagation(); paneAct(id, () => fn(b)); };
+        return b;
+      };
+      const tab = () => state.tabs.find(t => t.id === id) || {};
+      const back = btn('back', 'Back', PB.back, () => post('GoBack'));
+      const fwd = btn('fwd', 'Forward', PB.fwd, () => post('GoForward'));
+      const reload = btn('reload', 'Reload', PB.reload, () => post(tab().is_loading ? 'Stop' : 'Reload'));
+      const fav = btn('fav', 'Bookmark this tab', '<path d="M12 3.8l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 17.1l-5.2 2.8 1-5.8L3.5 10l5.9-.9z"/>', () => post('ToggleFavourite'));
+      const dark = btn('dark', 'Dark mode', '', () => { anchorDark = dark; post('ToggleDarkPanel'); });
+      dark.oncontextmenu = e => { e.preventDefault(); const h = hostOf(tab().url || ''); if (h) post('ToggleDarkSite', { host: h }); };
+      const shield = btn('shield', 'Byōbu shield', '<path d="M12 3l7 3v5.5c0 4.3-3 7.7-7 9.5-4-1.8-7-5.2-7-9.5V6z"/><path class="check" d="M9 12l2 2 4-4"/><path class="slash" d="M5 4l14 16"/>', b => { anchorDark = b; post('ToggleShieldPanel'); });
+      const cnt = document.createElement('span'); cnt.className = 'cnt'; cnt.hidden = true; shield.appendChild(cnt);
+      const reader = btn('reader', 'Reader view', '<path d="M4 5.5C6.5 4.5 9.5 4.5 12 6c2.5-1.5 5.5-1.5 8-.5v13c-2.5-1-5.5-1-8 .5-2.5-1.5-5.5-1.5-8-.5z"/><path d="M12 6v13.5"/>', () => post('ToggleReader'));
+      const pip = btn('pip', 'Picture in picture', '<rect x="3" y="5" width="18" height="14" rx="2"/><rect x="12" y="11" width="7" height="5" rx="1" fill="currentColor"/>', () => post('TogglePictureInPicture'));
+      pip.hidden = true; pip.dataset.na = '1';
+      const more = btn('more', 'More', PB.more, b => openPaneMenu(bar, b));
+      const pa = document.createElement('div');
+      pa.className = 'pa';
+      const lk = document.createElement('button');
+      lk.className = 'lk'; lk.setAttribute('aria-label', 'Site information');
+      lk.innerHTML = '<svg class="i" viewBox="0 0 24 24"></svg>';
+      lk.onclick = e => { e.stopPropagation(); paneAct(id, () => lockClick(lk)); };
+      const inp = document.createElement('input');
+      inp.className = 'paddr'; inp.type = 'text'; inp.spellcheck = false; inp.autocomplete = 'off';
+      inp.setAttribute('aria-label', 'Address and search');
+      inp.onfocus = () => { curOmni = inp; if (id !== activeTabId) post('SwitchTab', { id }); omniFocus(inp); };
+      inp.onblur = () => omniBlur(inp);
+      inp.oninput = () => { curOmni = inp; omniInput(); };
+      inp.onkeydown = omniKey;
+      pa.append(lk, shield, inp);
+      bar.append(back, fwd, reload, pa, fav, dark, reader, pip, more);
+      bar.onmousedown = () => { if (id !== activeTabId) post('SwitchTab', { id }); };
+      $('paneBars').appendChild(bar);
+      return bar;
+    }
+    let anchorDark = null;
+    function paintBars() {
+      if (!splitBarsOn) return;
+      const sp = state.split_state;
+      if (!sp) return;
+      const color = deepOf(sp.color);
+      sp.panes.forEach(id => {
+        const bar = ensureBar(id), tab = state.tabs.find(t => t.id === id);
+        if (!tab) return;
+        bar.style.setProperty('--sd', color);
+        bar.classList.toggle('active', id === activeTabId);
+        bar.classList.toggle('loading', !!tab.is_loading);
+        const internal = isInternal(tab.url);
+        const shown = internal ? '' : tab.url;
+        const inp = bar.querySelector('.paddr');
+        inp.dataset.url = shown;
+        inp.placeholder = 'Search ' + engineName + ' or type a URL';
+        if (document.activeElement !== inp) inp.value = shownUrl(shown, false);
+        bar.querySelector('.back').disabled = !tab.can_go_back;
+        bar.querySelector('.fwd').disabled = !tab.can_go_forward;
+        const kind = internal || tab.notice ? 'shoji' : (tab.url.startsWith('https://') ? 'lock' : 'open');
+        const lk = bar.querySelector('.lk');
+        if (lk.dataset.kind !== kind) {
+          lk.dataset.kind = kind;
+          lk.className = 'lk' + (kind === 'open' ? ' insecure' : '');
+          // The same marks as the single address bar: the engine's logo on a new tab, the red
+          // seal on a secure page, the plain symbols otherwise.
+          if (kind === 'lock') {
+            lk.innerHTML = '<span class="seal' + (Pet_calm ? '' : ' stamp') + '" aria-hidden="true">\u5B89</span>';
+          } else {
+            lk.innerHTML = '<svg class="i' + (kind === 'shoji' ? ' eng' : '') + '" viewBox="0 0 24 24">' + (kind === 'shoji' ? (ENGINE_LOGOS[engineName.toLowerCase()] || ENGINE_LOGOS.duckduckgo) : ICONS[kind]) + '</svg>';
+          }
+        }
+        const faved = !internal && data.favs.some(f => f.url === tab.url);
+        const fav = bar.querySelector('.fav');
+        fav.classList.toggle('on', faved);
+        fav.querySelector('path').setAttribute('fill', faved ? 'currentColor' : 'none');
+        fav.title = faved ? 'Remove bookmark' : 'Bookmark this tab';
+        const host = internal ? '' : hostOf(tab.url);
+        const never = !!host && siteListed(prefs.darkExclude, host);
+        const always = !!host && !never && siteListed(prefs.darkInclude, host);
+        const on = !never && (prefs.darkWebsites || always);
+        const dark = bar.querySelector('.dark');
+        dark.classList.toggle('on', on);
+        dark.querySelector('svg').innerHTML = on ? MOON.replace('<path', '<path fill="currentColor"') : MOON + (never ? '<path d="M4 4l16 16"/>' : '');
+        dark.title = never ? 'Dark mode: never on ' + host : always ? 'Dark mode: always on ' + host : on ? 'Dark mode: on' : 'Dark mode: off';
+      });
+      // Bars of tabs that left the split
+      [...$('paneBars').children].forEach(b => { if (!sp.panes.includes(+b.dataset.id)) b.remove(); });
+      layoutBars();
+    }
+    /* Place each bar over its pane, then drop what does not fit: dark mode first, then favourite,
+       forward, reload, back; the address shortens last. Dropped buttons live in the "..." menu. */
+    function layoutBars() {
+      if (!splitBarsOn) return;
+      const sp = state.split_state, rects = state.split_rects || [];
+      if (!sp || rects.length !== sp.panes.length) return;
+      sp.panes.forEach((id, i) => {
+        const bar = [...$('paneBars').children].find(b => b.dataset.id === String(id));
+        if (!bar) return;
+        const r = rects[i];
+        const x = Math.round(r[0] * 10) / 10, w = Math.round(r[2] * 10) / 10;
+        if (bar.style.left !== x + 'px') bar.style.left = x + 'px';
+        if (bar.style.width !== w + 'px') bar.style.width = w + 'px';
+        // In the order they are kept; buttons that do not apply (no video, nothing to shield) take no room.
+        const keep = ['back', 'reload', 'fwd', 'fav', 'dark', 'reader', 'pip'].filter(k => !bar.querySelector('.' + k).dataset.na);
+        const room = w - 10 - 76 - 24;               // what is left once the address has its minimum
+        let fit = Math.max(0, Math.floor((room + 2) / 34));
+        const hiddenAny = fit < keep.length;
+        if (hiddenAny) fit = Math.max(0, Math.floor((room - 34 + 2) / 34));
+        ['back', 'reload', 'fwd', 'fav', 'dark', 'reader', 'pip'].forEach(k => { const b = bar.querySelector('.' + k); b.hidden = !!b.dataset.na || keep.indexOf(k) >= fit; });
+        bar.querySelector('.more').hidden = !hiddenAny;
+        bar.classList.toggle('tiny', w < 120);
+      });
+      reportAnchors();
+    }
+    function openPaneMenu(bar, anchor) {
+      document.querySelectorAll('.pmenu').forEach(m => m.remove());
+      const id = +bar.dataset.id;
+      const tab = state.tabs.find(t => t.id === id) || {};
+      const menu = document.createElement('div');
+      menu.className = 'pmenu';
+      const names = { back: 'Back', reload: tab.is_loading ? 'Stop' : 'Reload', fwd: 'Forward', fav: bar.querySelector('.fav').title, dark: 'Dark mode\u2026', shield: bar.querySelector('.shield').title, reader: bar.querySelector('.reader').title, pip: 'Picture in picture' };
+      ['back', 'reload', 'fwd', 'fav', 'dark', 'shield', 'reader', 'pip'].forEach(k => {
+        const src = bar.querySelector('.' + k);
+        if (!src.hidden || src.dataset.na) return;
+        const it = document.createElement('button');
+        it.innerHTML = '<svg class="i" viewBox="0 0 24 24">' + src.querySelector('svg').innerHTML + '</svg><span></span>';
+        it.querySelector('span').textContent = names[k];
+        it.disabled = src.disabled;
+        it.onclick = () => { menu.remove(); src.hidden = false; src.click(); src.hidden = true; };
+        menu.appendChild(it);
+      });
+      document.body.appendChild(menu);
+      const r = anchor.getBoundingClientRect();
+      menu.style.left = Math.max(4, Math.min(innerWidth - menu.offsetWidth - 4, r.right - menu.offsetWidth)) + 'px';
+      menu.style.top = (r.bottom + 4) + 'px';
+      const close = e => { if (!menu.contains(e.target)) { menu.remove(); removeEventListener('mousedown', close, true); } };
+      setTimeout(() => addEventListener('mousedown', close, true), 0);
+    }
+    /* Per-pane page state from the host: shield counts, reader on, video present */
+    let paneStates = {};
+    window.__paneState = list => {
+      paneStates = {};
+      list.forEach(p => { paneStates[p.id] = p; });
+      if (!splitBarsOn) return;
+      list.forEach(p => {
+        const bar = [...$('paneBars').children].find(b => b.dataset.id === String(p.id));
+        if (!bar) return;
+        const sh = bar.querySelector('.shield'), rd = bar.querySelector('.reader'), pp = bar.querySelector('.pip');
+        const shNa = p.shield === 'none' ? '1' : '';
+        if ((sh.dataset.na || '') !== shNa || (pp.dataset.na || '') !== (p.video ? '' : '1')) { if (shNa) sh.dataset.na = '1'; else delete sh.dataset.na; if (p.video) delete pp.dataset.na; else pp.dataset.na = '1'; }
+        sh.dataset.state = p.shield;
+        const n = p.n || 0, shown = p.shield === 'on' && n > 0;
+        const c = sh.querySelector('.cnt'); c.hidden = !shown; c.textContent = n > 999 ? '999+' : String(n);
+        sh.title = p.shield === 'paused' ? 'Byōbu is paused on this site' : p.shield === 'off' ? 'Byōbu is off' : n > 0 ? 'Byōbu blocked ' + n + ' on this page' : 'Byōbu shield';
+        rd.classList.toggle('on', !!p.reader);
+        rd.title = p.reader ? 'Exit reader view' : 'Reader view';
+      });
+      layoutBars();
+    };
+    window.__splitRects = r => { state.split_rects = r; if (splitBarsOn) layoutBars(); };
+
+    /* Keyboard navigation within the tab list */
+    $('tabs').addEventListener('wheel', e => { if (e.deltaY) { $('tabs').scrollLeft += e.deltaY; e.preventDefault(); } }, { passive: false });
+    $('tabs').addEventListener('keydown', e => {
+      const tabs = stripTabs();
+      const i = tabs.indexOf(document.activeElement);
+      if (i < 0) return;
+      const to = { ArrowRight: (i + 1) % tabs.length, ArrowLeft: (i - 1 + tabs.length) % tabs.length, Home: 0, End: tabs.length - 1 }[e.key];
+      if (to === undefined) return;
+      e.preventDefault();
+      tabs[to].focus();
+      post('SwitchTab', { id: +tabs[to].id.slice(4) });
+    });
+
+    /* Window frame: empty title-bar space is an app-region drag area, handled natively by
+       WebView2 + Windows (drag, double-click to maximize, right-click for the system menu). */
+    window.__syncWindow = w => {
+      document.body.classList.toggle('maximized', w.maximized);
+      document.body.classList.toggle('inactive', !w.focused);
+      $('winMax').innerHTML = w.maximized ? '&#xE923;' : '&#xE922;';
+      $('winMax').title = $('winMax').ariaLabel = w.maximized ? 'Restore' : 'Maximize';
+    };
+
+    // Re-check busy tabs now and then: a tab stuck "loading" for 30 s stops looking busy.
+    setInterval(() => {
+      const now = Date.now();
+      document.querySelectorAll('.tab.loading').forEach(el => {
+        if (now - (+el.dataset.ls || now) > 30000) el.classList.remove('loading');
+      });
+      document.body.classList.toggle('loading', !!document.querySelector('.tab.active.loading'));
+    }, 4000);
+    $('lockIcon').innerHTML = ICONS.shoji;
+    window.__syncFav(false);
+    renderBar();
+    $('btnPanel').hidden = prefs.sidebar === 'off';
+    // Pose the little crane in the toast to match its message, now that the page has the kit.
+    new ResizeObserver(reportAnchors).observe(document.querySelector('.nav'));
+    post('ChromeReady');
+    reportAnchors();
+  </script>
+</body>
+</html>

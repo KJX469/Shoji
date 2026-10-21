@@ -1,54 +1,40 @@
 # Third-party notices
 
-Shoji is MIT licensed (see [LICENSE](LICENSE)). It includes, links against or downloads the
-following. Each keeps its own licence.
+Shoji is MIT licensed. It includes, links or downloads the following, each under its own licence.
 
-## Included in Shoji
+## Included
 
 | Component | Licence |
 | --- | --- |
 | [Dark Reader](https://github.com/darkreader/darkreader) (modified) | MIT |
-| Browser logos ([browser-logos](https://github.com/alrra/browser-logos), MIT, and [Simple Icons](https://simpleicons.org), CC0). The logos remain trademarks of their owners and only identify the browser to import from | MIT / CC0 |
-| Instrument Sans, Newsreader, Fraunces, Literata | SIL Open Font License 1.1 |
+| Browser logos from [browser-logos](https://github.com/alrra/browser-logos) and [Simple Icons](https://simpleicons.org) | MIT / CC0 |
+| Instrument Sans, Newsreader, Fraunces, Literata | SIL OFL 1.1 |
 
-## Linked into the browser
-
-Rust crates, including:
+## Linked
 
 | Crate | Licence |
 | --- | --- |
-| [adblock](https://github.com/brave/adblock-rust) (Brave) | MPL-2.0 |
+| [adblock](https://github.com/brave/adblock-rust) | MPL-2.0 |
 | [winit](https://github.com/rust-windowing/winit), [wry](https://github.com/tauri-apps/wry) | Apache-2.0 / MIT |
 | [windows](https://github.com/microsoft/windows-rs), webview2-com | MIT / Apache-2.0 |
-| [ureq](https://github.com/algesten/ureq), rustls | MIT / Apache-2.0 (rustls also ISC) |
-| [rusqlite](https://github.com/rusqlite/rusqlite) with bundled [SQLite](https://sqlite.org) (reads other browsers' data on import) | MIT; SQLite is public domain |
-| [ring](https://github.com/briansmith/ring) (encrypts the password vault) | ISC-style / OpenSSL-derived |
-| serde, serde_json and the other dependencies | MIT and/or Apache-2.0 |
+| [ureq](https://github.com/algesten/ureq), rustls | MIT / Apache-2.0 / ISC |
+| [rusqlite](https://github.com/rusqlite/rusqlite) with [SQLite](https://sqlite.org) | MIT / public domain |
+| [ring](https://github.com/briansmith/ring) | ISC-style |
+| Other dependencies (see `Cargo.lock`) | MIT and/or Apache-2.0 |
 
-The MPL-2.0 source for `adblock` is available from its
-repository.
+## Downloaded at runtime
 
-## Downloaded at runtime (not part of the binary)
+| Data | Licence |
+| --- | --- |
+| [uBlock Origin](https://github.com/gorhill/uBlock) scriptlets and [uAssets](https://github.com/uBlockOrigin/uAssets) lists | GPL-3.0 |
+| [EasyList and EasyPrivacy](https://easylist.to) | GPL-3.0 / CC BY-SA 3.0 |
+| [Brave lists and resources](https://github.com/brave/adblock-resources) | MPL-2.0 |
 
-| Data | Licence | Source |
-| --- | --- | --- |
-| uBlock Origin filter lists and scriptlets | GPL-3.0 | [uBlockOrigin/uAssets](https://github.com/uBlockOrigin/uAssets), [gorhill/uBlock](https://github.com/gorhill/uBlock) |
-| EasyList and EasyPrivacy | GPL-3.0 / CC BY-SA 3.0 | [easylist.to](https://easylist.to) |
-| Brave filter lists and resources | MPL-2.0 | [brave/adblock-resources](https://github.com/brave/adblock-resources) |
+These are never compiled into `shoji.exe`. The `byobu-data` release asset is a build of uBlock
+Origin's scriptlets and stays GPL-3.0.
 
-These are fetched onto the user's machine when Byōbu updates and are never compiled into
-`shoji.exe`. The `byobu-data` release asset published by this repository's workflow is a build of
-uBlock Origin's scriptlets and remains under GPL-3.0.
+## Trademarks
 
-## Trademarks and logos
-
-Shoji's import feature shows the names and logos of other browsers (including Chrome, Edge,
-Firefox, Brave, Opera, Vivaldi, Arc, Safari and Tor Browser) so you can pick where to import from.
-These names and logos are trademarks or registered trademarks of their respective owners. They are
-used only to identify those products; Shoji is not affiliated with, sponsored by or endorsed by
-any of them.
-
-## Provided by Windows
-
-Web content is rendered by the Microsoft Edge WebView2 runtime. Microsoft and WebView2 are
-trademarks of the Microsoft group of companies.
+Browser names and logos shown on the import screen belong to their owners and only identify the
+browser to import from. Shoji is not affiliated with or endorsed by any of them. Microsoft and
+WebView2 are trademarks of the Microsoft group of companies.

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en" data-accent="{{ACCENT}}" data-mode="{{MODE}}" data-fonts="{{FONTS}}">
+<head>
+  <meta charset="UTF-8">
+  <!-- No script of any kind runs here: the article text came from a web page. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src http: https: data:; style-src 'unsafe-inline'; font-src http://shoji.fonts; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>{{TITLE}}</title>
+  <style>
+{{THEME_CSS}}
+    html { background: var(--bg); }
+    body { min-height: 100%; margin: 0; padding: 0 24px 96px; color: var(--ink);
+      /* washi: a faint warm grain over the paper colour */
+      background-image: radial-gradient(var(--line) 1px, transparent 1.2px), radial-gradient(var(--line) 1px, transparent 1.2px);
+      background-size: 26px 26px, 41px 41px; background-position: 0 0, 13px 17px; background-color: var(--bg); }
+    .bar { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; max-width: 720px; margin: 0 auto; padding: 14px 0; font-size: 12.5px; color: var(--ink-3); background: linear-gradient(var(--bg) 70%, transparent); }
+    .bar a { color: var(--ink-2); text-decoration: none; padding: 5px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); }
+    .bar a:hover { border-color: var(--line-strong); color: var(--ink); }
+    article { max-width: 680px; margin: 28px auto 0; font-family: var(--font-text); font-size: 19px; line-height: 1.75; }
+    h1.headline { font-family: var(--font-display); font-weight: 400; font-size: 38px; line-height: 1.18; letter-spacing: -.01em; margin: 0 0 14px; }
+    .byline { font-size: 13.5px; color: var(--ink-3); margin-bottom: 34px; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
+    article p { margin: 0 0 1.15em; }
+    article h1, article h2, article h3, article h4 { font-family: var(--font-display); font-weight: 500; line-height: 1.25; margin: 1.6em 0 .55em; }
+    article h2 { font-size: 1.45em; } article h3 { font-size: 1.2em; }
+    article a { color: var(--accent); text-underline-offset: 3px; }
+    article img { display: block; max-width: 100%; height: auto; margin: 1.4em auto; border-radius: 6px; }
+    article figure { margin: 1.4em 0; } article figcaption { font-size: 14px; color: var(--ink-3); text-align: center; }
+    article blockquote { margin: 1.3em 0; padding: .1em 0 .1em 1.1em; border-left: 3px solid var(--tone); color: var(--ink-2); }
+    article pre { overflow-x: auto; padding: 14px 16px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); font-size: 14px; line-height: 1.55; }
+    article code { font-family: var(--mono); font-size: .88em; }
+    article ul, article ol { padding-left: 1.4em; margin: 0 0 1.15em; }
+    article table { border-collapse: collapse; margin: 1.2em 0; font-size: 15px; }
+    article td, article th { border: 1px solid var(--line); padding: 6px 10px; }
+    article hr { border: 0; border-top: 1px solid var(--line); margin: 2em 0; }
+  </style>
+</head>
+<body>
+  <div class="bar"><span>{{SITE}}</span><a href="{{ORIGINAL_URL}}">Exit reader</a></div>
+  <article>
+    <h1 class="headline">{{TITLE}}</h1>
+    <div class="byline">{{BYLINE}}</div>
+    {{CONTENT}}
+  </article>
+</body>
+</html>

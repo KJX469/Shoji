@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en" data-accent="{{ACCENT}}" data-mode="{{MODE}}" data-fonts="{{FONTS}}">
+<head>
+  <meta charset="UTF-8">
+  <title>Shoji</title>
+  <style>
+{{THEME_CSS}}
+    html, body { min-height: 100%; }
+    body { display: grid; place-items: center; padding: 40px 24px 60px; overflow-x: hidden; }
+    body::before { content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .5;
+      background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+      background-size: 132px 196px; background-position: center -40px;
+      -webkit-mask-image: radial-gradient(ellipse 55% 50% at 50% 45%, transparent 30%, #000 100%); mask-image: radial-gradient(ellipse 55% 50% at 50% 45%, transparent 30%, #000 100%); }
+    main { position: relative; width: min(760px, 100%); display: none; flex-direction: column; align-items: center; text-align: center; gap: 4px; }
+    body[data-kind="wish"] main#wish, body[data-kind="tea"] main#tea, body[data-kind="koan"] main#koan { display: flex; animation: rise .6s var(--ease) both; }
+    @keyframes rise { from { opacity: 0; transform: translateY(12px); } }
+    .crane.big { width: 84px; height: 84px; margin-bottom: 6px; }
+    h1 { font-family: var(--font-display); font-weight: 400; font-size: 30px; letter-spacing: -.01em; margin-top: 10px; }
+    h1 small { display: block; font: 12px var(--font-label); letter-spacing: .4em; color: var(--ink-3); margin-top: 6px; text-indent: .4em; }
+    p.lead { font-family: var(--font-text); color: var(--ink-2); line-height: 1.7; max-width: 480px; margin-top: 10px; }
+    .btn { margin-top: 20px; height: 40px; padding: 0 20px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; font-size: 13.5px; cursor: pointer; }
+    .btn:hover { border-color: var(--line-strong); background: var(--hover); }
+    .btn.primary { background: var(--tone); border-color: transparent; color: var(--on-tone); font-weight: 600; }
+    .btn[hidden] { display: none; }
+
+    /* Wish */
+    canvas#strings { width: min(700px, 100%); height: 330px; margin-top: 18px; }
+    .tally { margin-top: 12px; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+    .tally b { font-family: var(--font-display); font-weight: 400; font-size: 22px; color: var(--ink); }
+    .meter { width: min(320px, 70%); height: 3px; border-radius: 2px; background: var(--line); margin: 10px auto 0; overflow: hidden; }
+    .meter i { display: block; height: 100%; background: var(--accent); transition: width .8s var(--ease); }
+    .made { font-family: var(--font-display); font-size: 20px; margin-top: 18px; color: var(--ink); }
+    .made[hidden] { display: none; }
+
+
+    /* Kept secrets: the small hidden things found so far, one folded square each */
+    .kept { margin-top: 30px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+    .kept-h { font: 11px var(--font-label); letter-spacing: .28em; text-transform: uppercase; color: var(--ink-3); }
+    .tiles { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 520px; }
+    .tile { position: relative; width: 26px; height: 26px; border-radius: 4px; border: 1px dashed var(--line-strong); transform: rotate(45deg) scale(.82); }
+    .tile.got { border: 0; background: linear-gradient(135deg, var(--c1), var(--c2)); box-shadow: inset -9px -9px 0 -4px color-mix(in srgb, var(--c4) 55%, transparent); cursor: help; }
+    .kept-name { min-height: 1.4em; font-family: var(--font-display); font-style: italic; font-size: 14px; color: var(--ink-2); }
+
+    /* Tea */
+    .pot { position: relative; width: 220px; height: 170px; margin-top: 6px; }
+    .pot svg { width: 100%; height: 100%; overflow: visible; }
+    .steam path { fill: none; stroke: var(--ink-3); stroke-width: 3; stroke-linecap: round; opacity: 0; animation: steam 3.2s ease-in-out infinite; }
+    .steam path:nth-child(2) { animation-delay: 1s; }
+    .steam path:nth-child(3) { animation-delay: 2s; }
+    @keyframes steam { 0% { opacity: 0; transform: translateY(8px); } 35% { opacity: .75; } 100% { opacity: 0; transform: translateY(-16px); } }
+    .code { font: 700 70px/1 var(--font-display); color: var(--ink); opacity: .14; margin-top: -4px; }
+    #brew { font-variant-numeric: tabular-nums; }
+
+    /* Koan */
+    .words { font-family: var(--font-display); font-size: 26px; line-height: 1.55; max-width: 560px; margin-top: 22px; min-height: 140px; white-space: pre-line; }
+    .words.swap { animation: fade .5s ease both; }
+    @keyframes fade { from { opacity: 0; transform: translateY(6px); } }
+    .kind { font: 11px var(--font-label); letter-spacing: .3em; text-transform: uppercase; color: var(--ink-3); margin-top: 14px; }
+  </style>
+</head>
+<body data-kind="{{KIND}}">
+  <main id="wish">
+    {{CRANE}}
+    <h1>Senbazuru<small>千羽鶴</small></h1>
+    <p class="lead">Fold a thousand paper cranes and a wish is granted. Here, every tab you close and every file you save folds one.</p>
+    <canvas id="strings" width="700" height="330"></canvas>
+    <div class="tally"><b id="count">0</b> of 1,000</div>
+    <div class="meter"><i id="bar"></i></div>
+    <button class="btn primary" id="wishBtn" hidden>Make a wish</button>
+    <div class="made" id="made" hidden>Made. It stays between you and the crane.</div>
+    <section class="kept" id="kept" hidden>
+      <div class="kept-h" id="keptCount"></div>
+      <div class="tiles" id="tiles"></div>
+      <div class="kept-name" id="keptName"></div>
+    </section>
+  </main>
+
+  <main id="tea">
+    {{CRANE_T}}
+    <div class="pot">
+      <svg viewBox="0 0 220 170" aria-hidden="true">
+        <g class="steam" transform="translate(96 40)"><path d="M0 0c-8-10 8-18 0-28"/><path d="M14 4c-8-10 8-18 0-28"/><path d="M28 0c-8-10 8-18 0-28"/></g>
+        <g fill="none" stroke="var(--ink-2)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M64 70h92a8 8 0 0 1 8 8v28a46 46 0 0 1-46 46h-16a46 46 0 0 1-46-46V78a8 8 0 0 1 8-8z" fill="var(--surface)"/>
+          <path d="M92 70c0-12 8-20 18-20s18 8 18 20"/>
+          <path d="M164 84h12a14 14 0 0 1 0 30h-14"/>
+          <path d="M60 92c-14-8-26-6-34 6"/>
+        </g>
+        <path d="M70 98h80" stroke="var(--tone)" stroke-width="5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="code">418</div>
+    <h1>I'm a teapot</h1>
+    <p class="lead">This page declines to brew coffee. Shoji suggests a pause: three minutes, no tabs, a warm cup.</p>
+    <button class="btn primary" id="brew">Steep for 3:00</button>
+  </main>
+
+  <main id="koan">
+    {{CRANE_K}}
+    <div class="kind" id="kind"></div>
+    <div class="words" id="words"></div>
+    <button class="btn" id="another">Another</button>
+  </main>
+
+  <script>
+{{PET_JS}}
+    const $ = id => document.getElementById(id);
+    function post(action, payload = null) {
+      if (window.ipc) window.ipc.postMessage(JSON.stringify({ action, payload }));
+    }
+    const kind = document.body.dataset.kind;
+    const MEM = {{MEMORY_JSON}};
+    const found = id => post('FoundSecret', { id });
+    const pet = document.querySelector('main:not([style*="none"]) .crane') || document.querySelector('.crane');
+    document.querySelectorAll('.crane').forEach(c => c.classList.add('pet', 'live', 'big'));
+    document.title = { wish: 'Senbazuru', tea: '418 · A teapot', koan: 'A word from the crane' }[kind] || 'Shoji';
+    window.__applyTheme = t => { const r = document.documentElement; r.dataset.accent = t.accent; if (t.mode) r.dataset.mode = t.mode; if (t.fonts) r.dataset.fonts = t.fonts; };
+
+    /* ---- wish ---- */
+    if (kind === 'wish') {
+      const TONES = {{ACCENTS_JSON}}.map(a => a.tone);
+      const folded = {{CRANES}};
+      const GOAL = 1000, STRINGS = 25, PER = 40;
+      const cv = $('strings'), g = cv.getContext('2d');
+      const dpr = Math.max(1, devicePixelRatio || 1);
+      const W = 700, H = 330;
+      cv.width = W * dpr; cv.height = H * dpr; g.scale(dpr, dpr);
+      const ink = getComputedStyle(document.documentElement).getPropertyValue('--ink-3').trim() || '#999';
+      const line = getComputedStyle(document.documentElement).getPropertyValue('--line-strong').trim() || '#aaa';
+      function crane(x, y, s, color, alpha) {
+        g.globalAlpha = alpha;
+        g.fillStyle = color;
+        g.beginPath();                        // body
+        g.moveTo(x, y - s * .55); g.lineTo(x + s * .5, y + s * .1); g.lineTo(x, y + s * .55); g.lineTo(x - s * .5, y + s * .1);
+        g.closePath(); g.fill();
+        g.globalAlpha = alpha * .65;
+        g.beginPath();                        // wing
+        g.moveTo(x - s * .05, y - s * .15); g.lineTo(x + s * .75, y - s * .5); g.lineTo(x + s * .15, y + s * .2);
+        g.closePath(); g.fill();
+        g.globalAlpha = 1;
+      }
+      function draw(sway) {
+        g.clearRect(0, 0, W, H);
+        const gap = W / (STRINGS + 1), step = (H - 30) / PER;
+        for (let s = 0; s < STRINGS; s++) {
+          const x = gap * (s + 1) + Math.sin(sway + s * .7) * 1.6;
+          g.strokeStyle = line; g.globalAlpha = .6; g.lineWidth = 1;
+          g.beginPath(); g.moveTo(x, 4); g.lineTo(x, H - 10); g.stroke();
+          for (let r = 0; r < PER; r++) {
+            const n = s * PER + r;
+            const y = 18 + r * step + Math.sin(sway * 1.3 + n) * .8;
+            if (n < folded) crane(x + Math.sin(sway + n * .31) * 1.2, y, 6.6, TONES[n % TONES.length], .95);
+            else { g.strokeStyle = ink; g.globalAlpha = .22; g.beginPath(); g.arc(x, y, 1.3, 0, 7); g.stroke(); }
+          }
+        }
+        g.globalAlpha = 1;
+      }
+      let t0 = performance.now();
+      const calm = Pet.calm;
+      const loop = t => { draw(calm ? 0 : (t - t0) / 1400); if (!calm && !resting()) requestAnimationFrame(loop); };
+      const resting = Pet.rest(45000, null, () => requestAnimationFrame(loop));
+      loop(t0);
+      $('count').textContent = Math.min(folded, GOAL).toLocaleString() + (folded > GOAL ? '+' : '');
+      $('bar').style.width = Math.min(100, folded / GOAL * 100) + '%';
+      if (folded >= GOAL) $('wishBtn').hidden = false;
+      $('wishBtn').onclick = () => {
+        $('wishBtn').hidden = true; $('made').hidden = false;
+        Pet.pose(document.querySelector('#wish .crane'), 'cheer');
+        Pet.flock(12, document.querySelector('#wish .crane'));
+        found('wish');
+      };
+      // What has been found, never what hasn't: an empty square keeps its secret.
+      const NAMES = {
+        welcome: 'The first door', hello: 'A greeting', fold: 'Folded by hand', colours: 'Every colour, once',
+        kanji: 'The old script', seasons: 'A season on request', konami: 'An old code', sleep: 'A short nap',
+        night: 'The quiet hours', koan: 'A word from the crane', tea: 'Three minutes', about: 'What the name means',
+        wish: 'Senbazuru',
+      };
+      const got = new Set(MEM.found || []);
+      if (got.size) {
+        $('kept').hidden = false;
+        $('keptCount').textContent = got.size + ' of ' + MEM.secrets.length + ' small things found';
+        MEM.secrets.forEach((id, i) => {
+          const t = document.createElement('span');
+          t.className = 'tile' + (got.has(id) ? ' got' : '');
+          if (got.has(id)) {
+            const a = {{ACCENTS_JSON}}[i % 7];
+            t.style.cssText = '--c1:' + a.tone + ';--c2:' + a.deep + ';--c4:' + a.deep;
+            t.title = NAMES[id] || '';
+            t.onmouseenter = () => { $('keptName').textContent = NAMES[id] || ''; };
+            t.onmouseleave = () => { $('keptName').textContent = ''; };
+          }
+          $('tiles').append(t);
+        });
+      }
+      const left = GOAL - folded;
+      if (left > 0) document.querySelector('#wish .lead').insertAdjacentHTML('afterend',
+        '<p class="lead" style="margin-top:4px;color:var(--ink-3)">' + left.toLocaleString() + ' more to go.</p>');
+    }
+
+    /* ---- tea ---- */
+    if (kind === 'tea') {
+      const btn = $('brew'), tpet = document.querySelector('#tea .crane');
+      let timer = 0, left = 0;
+      const fmt = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+      btn.onclick = () => {
+        if (timer) { clearInterval(timer); timer = 0; btn.textContent = 'Steep for 3:00'; tpet.removeAttribute('data-pose'); return; }
+        left = 180;
+        tpet.setAttribute('data-pose', 'sleep');
+        btn.textContent = 'Steeping… ' + fmt(left);
+        timer = setInterval(() => {
+          left--;
+          if (left <= 0) {
+            clearInterval(timer); timer = 0;
+            btn.textContent = 'Ready. Steep again?';
+            found('tea');
+            Pet.pose(tpet, 'cheer');
+            Pet.flock(5, tpet);
+          } else btn.textContent = 'Steeping… ' + fmt(left);
+        }, 1000);
+      };
+    }
+
+    /* ---- koan / haiku ---- */
+    if (kind === 'koan') {
+      const KOANS = [
+        'Which tab is the real one?\nWhichever you are reading.',
+        'A page that never finishes loading has already taught you patience.\nDo not reload it.',
+        'If you close a tab in an empty room, does it still hold your place?\nPress Ctrl+Shift+T and find out.',
+        'The empty search box is not empty.\nIt is full of what you have not yet asked.',
+        'A student asked how many bookmarks are enough.\nThe teacher said: one more than you will ever open.',
+        'Before enlightenment: scroll, click, scroll.\nAfter enlightenment: scroll, click, scroll.\nBut the shield is up.',
+        'What is the sound of one page loading?\nNobody knows. The ads were turned away.',
+        'The wise do not clear their history to be rid of the past,\nbut to make room for the next page.',
+        'Do not ask which browser is best.\nAsk what is in front of you now.',
+        'The crane is folded from one square,\nand so is every page you have ever loved.',
+      ];
+      const HAIKU = [
+        'Forty tabs open\none of them holds what I want\nthe others, silent',
+        'Page still loading\nthe crane folds one more corner\nand waits for the light',
+        'Back button pressed twice\nthe old page, unchanged, still there\nlike a quiet pond',
+        'Cookies cleared at dusk\nthe sites forget my name, and\nI forget them too',
+        'Dark mode at midnight\nthe white page folds into ink\nand the room exhales',
+        'A link, a long scroll\nsomewhere under all the ads\none true paragraph',
+        'Shield raised, the page breathes\nall the small noises waiting\nturned back at the door',
+        'Tea cooling slowly\nthe download bar creeps along\nsteam, and then, a file',
+        'New tab, empty room\nthe cursor blinks like a heart\nwaiting to be asked',
+        'Fold, and fold again\nthe square forgets it was flat\nand learns to take wing',
+      ];
+      let last = -1, flip = false;
+      const kpet = document.querySelector('#koan .crane');
+      function next() {
+        const pool = flip ? HAIKU : KOANS;
+        let i;
+        do { i = Math.floor(Math.random() * pool.length); } while (i === last && pool.length > 1);
+        last = i; flip = !flip;
+        const w = $('words');
+        w.classList.remove('swap'); void w.offsetWidth; w.classList.add('swap');
+        w.textContent = pool[i];
+        $('kind').textContent = pool === HAIKU ? 'Haiku' : 'Koan';
+        Pet.pose(kpet, pool === HAIKU ? 'nod' : 'tilt');
+      }
+      $('another').onclick = next;
+      addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); next(); } });
+      flip = Math.random() < .5;
+      next();
+      found('koan');
+    }
+  </script>
+</body>
+</html>
