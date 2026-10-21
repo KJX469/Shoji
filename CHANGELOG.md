@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+- Shoji fixes: Shoji's own filter list, published with the Byōbu data and checked hourly, so a broken site can be fixed without a release.
+- The Byōbu page shows each list's age and last error, and warns when lists are over a week old.
+
+### Changed
+- A list download that looks wrong (an error page, a cut-off list, a damaged bundle) never replaces the last good copy.
+
 ## [0.1.6] - 2026-10-21
 
 ### Added
