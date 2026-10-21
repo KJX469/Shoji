@@ -411,6 +411,7 @@ fn internal_page(ctx: &PageContext, page: &str) -> Option<String> {
         ),
         "welcome" => pages::welcome(s),
         "passwords" => pages::passwords(s),
+        "extensions" => pages::extensions(s),
         "history" => pages::history(s, "history"),
         "downloads" => pages::history(s, "downloads"),
         "bookmarks" => pages::bookmarks(s),
@@ -891,6 +892,8 @@ struct BrowserApp {
     extension_buttons: String,
     /// What each extension's button opens, and whether it is a popup (by extension id)
     extension_popups: HashMap<String, (String, bool)>,
+    /// Extensions the puzzle menu lists, in order: (id, name)
+    extension_menu: Vec<(String, String)>,
     /// The extension popup that last closed by losing focus, and when (a click on its own
     /// button closes it first; that click must not open it again)
     popup_blurred: Option<(String, Instant)>,
@@ -1070,8 +1073,9 @@ impl BrowserApp {
             windows: HashMap::new(),
             proxy,
             shield,
-            extension_buttons: "[]".into(),
+            extension_buttons: r#"{"buttons":[],"any":false}"#.into(),
             extension_popups: HashMap::new(),
+            extension_menu: Vec::new(),
             popup_blurred: None,
             extensions_asked: std::cell::Cell::new(false),
             extensions_checked: None,
