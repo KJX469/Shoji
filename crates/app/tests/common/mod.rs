@@ -328,6 +328,9 @@ fn merge(base: &mut Value, over: &Value) {
 /// An isolated, running copy of Shoji (its own exe copy, profile and DevTools port).
 pub struct Shoji {
     child: Mutex<Child>,
+    exe: PathBuf,
+    /// Started as a standard user from an elevated runner
+    lowered: bool,
     pub cdp: u16,
     pub dir: PathBuf,
     real_lists: bool,
@@ -336,6 +339,10 @@ pub struct Shoji {
 
 /// Skip (pass) when this machine can't run the browser at all.
 pub fn can_run() -> bool {
+    if std::env::var_os("SHOJI_SKIP_BROWSER").is_some() {
+        eprintln!("skipped: SHOJI_SKIP_BROWSER is set");
+        return false;
+    }
     if shoji_core::env::detect_webview2_runtime().is_none() {
         // CI must run them; elsewhere a machine without the runtime just skips them.
         assert!(
@@ -405,14 +412,59 @@ impl Shoji {
                 .env("HTTP_PROXY", "http://127.0.0.1:9")
                 .env("ALL_PROXY", "http://127.0.0.1:9");
         }
-        let child = cmd.spawn().expect("start shoji.exe");
+        // An elevated test runner (CI's is) starts the browser as a standard user, as people
+        // run it: the engine doesn't create its views in an elevated process.
+        let lowered = shoji_core::env::is_process_elevated();
+        let child = if lowered {
+            let mut script = String::from("@echo off\r\n");
+            for (k, v) in cmd.get_envs() {
+                let k = k.to_string_lossy();
+                match v {
+                    Some(v) => script.push_str(&format!("set {k}={}\r\n", v.to_string_lossy())),
+                    None => script.push_str(&format!("set {k}=\r\n")),
+                }
+            }
+            script.push_str(&format!(
+                "\"{}\" \"{url}\" > \"{}\" 2> \"{}\"\r\n",
+                exe.display(),
+                dir.join("out.log").display(),
+                dir.join("err.log").display()
+            ));
+            let launcher = dir.join("launch.cmd");
+            std::fs::write(&launcher, script).unwrap();
+            Command::new("runas")
+                .arg("/trustlevel:0x20000")
+                .arg(launcher.display().to_string())
+                .spawn()
+                .expect("start shoji.exe as a standard user")
+        } else {
+            cmd.spawn().expect("start shoji.exe")
+        };
         Self {
             child: Mutex::new(child),
+            exe,
+            lowered,
             cdp,
             dir,
             real_lists: opts.real_lists,
             _turn: turn,
         }
+    }
+
+    /// The browser's process id (with a standard-user launch, found by its exe path).
+    fn pid(&self) -> Option<u32> {
+        if !self.lowered {
+            return Some(self.child.lock().unwrap().id());
+        }
+        let query = format!(
+            "(Get-Process shoji -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -eq '{}' }} | Select-Object -First 1).Id",
+            self.exe.display()
+        );
+        let out = Command::new("powershell")
+            .args(["-NoProfile", "-Command", &query])
+            .output()
+            .ok()?;
+        String::from_utf8_lossy(&out.stdout).trim().parse().ok()
     }
 
     pub fn data_dir(&self) -> PathBuf {
@@ -476,14 +528,20 @@ impl Shoji {
     }
 
     pub fn is_running(&self) -> bool {
+        if self.lowered {
+            return self.pid().is_some();
+        }
         matches!(self.child.lock().unwrap().try_wait(), Ok(None))
     }
 
     /// What there is to know when the browser didn't come up: whether it runs, its output, and
     /// the logs and files it wrote.
     pub fn report(&self) -> String {
-        let status = self.child.lock().unwrap().try_wait();
-        let mut out = format!("process: {status:?}\n");
+        let mut out = format!(
+            "process: running {} (standard-user launch: {})\n",
+            self.is_running(),
+            self.lowered
+        );
         let engines = Command::new("tasklist")
             .args(["/FI", "IMAGENAME eq msedgewebview2.exe"])
             .output()
@@ -522,14 +580,11 @@ impl Shoji {
 
 impl Drop for Shoji {
     fn drop(&mut self) {
-        let _ = Command::new("taskkill")
-            .args([
-                "/T",
-                "/F",
-                "/PID",
-                &self.child.lock().unwrap().id().to_string(),
-            ])
-            .output();
+        if let Some(pid) = self.pid() {
+            let _ = Command::new("taskkill")
+                .args(["/T", "/F", "/PID", &pid.to_string()])
+                .output();
+        }
         let _ = self.child.lock().unwrap().wait();
         if self.real_lists {
             // Keep what was downloaded for the next run.
