@@ -1,0 +1,19 @@
+name: store-probe
+on:
+  push:
+    branches: [claude/store-probe]
+permissions: {}
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          set +e
+          id=nngceckbapebfimnlniiiahkandclblb
+          echo "== updatecheck"; curl -sS -m 30 "https://clients2.google.com/service/update2/crx?prodversion=130.0&acceptformat=crx3&x=id%3D$id%26v%3D0.0.0%26uc" | head -c 600; echo
+          echo "== crx"; curl -sS -m 60 -o /tmp/a.crx -w '%{http_code} %{size_download}\n' -L "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=130.0&acceptformat=crx3&x=id%3D$id%26uc"; head -c 4 /tmp/a.crx; echo
+          echo "== detail"; curl -sS -m 30 -A 'Mozilla/5.0' -w '\n%{http_code}\n' "https://chromewebstore.google.com/detail/$id" -o /tmp/d.html; tail -c 20 /tmp/d.html; wc -c /tmp/d.html; grep -o '"ratingValue"[^,]*' /tmp/d.html | head -2; grep -o 'ld+json.\{0,400\}' /tmp/d.html | head -c 800; echo
+          echo "== sitemap"; curl -sS -m 30 -A 'Mozilla/5.0' -w '\n%{http_code}\n' "https://chromewebstore.google.com/sitemap" | head -c 800
+          echo "== robots"; curl -sS -m 30 -A 'Mozilla/5.0' "https://chromewebstore.google.com/robots.txt" | head -30
+          echo "== search"; curl -sS -m 30 -A 'Mozilla/5.0' -w '\n%{http_code}\n' "https://chromewebstore.google.com/search/password" -o /tmp/s.html; wc -c /tmp/s.html; grep -o '/detail/[a-z0-9-]*/[a-p]\{32\}' /tmp/s.html | sort -u | head -5
+          echo "== amo"; curl -sS -m 30 "https://addons.mozilla.org/api/v5/addons/search/?sort=users&page_size=2&app=firefox" | head -c 700
