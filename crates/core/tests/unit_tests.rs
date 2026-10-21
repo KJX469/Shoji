@@ -1237,8 +1237,8 @@ fn windows_sharing_an_id_counter_never_reuse_a_tab_id() {
     let mut b = TabManager::with_shared_ids(ids);
     let mut seen = std::collections::HashSet::new();
     for _ in 0..5 {
-        assert!(seen.insert(a.create_tab("https://a.test".into(), 0)));
-        assert!(seen.insert(b.create_tab("https://b.test".into(), 0)));
+        assert!(seen.insert(a.create_tab("https://a.test", 0)));
+        assert!(seen.insert(b.create_tab("https://b.test", 0)));
     }
 }
 

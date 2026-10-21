@@ -5,5 +5,6 @@ edition = "2021"
 authors = ["Shoji Contributors"]
 description = "Shoji brand: the origami crane (geometry, palettes, icon rasterizer) and the shared UI theme"
 license = "MIT"
+publish = false
 
 [dependencies]

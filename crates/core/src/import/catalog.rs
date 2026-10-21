@@ -53,6 +53,7 @@ pub struct Profile {
     pub local_state: PathBuf,
 }
 
+#[allow(clippy::too_many_arguments)]
 const fn s(
     id: &'static str,
     name: &'static str,
