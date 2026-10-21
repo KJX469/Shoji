@@ -2629,7 +2629,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "shoji"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "base64 0.22.1",
  "psl",
@@ -2650,11 +2650,11 @@ dependencies = [
 
 [[package]]
 name = "shoji-brand"
-version = "0.1.5"
+version = "0.1.6"
 
 [[package]]
 name = "shoji-byobu"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "adblock",
  "serde",
@@ -2665,7 +2665,7 @@ dependencies = [
 
 [[package]]
 name = "shoji-core"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "ring",
  "rusqlite",
@@ -2677,7 +2677,7 @@ dependencies = [
 
 [[package]]
 name = "shoji-setup"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "serde_json",
  "shoji-brand",
