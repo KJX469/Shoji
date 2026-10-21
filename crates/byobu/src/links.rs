@@ -2,6 +2,7 @@
 //! well-known tracking parameters are dropped, so the page you land on never learns where you
 //! clicked from. Pure functions; the browser decides when to apply them.
 
+use crate::navigation::NavigationRules;
 use url::Url;
 
 /// Query parameters that exist only to identify a click or a person. Exact names.
@@ -125,6 +126,11 @@ fn is_signature(name: &str) -> bool {
 /// `url` without tracking parameters, if it had any. Only the tracking pairs are removed; the
 /// bytes of everything else are left exactly as they were.
 pub fn strip_tracking(url: &str) -> Option<String> {
+    strip_with(url, &[])
+}
+
+/// [`strip_tracking`], also removing the parameters named in `extra` (exact names).
+pub fn strip_with(url: &str, extra: &[&str]) -> Option<String> {
     let mut u = Url::parse(url).ok()?;
     if u.scheme() != "https" && u.scheme() != "http" {
         return None;
@@ -145,7 +151,10 @@ pub fn strip_tracking(url: &str) -> Option<String> {
     let kept: Vec<&str> = present
         .iter()
         .copied()
-        .filter(|p| !is_tracking(&name_of(p)))
+        .filter(|p| {
+            let name = name_of(p);
+            !is_tracking(&name) && !extra.contains(&name.as_str())
+        })
         .collect();
     // Only a removed tracking parameter is worth a rewrite, not a stray `&` or a bare `?`.
     if kept.len() == present.len() {
@@ -159,17 +168,50 @@ pub fn strip_tracking(url: &str) -> Option<String> {
     Some(u.to_string())
 }
 
+/// If `url` is a Google, Bing or AMP-cache viewer page, the publisher's own address for it.
+pub fn de_amp(url: &str) -> Option<String> {
+    let u = Url::parse(url).ok()?;
+    let host = u.host_str()?;
+    let rest = url.splitn(4, '/').nth(3)?;
+    let google = host.starts_with("www.google.") || host == "www.bing.com";
+    let target = if google {
+        rest.strip_prefix("amp/s/")
+            .map(|r| format!("https://{r}"))
+            .or_else(|| rest.strip_prefix("amp/").map(|r| format!("http://{r}")))?
+    } else if host.ends_with(".cdn.ampproject.org") {
+        ["c/s/", "v/s/"]
+            .iter()
+            .find_map(|p| rest.strip_prefix(p))
+            .map(|r| format!("https://{r}"))
+            .or_else(|| rest.strip_prefix("c/").map(|r| format!("http://{r}")))?
+    } else {
+        return None;
+    };
+    let t = Url::parse(&target).ok()?;
+    (t.host_str()? != host && t.host_str()?.contains('.')).then(|| t.to_string())
+}
+
 /// The cleaned destination for a navigation: redirects skipped first (up to a few hops),
 /// then tracking parameters removed. `None` when nothing changes.
 pub fn clean(url: &str) -> Option<String> {
+    clean_with(url, &NavigationRules::default(), false)
+}
+
+/// [`clean`] with Brave's navigation rules ahead of the built-in tables. `amp`: AMP viewer
+/// links go to the publisher's page too.
+pub fn clean_with(url: &str, rules: &NavigationRules, amp: bool) -> Option<String> {
     let mut cur = url.to_string();
     for _ in 0..3 {
-        match debounce(&cur) {
+        let next = rules
+            .debounce(&cur, amp)
+            .or_else(|| debounce(&cur))
+            .or_else(|| amp.then(|| de_amp(&cur)).flatten());
+        match next {
             Some(next) => cur = next,
             None => break,
         }
     }
-    if let Some(next) = strip_tracking(&cur) {
+    if let Some(next) = strip_with(&cur, &rules.params_for(&cur)) {
         cur = next;
     }
     (cur != url).then_some(cur)
@@ -278,6 +320,53 @@ mod tests {
         assert_eq!(
             strip_tracking("https://example.org/api?a=1&&utm_source=x").as_deref(),
             Some("https://example.org/api?a=1")
+        );
+    }
+
+    #[test]
+    fn amp_viewers_go_to_the_publisher() {
+        assert_eq!(
+            de_amp("https://www.google.com/amp/s/news.test/a/story.amp?x=1").as_deref(),
+            Some("https://news.test/a/story.amp?x=1")
+        );
+        assert_eq!(
+            de_amp("https://news-test.cdn.ampproject.org/c/s/news.test/b").as_deref(),
+            Some("https://news.test/b")
+        );
+        assert_eq!(de_amp("https://www.google.com/search?q=amp"), None);
+        assert_eq!(de_amp("https://www.google.com/amp/s/"), None);
+        assert_eq!(
+            clean_with(
+                "https://www.google.com/amp/s/news.test/c?utm_source=g",
+                &NavigationRules::default(),
+                true
+            )
+            .as_deref(),
+            Some("https://news.test/c")
+        );
+        assert_eq!(
+            clean_with(
+                "https://www.google.com/amp/s/news.test/c",
+                &NavigationRules::default(),
+                false
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn site_rules_drop_their_own_parameters() {
+        let rules = NavigationRules::from_json(
+            None,
+            Some(r#"[{"include":["*://shop.test/*"],"exclude":[],"params":["ref"]}]"#),
+        );
+        assert_eq!(
+            clean_with("https://shop.test/p?id=1&ref=mail", &rules, false).as_deref(),
+            Some("https://shop.test/p?id=1")
+        );
+        assert_eq!(
+            clean_with("https://other.test/p?id=1&ref=mail", &rules, false),
+            None
         );
     }
 
