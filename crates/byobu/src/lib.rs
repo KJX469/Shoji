@@ -7,6 +7,7 @@
 pub mod headers;
 pub mod links;
 pub mod matcher;
+pub mod popups;
 pub mod shield;
 pub mod sources;
 pub mod updater;
