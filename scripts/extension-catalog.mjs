@@ -68,26 +68,40 @@ const manifestOf = r => {
 };
 
 const found = new Map();
+/** Listed on some page without a manifest: wanted once its own page confirms Manifest V3. */
+const candidates = new Map();
+const rejected = new Set();
 const labelOf = slug => CATEGORIES[slug] ?? (slug ? slug.split('/').pop().replace(/_/g, ' ').replace(/^./, c => c.toUpperCase()) : 'Other');
 
-/** Add the Manifest V3 extensions among `list`; returns how many were new. */
+const entryOf = (r, label) => {
+  const slug = Array.isArray(r[11]) ? r[11][0] : '';
+  return {
+    id: r[0],
+    name: r[2].trim(),
+    cat: label ?? labelOf(slug),
+    text: typeof r[6] === 'string' ? r[6].trim().slice(0, 200) : '',
+    rating: Math.round(r[3] * 10) / 10,
+    ratings: typeof r[4] === 'number' ? r[4] : 0,
+    users: typeof r[14] === 'number' ? r[14] : (r.slice(8).find(v => typeof v === 'number' && v > 1) ?? 0),
+    icon: r[1],
+  };
+};
+
+/** Take in the extensions among `list`; returns how many Manifest V3 ones were new. */
 const collect = (list, label) => {
   let kept = 0;
   for (const r of list) {
+    const id = r[0];
+    if (found.has(id) || rejected.has(id)) continue;
     const manifest = manifestOf(r);
+    if (!manifest) {
+      if (!candidates.has(id)) candidates.set(id, entryOf(r, label));
+      continue;
+    }
+    candidates.delete(id);
     // The engine only runs Manifest V3.
-    if (!manifest || manifest.manifest_version !== 3 || found.has(r[0])) continue;
-    const slug = Array.isArray(r[11]) ? r[11][0] : '';
-    found.set(r[0], {
-      id: r[0],
-      name: r[2].trim(),
-      cat: label ?? labelOf(slug),
-      text: typeof r[6] === 'string' ? r[6].trim().slice(0, 200) : '',
-      rating: Math.round(r[3] * 10) / 10,
-      ratings: typeof r[4] === 'number' ? r[4] : 0,
-      users: typeof r[14] === 'number' ? r[14] : (r.slice(8).find(v => typeof v === 'number' && v > 1) ?? 0),
-      icon: r[1],
-    });
+    if (manifest.manifest_version !== 3) { rejected.add(id); continue; }
+    found.set(id, entryOf(r, label));
     kept++;
   }
   return kept;
@@ -102,12 +116,15 @@ for (const [slug, label] of Object.entries(CATEGORIES)) {
 }
 
 // Widen: read the most-used extensions' pages, which list related extensions, again and again.
-const PAGES = 1500;
+// Each page confirms its own extension's manifest.
+const PAGES = 6000;
+const DEADLINE = Date.now() + 25 * 60 * 1000;
 const seen = new Set();
 let crawled = 0;
-while (crawled < PAGES) {
-  const batch = [...found.values()].filter(e => !seen.has(e.id)).sort((a, b) => b.users - a.users).slice(0, 4);
-  if (!batch.length) break;
+while (crawled < PAGES && Date.now() < DEADLINE) {
+  const todo = [...found.values(), ...candidates.values()].filter(e => !seen.has(e.id));
+  if (!todo.length) break;
+  const batch = todo.sort((a, b) => b.users - a.users).slice(0, 3);
   await Promise.all(batch.map(async e => {
     seen.add(e.id);
     try {
@@ -118,9 +135,10 @@ while (crawled < PAGES) {
     }
   }));
   crawled += batch.length;
-  await new Promise(r => setTimeout(r, 250));
+  if (crawled % 300 === 0) console.log(`${crawled} pages: ${found.size} confirmed, ${candidates.size} to confirm, ${rejected.size} not Manifest V3`);
+  await new Promise(r => setTimeout(r, 300));
 }
-console.log(`read ${crawled} pages; ${found.size} Manifest V3 extensions`);
+console.log(`read ${crawled} pages; ${found.size} Manifest V3 extensions, ${candidates.size} unconfirmed left out, ${rejected.size} older ones left out`);
 
 // Icons of the most-used ones are fetched here and embedded; the rest show a letter.
 const ICONS = 1000;
