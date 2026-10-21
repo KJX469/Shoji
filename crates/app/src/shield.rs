@@ -95,6 +95,30 @@ pub struct Hub {
 
 const LOG_CAP: usize = 3000;
 
+/// How long the last [`CHECK_SAMPLES`] request checks took on the UI thread, in microseconds.
+static CHECK_TIMES: Mutex<VecDeque<u32>> = Mutex::new(VecDeque::new());
+const CHECK_SAMPLES: usize = 4096;
+
+fn note_check_time(d: Duration) {
+    if let Ok(mut t) = CHECK_TIMES.lock() {
+        if t.len() == CHECK_SAMPLES {
+            t.pop_front();
+        }
+        t.push_back(d.as_micros().min(u32::MAX as u128) as u32);
+    }
+}
+
+/// (median, 99th percentile) of recent request checks, in microseconds.
+fn check_times() -> Option<(u32, u32)> {
+    let mut t: Vec<u32> = CHECK_TIMES.lock().ok()?.iter().copied().collect();
+    if t.is_empty() {
+        return None;
+    }
+    t.sort_unstable();
+    let at = |q: f64| t[((t.len() - 1) as f64 * q).round() as usize];
+    Some((at(0.5), at(0.99)))
+}
+
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -287,6 +311,7 @@ impl Hub {
         serde_json::json!({
             "lists": lists, "log": log, "total": h.total, "week": Self::week(&h),
             "updating": h.updating, "ready": h.ready,
+            "timing": check_times().map(|(p50, p99)| serde_json::json!({"p50": p50, "p99": p99})),
         })
         .to_string()
     }
@@ -652,89 +677,97 @@ pub fn attach(webview: &WebView, shield: Shield, mode_for: ModeFor, tab_id: TabI
         let blocked_response: std::cell::RefCell<Option<ICoreWebView2WebResourceResponse>> =
             std::cell::RefCell::new(None);
         let handler = WebResourceRequestedEventHandler::create(Box::new(move |_, args| {
-            let Some(args) = args else { return Ok(()) };
-            let request = unsafe { args.Request()? };
-            let mut uri = PWSTR::null();
-            unsafe { request.Uri(&mut uri)? };
-            let url = take(uri);
-            if !(url.starts_with("http://") || url.starts_with("https://") || url.starts_with("ws"))
-                || url.starts_with("http://shoji.")
-            {
-                return Ok(());
-            }
-            if SEND_GPC.load(Ordering::Relaxed) {
-                if let Ok(headers) = unsafe { request.Headers() } {
-                    let (name, value) = (wide("Sec-GPC"), wide("1"));
-                    let _ =
-                        unsafe { headers.SetHeader(PCWSTR(name.as_ptr()), PCWSTR(value.as_ptr())) };
-                }
-            }
-            let mut ctx = COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL;
-            unsafe { args.ResourceContext(&mut ctx)? };
-            let mut kind = kind_of(ctx);
-            let page = top_target.lock().map(|t| t.clone()).unwrap_or_default();
-            if kind == RequestKind::Document {
-                if url == page {
+            let started = Instant::now();
+            let result = (|| -> windows::core::Result<()> {
+                let Some(args) = args else { return Ok(()) };
+                let request = unsafe { args.Request()? };
+                let mut uri = PWSTR::null();
+                unsafe { request.Uri(&mut uri)? };
+                let url = take(uri);
+                if !(url.starts_with("http://")
+                    || url.starts_with("https://")
+                    || url.starts_with("ws"))
+                    || url.starts_with("http://shoji.")
+                {
                     return Ok(());
                 }
-                kind = RequestKind::Subdocument;
-            }
-            let mode = mode_for(&page);
-            if mode == Mode::Off {
-                return Ok(());
-            }
-            let mut method = PWSTR::null();
-            unsafe { request.Method(&mut method)? };
-            let method = take(method);
-            let (decision, rule) = shield.check_request(&url, &page, kind, mode, &method);
-            if decision == Decision::Allow {
-                return Ok(());
-            }
-            hub().record(tab, &page, &url, kind, &decision, rule);
-            match decision {
-                Decision::Allow => {}
-                Decision::Block => {
-                    let mut cached = blocked_response.borrow_mut();
-                    if cached.is_none() {
-                        let env = unsafe { core_env.Environment()? };
-                        let reason = wide("Blocked");
-                        let headers = wide("");
-                        *cached = Some(unsafe {
-                            env.CreateWebResourceResponse(
-                                None,
-                                403,
-                                PCWSTR(reason.as_ptr()),
-                                PCWSTR(headers.as_ptr()),
-                            )?
-                        });
-                    }
-                    if let Some(resp) = cached.as_ref() {
-                        unsafe { args.SetResponse(resp)? };
-                    }
-                }
-                Decision::Redirect(data) => {
-                    if let Some((mime, bytes)) = decode_data_url(&data) {
-                        let env = unsafe { core_env.Environment()? };
-                        let stream = unsafe { SHCreateMemStream(Some(&bytes)) };
-                        let reason = wide("OK");
-                        let headers = wide(&format!("Content-Type: {mime}"));
-                        let resp = unsafe {
-                            env.CreateWebResourceResponse(
-                                stream.as_ref(),
-                                200,
-                                PCWSTR(reason.as_ptr()),
-                                PCWSTR(headers.as_ptr()),
-                            )?
+                if SEND_GPC.load(Ordering::Relaxed) {
+                    if let Ok(headers) = unsafe { request.Headers() } {
+                        let (name, value) = (wide("Sec-GPC"), wide("1"));
+                        let _ = unsafe {
+                            headers.SetHeader(PCWSTR(name.as_ptr()), PCWSTR(value.as_ptr()))
                         };
-                        unsafe { args.SetResponse(&resp)? };
                     }
                 }
-                Decision::Rewrite(new_url) => {
-                    let w = wide(&new_url);
-                    unsafe { request.SetUri(PCWSTR(w.as_ptr()))? };
+                let mut ctx = COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL;
+                unsafe { args.ResourceContext(&mut ctx)? };
+                let mut kind = kind_of(ctx);
+                let page = top_target.lock().map(|t| t.clone()).unwrap_or_default();
+                if kind == RequestKind::Document {
+                    if url == page {
+                        return Ok(());
+                    }
+                    kind = RequestKind::Subdocument;
                 }
-            }
-            Ok(())
+                let mode = mode_for(&page);
+                if mode == Mode::Off {
+                    return Ok(());
+                }
+                let mut method = PWSTR::null();
+                unsafe { request.Method(&mut method)? };
+                let method = take(method);
+                let (decision, rule) = shield.check_request(&url, &page, kind, mode, &method);
+                if decision == Decision::Allow {
+                    return Ok(());
+                }
+                hub().record(tab, &page, &url, kind, &decision, rule);
+                match decision {
+                    Decision::Allow => {}
+                    Decision::Block => {
+                        let mut cached = blocked_response.borrow_mut();
+                        if cached.is_none() {
+                            let env = unsafe { core_env.Environment()? };
+                            let reason = wide("Blocked");
+                            let headers = wide("");
+                            *cached = Some(unsafe {
+                                env.CreateWebResourceResponse(
+                                    None,
+                                    403,
+                                    PCWSTR(reason.as_ptr()),
+                                    PCWSTR(headers.as_ptr()),
+                                )?
+                            });
+                        }
+                        if let Some(resp) = cached.as_ref() {
+                            unsafe { args.SetResponse(resp)? };
+                        }
+                    }
+                    Decision::Redirect(data) => {
+                        if let Some((mime, bytes)) = decode_data_url(&data) {
+                            let env = unsafe { core_env.Environment()? };
+                            let stream = unsafe { SHCreateMemStream(Some(&bytes)) };
+                            let reason = wide("OK");
+                            let headers = wide(&format!("Content-Type: {mime}"));
+                            let resp = unsafe {
+                                env.CreateWebResourceResponse(
+                                    stream.as_ref(),
+                                    200,
+                                    PCWSTR(reason.as_ptr()),
+                                    PCWSTR(headers.as_ptr()),
+                                )?
+                            };
+                            unsafe { args.SetResponse(&resp)? };
+                        }
+                    }
+                    Decision::Rewrite(new_url) => {
+                        let w = wide(&new_url);
+                        unsafe { request.SetUri(PCWSTR(w.as_ptr()))? };
+                    }
+                }
+                Ok(())
+            })();
+            note_check_time(started.elapsed());
+            result
         }));
         unsafe {
             let _ = core.add_WebResourceRequested(&handler, &mut token);
