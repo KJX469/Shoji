@@ -244,6 +244,11 @@ pub(crate) enum BrowserEvent {
         kind: &'static str,
     },
     TabCrashed(TabId, i32),
+    /// A tab passed through `host` as a redirect hop, or the user visited it (see `bounce`)
+    Bounce {
+        host: String,
+        hop: bool,
+    },
     /// A tab navigated to a site that always opens in another container
     OpenInContainer {
         tab_id: TabId,
@@ -1445,6 +1450,10 @@ struct BrowserApp {
     reloads: Vec<Instant>,
     /// Told the user about their pile of tabs this session
     hoarding_told: bool,
+    /// Redirect hops and visits, for bounce-tracking cleanup
+    bounce: shoji_core::bounce::BounceLog,
+    /// When hop-only sites are next checked for cleaning
+    next_bounce_clean: Instant,
     /// A tab being dragged out of a strip (its window follows the cursor)
     tab_drag: Option<tabdrag::TabDrag>,
     /// A finished, hidden window kept ready so a dragged-out tab gets its window at once (building
@@ -1616,6 +1625,8 @@ impl BrowserApp {
             keepsakes,
             reloads: Vec::new(),
             hoarding_told: false,
+            bounce: shoji_core::bounce::BounceLog::load(&data_dir.join("bounce.json")),
+            next_bounce_clean: Instant::now() + Duration::from_secs(90),
             tab_drag: None,
             spare: None,
             spare_due: Instant::now() + Duration::from_secs(3),
@@ -2717,6 +2728,11 @@ impl BrowserApp {
         );
         webview::attach_focus(&view, tab_id, self.proxy.clone());
         webview::attach_nav_failures(&view, tab_id, self.proxy.clone());
+        // Bounce tracking is cleaned in the main cookie jar; containers and private windows keep
+        // their own (or nothing).
+        if persistent && container.is_none() {
+            webview::attach_bounce_watch(&view, self.proxy.clone());
+        }
         // Autofill only where the browser also remembers things (passwords are Shoji's own).
         webview::configure_engine(
             &view,
@@ -4867,6 +4883,45 @@ impl BrowserApp {
             });
             self.toast(&toast);
         }
+    }
+
+    /// Delete the cookies and storage of sites that only ever appeared as redirect hops (see
+    /// `shoji_core::bounce`). Needs a tab in the main cookie jar to reach it through; sites open
+    /// in a tab are left alone.
+    fn clean_bounce_trackers(&mut self) {
+        let open: HashSet<String> = self
+            .windows
+            .values()
+            .flat_map(|w| w.tabs.all_tabs())
+            .filter_map(|t| webview::site_of(&t.url).map(|s| s.0))
+            .collect();
+        let due = self.bounce.due(now_secs());
+        let Some(view) = self
+            .windows
+            .values()
+            .flat_map(|w| w.views.values())
+            .find(|t| t.persistent && t.container.is_none())
+            .map(|t| &t.view)
+        else {
+            self.next_bounce_clean = Instant::now() + Duration::from_secs(600);
+            return;
+        };
+        for (site, hosts) in due.into_iter().filter(|(s, _)| !open.contains(s)) {
+            for host in &hosts {
+                for scheme in ["https", "http"] {
+                    let origin = format!("{scheme}://{host}");
+                    let params = serde_json::json!({
+                        "origin": origin,
+                        "storageTypes": "local_storage,indexeddb,cache_storage,service_workers,file_systems,websql",
+                    })
+                    .to_string();
+                    webview::cdp(view, "Storage.clearDataForOrigin", &params);
+                    webview::site_cookies(view, &format!("{origin}/"), true, |_| {});
+                }
+            }
+            self.bounce.forget(&site);
+        }
+        self.bounce.save(&self.data_dir.join("bounce.json"));
     }
 
     /// Give the UI watchdog a window of this thread to ping.
@@ -7764,6 +7819,17 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                     ));
                 }
             },
+            BrowserEvent::Bounce { host, hop } => {
+                let Some((site, host)) = webview::site_of(&format!("https://{host}/")) else {
+                    return;
+                };
+                if hop {
+                    self.bounce.hop(&site, &host, now_secs());
+                } else {
+                    self.bounce.visit(&site, now_secs());
+                }
+                self.bounce.save(&self.data_dir.join("bounce.json"));
+            }
             BrowserEvent::OpenInContainer {
                 tab_id,
                 url,
@@ -8336,6 +8402,10 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let _doing = crash::doing("about_to_wait");
         self.note_ui_window();
+        if Instant::now() >= self.next_bounce_clean {
+            self.next_bounce_clean = Instant::now() + Duration::from_secs(6 * 3600);
+            self.clean_bounce_trackers();
+        }
         self.flush();
         let mut animating = self.step_tab_drag(event_loop);
         self.warm_spare(event_loop);
