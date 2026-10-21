@@ -7,22 +7,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-      - shell: node {0}
-        run: |
-          const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
-          const html = await (await fetch('https://chromewebstore.google.com/detail/nngceckbapebfimnlniiiahkandclblb', { headers: { 'user-agent': UA } })).text();
-          console.log('len', html.length);
-          const keys = [...html.matchAll(/AF_initDataCallback\(\{key: '(ds:\d+)'/g)].map(m => m[1]);
-          console.log('keys', keys.join(' '));
-          const ids = new Set([...html.matchAll(/[a-p]{32}/g)].map(m => m[0]));
-          console.log('distinct ids in page', ids.size);
-          const rec = html.match(/\["[a-p]{32}","https:\/\/lh3[^\]]{0,400}/g) || [];
-          console.log('records', rec.length); console.log(rec.slice(0, 4).join('\n---\n'));
-          const det = [...html.matchAll(/href="\.\/detail\/[a-z0-9-]*\/([a-p]{32})/g)].length;
-          console.log('detail links', det);
-          const t0 = Date.now(); let ok = 0;
-          for (let i = 0; i < 8; i++) { const r = await fetch('https://chromewebstore.google.com/detail/nngceckbapebfimnlniiiahkandclblb', { headers: { 'user-agent': UA } }); ok += r.ok; await r.arrayBuffer(); }
-          console.log('8 sequential detail fetches', ok, Date.now() - t0, 'ms');
+      - run: |
+          mkdir out
+          time node scripts/extension-catalog.mjs out/extension-catalog.json 2>&1 | tail -40
+          ls -l out
+          node -e "const l=require('./out/extension-catalog.json');const c={};l.forEach(e=>c[e.cat]=(c[e.cat]||0)+1);console.log(l.length,JSON.stringify(c));console.log(l.slice(0,5).map(e=>e.name+' '+e.users).join(' | '));console.log('no icon',l.filter(e=>!e.icon).length,'no text',l.filter(e=>!e.text).length)"
