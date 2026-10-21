@@ -8,7 +8,7 @@
 //! is started again.
 
 use crate::shield::{Decision, Mode, RequestKind, Shield};
-use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread::Thread;
@@ -37,16 +37,18 @@ pub struct Answer {
 /// Called on the matcher thread for every decision that isn't `Allow` (counters, the log).
 pub type Recorder = Box<dyn Fn(&Query, &Answer) + Send + Sync>;
 
-/// One waiting caller of [`Matcher::check`].
+/// The reply slot of the thread that calls [`Matcher::check`], reused for every call. Each
+/// call has its own number, so an answer to an earlier call (a query sent again while the
+/// matcher was slow) is never taken for a later one.
 struct Reply {
-    /// 0 waiting, 1 answered
-    state: AtomicU8,
-    answer: Mutex<Option<Answer>>,
+    /// The number of the latest call answered
+    done: AtomicU64,
+    answer: Mutex<Option<(u64, Answer)>>,
     waiter: Thread,
 }
 
 enum Job {
-    Wait(Query, Arc<Reply>),
+    Wait(Query, u64, Arc<Reply>),
     Later(Query, u64),
     /// A decision made elsewhere (from a cache) that still counts
     Record(Query, Answer),
@@ -75,6 +77,8 @@ pub struct Matcher {
     tx: Mutex<Sender<Job>>,
     /// The reply slot of the (single) thread that calls `check`, reused for every call
     reply: Mutex<Option<Arc<Reply>>>,
+    /// Numbers `check` calls
+    calls: AtomicU64,
 }
 
 /// How long the matcher keeps polling for the next request before it sleeps. Requests come in
@@ -82,6 +86,8 @@ pub struct Matcher {
 const LINGER: Duration = Duration::from_micros(300);
 /// How long a waiting caller spins before it parks.
 const SPIN: Duration = Duration::from_micros(40);
+/// How long a waiting caller waits before it asks again (the matcher may have stopped).
+const RESEND: Duration = Duration::from_secs(5);
 
 impl Matcher {
     /// Start the matcher for `shield`. `recorder` sees every non-allow decision; `ready` is
@@ -103,6 +109,7 @@ impl Matcher {
             shared,
             tx: Mutex::new(tx),
             reply: Mutex::new(None),
+            calls: AtomicU64::new(0),
         }
     }
 
@@ -134,7 +141,8 @@ impl Matcher {
         }
     }
 
-    /// Decide on `q`, waiting for the answer.
+    /// Decide on `q`, waiting for the answer. Nothing is let through unanswered: a matcher
+    /// that stopped is started again and asked again, for as long as it takes.
     pub fn check(&self, q: Query) -> Answer {
         let reply = {
             let mut slot = self.reply.lock().unwrap_or_else(|e| e.into_inner());
@@ -143,7 +151,7 @@ impl Matcher {
                 Some(r) if r.waiter.id() == current.id() => r.clone(),
                 _ => {
                     let r = Arc::new(Reply {
-                        state: AtomicU8::new(0),
+                        done: AtomicU64::new(0),
                         answer: Mutex::new(None),
                         waiter: current,
                     });
@@ -152,25 +160,34 @@ impl Matcher {
                 }
             }
         };
-        reply.state.store(0, Ordering::Release);
-        self.send(Job::Wait(q.clone(), reply.clone()));
+        let call = self.calls.fetch_add(1, Ordering::Relaxed) + 1;
+        self.send(Job::Wait(q.clone(), call, reply.clone()));
         let start = Instant::now();
-        while reply.state.load(Ordering::Acquire) == 0 {
-            if start.elapsed() < SPIN {
-                std::hint::spin_loop();
-            } else {
-                std::thread::park_timeout(Duration::from_millis(50));
-                // A matcher that died with this query is replaced by `send`; ask again.
-                if start.elapsed() > Duration::from_secs(5) {
-                    self.send(Job::Wait(q.clone(), reply.clone()));
+        let mut asked = start;
+        loop {
+            if reply.done.load(Ordering::Acquire) == call {
+                let mut slot = reply.answer.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some((n, answer)) = slot.take() {
+                    if n == call {
+                        return answer;
+                    }
                 }
             }
+            if start.elapsed() < SPIN {
+                std::hint::spin_loop();
+                continue;
+            }
+            std::thread::park_timeout(Duration::from_millis(50));
+            // A matcher that died with this query is replaced by `send`; ask again.
+            if asked.elapsed() > RESEND {
+                eprintln!(
+                    "byobu: no answer from the matcher after {:?}; asking again",
+                    start.elapsed()
+                );
+                asked = Instant::now();
+                self.send(Job::Wait(q.clone(), call, reply.clone()));
+            }
         }
-        let answer = reply.answer.lock().ok().and_then(|mut a| a.take());
-        answer.unwrap_or(Answer {
-            decision: Decision::Allow,
-            rule: None,
-        })
     }
 
     /// Queue `q` under `ticket`; its answer arrives through [`Matcher::take_answers`].
@@ -259,12 +276,16 @@ fn run(shared: &Shared, rx: Receiver<Job>) {
                     rec(&q, &a);
                 }
             }
-            Job::Wait(q, reply) => {
+            Job::Wait(q, call, reply) => {
+                // A call already answered (it was sent again while slow) needs nothing more.
+                if reply.done.load(Ordering::Acquire) >= call {
+                    continue;
+                }
                 let answer = decide(shared, &q);
                 if let Ok(mut a) = reply.answer.lock() {
-                    *a = Some(answer);
+                    *a = Some((call, answer));
                 }
-                reply.state.store(1, Ordering::Release);
+                reply.done.store(call, Ordering::Release);
                 reply.waiter.unpark();
             }
             Job::Later(q, ticket) => {
