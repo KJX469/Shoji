@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en" data-accent="{{ACCENT}}" data-mode="{{MODE}}" data-fonts="{{FONTS}}">
+<head>
+  <meta charset="UTF-8">
+  <title>Shoji</title>
+  <style>
+{{THEME_CSS}}
+    html, body { height: 100%; overflow: hidden; }
+    body { display: flex; flex-direction: column; font-size: 13px; user-select: none;
+      background: var(--surface); border: 1px solid var(--line-strong); border-top-color: var(--line); box-shadow: inset 0 0 0 0 transparent; }
+    .field { display: none; position: relative; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+    body[data-mode-kind="palette"] .field, body[data-mode-kind="prompt"] .field, body[data-mode-kind="paneadd"] .field { display: block; }
+    .eng { display: none; position: absolute; left: 22px; top: 50%; width: 18px; height: 18px; margin-top: -9px; pointer-events: none; }
+    body[data-mode-kind="paneadd"] .eng { display: block; }
+    body[data-mode-kind="paneadd"] input { padding-left: 38px; }
+    .hd { padding: 9px 10px 3px; font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+    .title { display: none; padding: 12px 14px 0; font-family: var(--font-display); font-size: 15px; color: var(--ink); }
+    body[data-mode-kind="prompt"] .title { display: block; }
+    body[data-mode-kind="savebm"] .title { display: block; padding: 11px 14px 4px; font-size: 13.5px; }
+    li .ck { color: var(--accent); font-weight: 700; flex-shrink: 0; }
+    /* "Save to": the folders scroll, the two actions under them stay in view */
+    #foot { display: none; flex-shrink: 0; padding: 4px; border-top: 1px solid var(--line); }
+    #foot.has { display: block; }
+    li.danger { color: var(--danger, #c0392b); }
+    input { width: 100%; height: 34px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font: inherit; font-size: 14px; outline: none; user-select: text; }
+    input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--tint-soft); }
+    ul { list-style: none; flex: 1; min-height: 0; overflow-y: auto; padding: 4px; }
+    body[data-mode-kind="prompt"] ul { display: none; }
+    li { display: flex; align-items: center; gap: 10px; min-height: 32px; padding: 5px 10px; border-radius: 7px; color: var(--ink); cursor: default; }
+    li .chip { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; background: var(--line-strong); }
+    li .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    li .lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    li .sb { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; color: var(--ink-3); }
+    li .kd { font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); flex-shrink: 0; }
+    li.on { background: var(--tint); }
+    li:hover:not(.on) { background: var(--hover); }
+    .empty { padding: 14px; color: var(--ink-3); text-align: center; }
+    body[data-mode-kind="suggest"] li, body[data-mode-kind="menu"] li, body[data-mode-kind="paneadd"] li, body[data-mode-kind="savebm"] li { min-height: 30px; }
+    body[data-mode-kind="savebm"] li .kd { text-transform: none; letter-spacing: 0; font-size: 11px; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  </style>
+</head>
+<body data-mode-kind="suggest">
+  <div class="title" id="title"></div>
+  <div class="field"><svg class="eng" id="eng" viewBox="0 0 24 24"></svg><input id="q" type="text" spellcheck="false" autocomplete="off"></div>
+  <ul id="list" role="listbox"></ul>
+  <div id="foot"></div>
+  <script>
+    function post(action, payload = null) {
+      if (window.ipc) window.ipc.postMessage(JSON.stringify({ action, payload }));
+    }
+    const $ = id => document.getElementById(id);
+    const KIND_LABEL = { tab: 'Tab', url: '', search: 'Search', action: 'Action' };
+    let mode = 'suggest', all = [], shown = [], sel = -1;
+
+    function render() {
+      const ul = $('list'), foot = $('foot');
+      ul.textContent = '';
+      foot.textContent = '';
+      foot.classList.remove('has');
+      if (mode === 'prompt') return;
+      if (!shown.length) {
+        const e = document.createElement('div');
+        e.className = 'empty';
+        e.textContent = mode === 'palette' ? 'Nothing matches' : '';
+        if (e.textContent) ul.appendChild(e);
+        return;
+      }
+      shown.forEach((it, i) => {
+        if (it.head) { const h = document.createElement('div'); h.className = 'hd'; h.textContent = it.head; ul.appendChild(h); }
+        const li = document.createElement('li');
+        const inFoot = mode === 'savebm' && /^bm:(put-new|unsave):/.test(it.value);
+        li.setAttribute('role', 'option');
+        if (i === sel) li.classList.add('on');
+        const saving = mode === 'savebm';
+        const chip = document.createElement('span');
+        chip.className = 'chip';
+        if (it.color && !saving) chip.style.background = it.color; else chip.style.display = 'none';
+        const main = document.createElement('span');
+        main.className = 'main';
+        const label = document.createElement('span');
+        label.className = 'lbl';
+        label.textContent = it.label;
+        main.appendChild(label);
+        if (it.sub && !saving) { const sub = document.createElement('span'); sub.className = 'sb'; sub.textContent = it.sub; main.appendChild(sub); }
+        li.append(chip, main);
+        if (saving) {
+          // "Save to": the folder's parent on the right, a tick on the one it is in now.
+          if (it.sub) { const k = document.createElement('span'); k.className = 'kd'; k.textContent = it.sub; li.appendChild(k); }
+          if (it.color === 'current') { const c = document.createElement('span'); c.className = 'ck'; c.textContent = '\u2713'; li.appendChild(c); }
+          if (it.value === 'bm:unsave:') li.classList.add('danger');
+        }
+        if (mode === 'palette' && KIND_LABEL[it.kind]) {
+          const k = document.createElement('span'); k.className = 'kd'; k.textContent = KIND_LABEL[it.kind]; li.appendChild(k);
+        }
+        // mousedown, not click: the address bar loses focus the moment this surface is pressed.
+        li.onmousedown = e => { e.preventDefault(); choose(it); };
+        li.onmousemove = () => { if (sel !== i) { sel = i; paneMoved = true; mark(); } };
+        if (inFoot) { foot.classList.add('has'); foot.appendChild(li); } else ul.appendChild(li);
+      });
+      const on = document.querySelector('li.on');
+      if (on) on.scrollIntoView({ block: 'nearest' });
+    }
+    function mark() {
+      [...document.querySelectorAll('li')].forEach((li, i) => li.classList.toggle('on', i === sel));
+      const on = document.querySelector('li.on');
+      if (on) on.scrollIntoView({ block: 'nearest' });
+    }
+    function choose(it) { post('OverlayChoose', { kind: it.kind, value: it.value }); }
+
+    function filter() {
+      const q = $('q').value.trim().toLowerCase();
+      const words = q.split(/\s+/).filter(Boolean);
+      shown = !words.length ? all.slice(0, 40)
+        : all.filter(it => { const hay = (it.label + ' ' + (it.sub || '')).toLowerCase(); return words.every(w => hay.includes(w)); }).slice(0, 40);
+      sel = shown.length ? 0 : -1;
+      render();
+    }
+
+    /* Adding a pane: this field works like an address bar. Open tabs that match come first (Enter
+       adds that very tab); under them, what to open in a new pane: the site you most likely mean
+       (from your history), what you typed, matching history, and the search engine's suggestions. */
+    const ENGINE_LOGOS = {
+      google: '<path fill="#4285F4" d="M23.5 12.27c0-.85-.08-1.67-.22-2.45H12v4.64h6.46a5.52 5.52 0 0 1-2.4 3.62v3h3.88c2.27-2.09 3.56-5.17 3.56-8.81z"/><path fill="#34A853" d="M12 24c3.24 0 5.96-1.07 7.94-2.91l-3.88-3a7.2 7.2 0 0 1-10.7-3.77H1.4v3.09A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.36 14.32a7.2 7.2 0 0 1 0-4.64V6.59H1.4a12 12 0 0 0 0 10.82z"/><path fill="#EA4335" d="M12 4.75c1.76 0 3.34.6 4.58 1.8l3.44-3.44A11.5 11.5 0 0 0 12 0 12 12 0 0 0 1.4 6.59l3.96 3.09A7.2 7.2 0 0 1 12 4.75z"/>',
+      bing: '<path fill="#0C8484" d="M5 2l4 1.4v14.2l5.7-3.3-2.9-1.3-1.8-4.6 9 3.2v4.7L9 22.2l-4-2.3z"/>',
+      brave: '<path fill="#FB542B" d="M12 2l3.4 1.5L19.2 3l2.3 4.2-1 3.1 1.4 6.4L12 22.2 3.1 16.7l1.4-6.4-1-3.1L5.8 3l3.8.5z"/><path fill="#fff" d="M12 7.6l2.7 1.2 2-.3.7 1.6-1.3 3.3 1 2.2L12 18.6 6.9 15.6l1-2.2-1.3-3.3.7-1.6 2 .3z"/>',
+      ecosia: '<circle cx="12" cy="12" r="11" fill="#36ACB0"/><path fill="#fff" d="M12 5c-3.6 0-6 2.5-6 5.6 0 2.9 2.2 4.9 4.8 5V19l1.6-3.4c2.7-.2 4.6-2.2 4.6-5C17 7.4 14.9 5 12 5z"/>',
+      duckduckgo: '<circle cx="12" cy="12" r="11" fill="#DE5833"/><circle cx="12" cy="12" r="8.6" fill="#fff"/><circle cx="12" cy="12" r="6.2" fill="#DE5833"/><circle cx="10.2" cy="10.4" r="1.3" fill="#fff"/><circle cx="10.4" cy="10.4" r=".6" fill="#2D4F8E"/>'
+    };
+    let paneMoved = false, engine = '', tabItems = [], paneHist = [], paneAuto = null, paneWords = [], paneSeq = 0, paneTimer = 0;
+    const hostOf = u => { try { return new URL(u).hostname.replace(/^www[.]/, ''); } catch { return ''; } };
+    function paneRows() {
+      const q = $('q').value.trim();
+      const open = x => ({ kind: 'action', value: 'split-open:' + x.value, label: x.label, sub: x.sub });
+      if (!q) {
+        const rows = tabItems.slice(0, 40);
+        if (rows.length) rows[0] = { ...rows[0], head: 'Open tabs' };
+        return rows;
+      }
+      const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+      const tabs = tabItems.filter(it => it.value !== 'split-newtab' && words.every(w => (it.label + ' ' + (it.sub || '')).toLowerCase().includes(w))).slice(0, 6);
+      const urlish = /^[a-z][a-z0-9+.-]*:[/][/]/i.test(q) || (!/\s/.test(q) && /^[^\s/]+[.][a-z]{2,}([/:]|$)/i.test(q)) || /^localhost([:/]|$)/i.test(q);
+      const typed = open({ value: q, label: q, sub: urlish ? 'Open in a new pane' : 'Search ' + engine + ' in a new pane' });
+      const auto = paneAuto ? open({ value: paneAuto[0], label: paneAuto[1], sub: 'Visit \u00b7 from your history, in a new pane' }) : null;
+      const hist = paneHist.map(h => open({ value: h.url, label: h.title || h.url, sub: 'History \u00b7 ' + hostOf(h.url) }));
+      const words2 = paneWords.map(w => open({ value: w, label: w, sub: 'Search in a new pane' }));
+      let rows = tabs.map((t, i) => (i === 0 ? { ...t, head: 'Open tabs' } : t));
+      const fresh = (tabs.length ? [typed, auto] : [auto, typed]).filter(Boolean).concat(hist, words2);
+      const seen = new Set();
+      const uniq = fresh.filter(r => { if (seen.has(r.value)) return false; seen.add(r.value); return true; }).slice(0, 8);
+      if (uniq.length) uniq[0] = { ...uniq[0], head: 'New pane' };
+      return rows.concat(uniq);
+    }
+    function paneRefresh(keep) {
+      // New results move the selection to the new first row, unless the user picked one themselves.
+      const was = keep && paneMoved && shown[sel] ? shown[sel].value : null;
+      shown = paneRows();
+      const at = was ? shown.findIndex(r => r.value === was) : -1;
+      sel = at >= 0 ? at : (shown.length ? 0 : -1);
+      render();
+    }
+    function paneInput() {
+      clearTimeout(paneTimer);
+      const q = $('q').value.trim();
+      paneAuto = null; paneHist = []; paneWords = []; paneMoved = false;
+      const seq = ++paneSeq;
+      paneRefresh(false);
+      if (!q) return;
+      if (!/^[a-z]+:[/][/]/i.test(q)) post('SearchHistory', { query: q, seq, overlay: true });
+      if (q.length > 1 && !/^[a-z]+:[/][/]/i.test(q)) paneTimer = setTimeout(() => post('SuggestQuery', { query: q, seq, overlay: true }), 120);
+    }
+    window.__paneHistory = (seq, items, auto) => {
+      if (seq !== paneSeq) return;
+      paneHist = (items || []).slice(0, 4); paneAuto = auto || null;
+      paneRefresh(true);
+    };
+    window.__paneWords = (seq, words) => {
+      if (seq !== paneSeq) return;
+      paneWords = (words || []).slice(0, 5);
+      paneRefresh(true);
+    };
+
+    window.__overlayShow = d => {
+      mode = d.mode;
+      document.body.dataset.modeKind = mode;
+      // The suggestions window is taller than the list; the host shows only the first `h` pixels.
+      document.body.style.height = mode === 'suggest' && d.h ? d.h + 'px' : '';
+      all = d.items || [];
+      $('title').textContent = d.title || '';
+      $('q').placeholder = d.placeholder || '';
+      if (mode === 'paneadd') {
+        engine = d.value || 'the web'; tabItems = all;
+        $('eng').innerHTML = ENGINE_LOGOS[engine.toLowerCase()] || ENGINE_LOGOS.duckduckgo;
+        $('q').value = ''; paneAuto = null; paneHist = []; paneWords = []; paneSeq++;
+        paneRefresh(false); setTimeout(() => $('q').focus(), 0);
+      }
+      else if (mode === 'palette') { $('q').value = ''; filter(); setTimeout(() => $('q').focus(), 0); }
+      else if (mode === 'prompt') { $('q').value = d.value || ''; shown = []; sel = -1; render(); setTimeout(() => { $('q').focus(); $('q').select(); }, 0); }
+      else {
+        shown = all;
+        sel = mode === 'suggest' && all.length ? 0 : mode === 'savebm' ? all.findIndex(i => i.color === 'current') : -1;
+        render();
+        if (mode === 'menu' || mode === 'savebm') setTimeout(() => window.focus(), 0);
+      }
+    };
+    window.__overlayHighlight = i => { sel = i; mark(); };
+    window.__applyTheme = t => { const r = document.documentElement; r.dataset.accent = t.accent; if (t.mode) r.dataset.mode = t.mode; if (t.fonts) r.dataset.fonts = t.fonts; };
+
+    $('q').addEventListener('input', () => { if (mode === 'palette') filter(); else if (mode === 'paneadd') paneInput(); });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { e.preventDefault(); post('OverlayClose'); return; }
+      if (mode === 'prompt') {
+        if (e.key === 'Enter') { e.preventDefault(); const v = $('q').value.trim(); if (v) post('OverlayChoose', { kind: 'text', value: v }); else post('OverlayClose'); }
+        return;
+      }
+      if (mode === 'suggest') return;
+      const n = shown.length;
+      if (e.key === 'ArrowDown') { e.preventDefault(); paneMoved = true; if (n) { sel = (sel + 1) % n; mark(); } }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); paneMoved = true; if (n) { sel = (sel - 1 + n) % n; mark(); } }
+      else if (e.key === 'Enter') { e.preventDefault(); if (shown[sel]) choose(shown[sel]); }
+    });
+    // Palette, menu and prompt close when the user clicks away from them.
+    window.addEventListener('blur', () => { if (mode !== 'suggest') post('OverlayClose'); });
+    post('OverlayReady');
+  </script>
+</body>
+</html>

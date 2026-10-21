@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en" data-accent="{{ACCENT}}" data-mode="{{MODE}}" data-fonts="{{FONTS}}">
+<head>
+  <meta charset="UTF-8">
+  <title>Bookmarks</title>
+  <style>
+{{THEME_CSS}}
+    html, body { min-height: 100%; }
+    body { font-size: 13.5px; overflow-y: auto; }
+    button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+    input, select { font: inherit; color: inherit; }
+    [hidden] { display: none !important; }
+    body::before { content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .45;
+      background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+      background-size: 132px 196px; background-position: center -40px;
+      -webkit-mask-image: linear-gradient(90deg, #000, transparent 18%, transparent 82%, #000); mask-image: linear-gradient(90deg, #000, transparent 18%, transparent 82%, #000); }
+    .page { position: relative; width: min(1040px, 100% - 48px); margin: 0 auto; padding: 28px 0 120px; }
+
+    .top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .brand { display: flex; align-items: center; gap: 12px; margin-right: auto; }
+    .brand .crane { width: 40px; height: 40px; }
+    h1 { font-family: var(--font-display); font-size: 26px; font-weight: 400; letter-spacing: -.01em; }
+    .btn { height: 38px; padding: 0 14px; border-radius: 11px; border: 1px solid var(--line); background: var(--surface); display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; font-size: 13px; }
+    .btn:hover { background: var(--hover); border-color: var(--line-strong); }
+    .btn.primary { background: var(--tone); border-color: transparent; color: var(--on-tone); font-weight: 600; }
+    .btn.primary:hover { filter: brightness(.97); }
+    .btn.danger { color: var(--danger); }
+    .btn:disabled { opacity: .45; cursor: default; }
+    .btn svg.i { width: 16px; height: 16px; }
+
+    .tools { display: flex; align-items: center; gap: 10px; margin-top: 20px; }
+    .search { position: relative; flex: 1; }
+    .search svg.i { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--ink-3); }
+    .search input { width: 100%; height: 40px; padding: 0 16px 0 40px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); outline: none; }
+    .search input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--tint-soft); }
+
+    .cols { display: grid; grid-template-columns: 250px 1fr; gap: 22px; margin-top: 22px; align-items: start; }
+    @media (max-width: 760px) { .cols { grid-template-columns: 1fr; } }
+
+    /* Folders */
+    #folders { position: sticky; top: 14px; display: flex; flex-direction: column; gap: 1px; padding: 8px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); max-height: calc(100vh - 40px); overflow-y: auto; }
+    .fo { display: flex; align-items: center; gap: 8px; height: 32px; padding-right: 4px; border-radius: 8px; color: var(--ink-2); cursor: pointer; }
+    .fo:hover { background: var(--hover); color: var(--ink); }
+    .fo.on { background: var(--tint); color: var(--ink); font-weight: 600; }
+    .fo.drop { background: var(--tint); box-shadow: inset 0 0 0 1.5px var(--accent); }
+    .fo svg.i { width: 16px; height: 16px; color: var(--ink-3); flex-shrink: 0; }
+    .fo .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fo .n { font-size: 11.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+    .fo .acts { display: none; gap: 0; }
+    .fo:hover .acts { display: flex; }
+    .fo:hover .n { display: none; }
+    .ib { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; color: var(--ink-3); }
+    .ib:hover { background: var(--press); color: var(--ink); }
+    .ib svg.i { width: 15px; height: 15px; }
+
+    /* The list */
+    #head { display: flex; align-items: baseline; gap: 10px; padding: 0 4px 10px; }
+    #head h2 { font-family: var(--font-display); font-size: 18px; font-weight: 400; }
+    #head small { color: var(--ink-3); }
+    #list { display: flex; flex-direction: column; }
+    .row { display: flex; align-items: center; gap: 12px; min-height: 50px; padding: 6px 8px; border-radius: 10px; cursor: pointer; border-top: 2px solid transparent; animation: row-in .22s var(--ease) both; }
+    @keyframes row-in { from { opacity: 0; transform: translateY(5px); } }
+    .row:hover { background: var(--hover); }
+    .row.sel { background: var(--tint-soft); }
+    .row.drop-before { border-top-color: var(--accent); }
+    .row.dragging { opacity: .45; }
+    .check { width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--line-strong); display: grid; place-items: center; flex-shrink: 0; opacity: 0; transition: opacity .12s; }
+    .row:hover .check, body.selecting .check { opacity: 1; }
+    .row.sel .check { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+    .check svg { width: 12px; height: 12px; opacity: 0; }
+    .row.sel .check svg { opacity: 1; }
+    .tile { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; flex-shrink: 0; font: 600 13px var(--font-display); text-transform: uppercase;
+      background: hsl(var(--h, 30) 38% 50% / .22); color: hsl(var(--h, 30) 40% 38%); }
+    :root[data-mode="dark"] .tile { color: hsl(var(--h, 30) 55% 72%); }
+    @media (prefers-color-scheme: dark) { :root:not([data-mode="light"]) .tile { color: hsl(var(--h, 30) 55% 72%); } }
+    .tile.fold { background: var(--tint); color: var(--ink-2); }
+    .tile.fold svg.i { width: 17px; height: 17px; }
+    .main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .s { font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .where { font-size: 12px; color: var(--ink-3); flex-shrink: 0; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row .acts { display: none; gap: 2px; flex-shrink: 0; }
+    .row:hover .acts { display: flex; }
+    .row:hover .where { display: none; }
+
+    .empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 64px 0; color: var(--ink-3); text-align: center; line-height: 1.6; }
+    .empty b { color: var(--ink-2); font-family: var(--font-display); font-weight: 400; font-size: 18px; }
+
+    #selbar { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 24px); opacity: 0; pointer-events: none; display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 18px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line-strong); box-shadow: var(--shadow); transition: opacity .18s, transform .22s var(--ease); z-index: 5; }
+    #selbar.on { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
+    #selbar .btn { height: 34px; border-radius: 9px; }
+    #selbar select { height: 34px; }
+
+    /* Dialogs */
+    #veil { position: fixed; inset: 0; z-index: 9; display: none; place-items: center; background: color-mix(in srgb, var(--bg) 70%, transparent); backdrop-filter: blur(3px); }
+    #veil.on { display: grid; animation: fade .18s ease both; }
+    @keyframes fade { from { opacity: 0; } }
+    .card { width: min(440px, 100% - 32px); padding: 24px; border-radius: 18px; background: var(--surface); border: 1px solid var(--line-strong); box-shadow: var(--shadow); animation: rise .26s var(--ease) both; }
+    @keyframes rise { from { opacity: 0; transform: translateY(14px) scale(.98); } }
+    .card h2 { font-family: var(--font-display); font-size: 20px; font-weight: 400; margin-bottom: 4px; }
+    .card p { color: var(--ink-2); margin: 6px 0 0; line-height: 1.55; font-size: 13px; }
+    .fld { display: flex; flex-direction: column; gap: 5px; margin-top: 14px; font-size: 12px; color: var(--ink-3); }
+    .fld input, .fld select, #selbar select { height: 38px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); outline: none; font-size: 13.5px; user-select: text; }
+    .fld input:focus, .fld select:focus { border-color: var(--accent); background: var(--surface); }
+    .card .go { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="top">
+      <div class="brand">{{CRANE}}<h1>Bookmarks</h1></div>
+      <button class="btn" onclick="post('RunAction', { value: 'bookmark-import' })"><svg class="i" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Import…</button>
+      <button class="btn" onclick="post('RunAction', { value: 'bookmark-export' })"><svg class="i" viewBox="0 0 24 24"><path d="M12 15V4M8 8l4-4 4 4M5 13v6h14v-6"/></svg>Export…</button>
+    </div>
+
+    <div class="tools">
+      <label class="search">
+        <svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>
+        <input id="q" type="search" autocomplete="off" spellcheck="false" placeholder="Search bookmarks" aria-label="Search bookmarks">
+      </label>
+      <button class="btn" onclick="folderDialog('')"><svg class="i" viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM12 10.500v5M9.500 13h5"/></svg>New folder</button>
+      <button class="btn primary" onclick="editDialog(null)"><svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Add bookmark</button>
+    </div>
+
+    <div class="cols">
+      <nav id="folders" aria-label="Folders"></nav>
+      <section>
+        <div id="head"><h2 id="headTitle">All bookmarks</h2><small id="headCount"></small></div>
+        <div id="list" role="list"></div>
+      </section>
+    </div>
+  </div>
+
+  <div id="selbar" role="status">
+    <span id="selCount"></span>
+    <button class="btn" onclick="openSelected()">Open</button>
+    <select id="selMove" aria-label="Move to folder" onchange="moveSelected(this.value)"></select>
+    <button class="btn danger" onclick="removeSelected()">Delete</button>
+    <button class="btn" onclick="clearSel()">Cancel</button>
+  </div>
+
+  <div id="veil" onmousedown="if (event.target === this) closeDialog()">
+    <div class="card" id="dlg" role="dialog" aria-modal="true"></div>
+  </div>
+
+  <script>
+    function post(action, payload = null) {
+      if (window.ipc) window.ipc.postMessage(JSON.stringify({ action, payload }));
+    }
+    const $ = id => document.getElementById(id);
+    const ICON = {
+      folder: '<svg class="i" viewBox="0 0 24 24"><path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/></svg>',
+      all: '<svg class="i" viewBox="0 0 24 24"><path d="M7 4h10a1 1 0 0 1 1 1v15l-6-4-6 4V5a1 1 0 0 1 1-1z"/></svg>',
+      edit: '<svg class="i" viewBox="0 0 24 24"><path d="M5 19l1-4L16 5l3 3L9 18zM14 7l3 3"/></svg>',
+      tab: '<svg class="i" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5H5V6h5"/></svg>',
+      trash: '<svg class="i" viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg>',
+      check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg>'
+    };
+    let BM = { items: [], folders: [] };
+    let cur = '*';            // '*' every bookmark, '' the top level, or a folder path
+    let query = '';
+    const selected = new Set();
+    let dragUrl = null;
+
+    const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const hostOf = u => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return ''; } };
+    const hue = str => { let h = 7; for (const c of str) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+    const parentOf = f => f.includes(' / ') ? f.slice(0, f.lastIndexOf(' / ')) : '';
+    const leafOf = f => f.includes(' / ') ? f.slice(f.lastIndexOf(' / ') + 3) : f;
+    const within = (f, p) => f === p || f.startsWith(p + ' / ');
+
+    /* ---- data: indexed once when it arrives ---- */
+    let IDX = { count: new Map(), kids: new Map(), at: new Map(), by: new Map(), folderKey: '' };
+    function reindex() {
+      const count = new Map(), kids = new Map(), at = new Map(), by = new Map();
+      const add = (m, k, v) => { const a = m.get(k); if (a) a.push(v); else m.set(k, [v]); };
+      BM.folders.forEach(f => add(kids, parentOf(f), f));
+      BM.items.forEach(i => {
+        const f = i.folder || '';
+        i.hay = (i.title + ' ' + i.url + ' ' + f).toLowerCase();
+        add(at, f, i);
+        by.set(i.url, i);
+        for (let p = f; p; p = parentOf(p)) count.set(p, (count.get(p) || 0) + 1);
+      });
+      IDX = { count, kids, at, by, folderKey: BM.folders.join('\n') };
+    }
+    const countIn = p => IDX.count.get(p) || 0;
+
+    /* ---- folders ---- */
+    function renderFolders() {
+      const out = [];
+      const add = (path, label, icon, depth, count, real) => {
+        out.push('<div class="fo' + (cur === path ? ' on' : '') + '" data-path="' + esc(path) + '"' + (real ? ' data-real="1"' : '') + ' style="padding-left:' + (8 + depth * 14) + 'px">' + icon +
+          '<span class="t">' + esc(label) + '</span><span class="n">' + (count || '') + '</span>' +
+          (real ? '<span class="acts"><button class="ib" data-a="rename" title="Rename">' + ICON.edit + '</button><button class="ib" data-a="delete" title="Delete folder">' + ICON.trash + '</button></span>' : '') + '</div>');
+      };
+      add('*', 'All bookmarks', ICON.all, 0, BM.items.length, false);
+      add('', 'Top level', ICON.folder, 0, (IDX.at.get('') || []).length, false);
+      BM.folders.forEach(f => add(f, leafOf(f), ICON.folder, f.split(' / ').length, countIn(f), true));
+      $('folders').innerHTML = out.join('');
+    }
+    $('folders').addEventListener('click', e => {
+      const fo = e.target.closest('.fo');
+      if (!fo) return;
+      const path = fo.dataset.path;
+      const b = e.target.closest('button[data-a]');
+      if (b) return b.dataset.a === 'rename' ? folderDialog(path, true) : deleteFolderDialog(path);
+      cur = path; query = ''; $('q').value = ''; clearSel(); render();
+    });
+    let lastDrop = null;
+    function clearDrop() { if (lastDrop) lastDrop.classList.remove('drop', 'drop-before'); lastDrop = null; }
+    function markDrop(el, cls) { if (lastDrop === el && el.classList.contains(cls)) return; clearDrop(); el.classList.add(cls); lastDrop = el; }
+    $('folders').addEventListener('dragover', e => {
+      const fo = e.target.closest('.fo');
+      if (dragUrl && fo && fo.dataset.path !== '*') { e.preventDefault(); markDrop(fo, 'drop'); }
+    });
+    $('folders').addEventListener('drop', e => {
+      const fo = e.target.closest('.fo');
+      clearDrop();
+      if (dragUrl && fo && fo.dataset.path !== '*') { e.preventDefault(); post('BookmarkMove', { url: dragUrl, folder: fo.dataset.path }); }
+    });
+
+    /* ---- list: the first rows at once, the rest as you scroll ---- */
+    const CHUNK = 120;
+    let listItems = [], shown = 0, showWhere = false;
+    function rowHtml(f) {
+      const host = hostOf(f.url);
+      return '<div class="row' + (selected.has(f.url) ? ' sel' : '') + '" role="listitem" draggable="true" data-url="' + esc(f.url) + '">' +
+        '<div class="check">' + ICON.check + '</div>' +
+        '<div class="tile" style="--h:' + hue(host || f.url) + '">' + esc((host || f.title || '?').charAt(0)) + '</div>' +
+        '<div class="main"><div class="t">' + esc(f.title || f.url) + '</div><div class="s">' + esc(f.url) + '</div></div>' +
+        (showWhere && f.folder ? '<span class="where">' + esc(f.folder) + '</span>' : '') +
+        '<div class="acts"><button class="ib" data-a="edit" title="Edit">' + ICON.edit + '</button><button class="ib" data-a="tab" title="Open in a new tab">' + ICON.tab + '</button><button class="ib" data-a="delete" title="Delete">' + ICON.trash + '</button></div></div>';
+    }
+    function folderRowHtml(path) {
+      const n = countIn(path);
+      return '<div class="row" role="listitem" data-folder="' + esc(path) + '"><div class="tile fold">' + ICON.folder + '</div>' +
+        '<div class="main"><div class="t">' + esc(leafOf(path)) + '</div><div class="s">' + n + (n === 1 ? ' bookmark' : ' bookmarks') + '</div></div></div>';
+    }
+    const sentinel = document.createElement('div');
+    sentinel.id = 'sentinel';
+    const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) more(); }, { rootMargin: '700px' });
+    function more() {
+      if (shown >= listItems.length) { io.disconnect(); sentinel.remove(); return; }
+      const next = Math.min(listItems.length, shown + CHUNK);
+      let h = '';
+      for (let i = shown; i < next; i++) h += rowHtml(listItems[i]);
+      shown = next;
+      sentinel.insertAdjacentHTML('beforebegin', h);
+      if (shown >= listItems.length) { io.disconnect(); sentinel.remove(); }
+    }
+    function render() {
+      renderFolders();
+      const list = $('list');
+      let subs = [];
+      const q = query.trim().toLowerCase();
+      if (q) {
+        const words = q.split(/\s+/);
+        listItems = BM.items.filter(f => words.every(w => f.hay.includes(w)));
+        $('headTitle').textContent = 'Search results';
+      } else if (cur === '*') {
+        listItems = BM.items;
+        $('headTitle').textContent = 'All bookmarks';
+      } else {
+        listItems = IDX.at.get(cur) || [];
+        subs = IDX.kids.get(cur) || [];
+        $('headTitle').textContent = cur === '' ? 'Top level' : cur;
+      }
+      showWhere = cur === '*' || !!q;
+      $('headCount').textContent = listItems.length + (listItems.length === 1 ? ' bookmark' : ' bookmarks');
+      io.disconnect();
+      shown = Math.min(listItems.length, CHUNK);
+      let h = subs.map(folderRowHtml).join('');
+      for (let i = 0; i < shown; i++) h += rowHtml(listItems[i]);
+      if (!listItems.length && !subs.length) {
+        h = '<div class="empty">' + (q ? '<b>Nothing matches.</b>' : (BM.items.length || BM.folders.length) ? '<b>Nothing in here.</b>Drag bookmarks onto a folder, or add one.' : '<b>No bookmarks yet.</b>Press Ctrl+D on any page, or import them from another browser.') + '</div>';
+      }
+      list.innerHTML = h;
+      if (shown < listItems.length) { list.appendChild(sentinel); io.observe(sentinel); }
+      updateSelBar();
+    }
+    // Rows listen through the list, not one by one.
+    const urlOf = e => { const r = e.target.closest && e.target.closest('.row'); return r ? r : null; };
+    $('list').addEventListener('click', e => {
+      const r = urlOf(e);
+      if (!r) return;
+      if (r.dataset.folder != null) { cur = r.dataset.folder; clearSel(); render(); return; }
+      const url = r.dataset.url, f = IDX.by.get(url);
+      if (!f) return;
+      if (e.target.closest('.check')) return toggleSel(url);
+      const b = e.target.closest('button[data-a]');
+      if (b) {
+        if (b.dataset.a === 'edit') editDialog(f);
+        else if (b.dataset.a === 'tab') post('BookmarkOpen', { urls: [url], how: 'tab' });
+        else post('BookmarkRemove', { urls: [url] });
+        return;
+      }
+      if (selected.size || e.ctrlKey || e.metaKey) toggleSel(url); else post('Navigate', { url });
+    });
+    $('list').addEventListener('auxclick', e => { const r = urlOf(e); if (r && r.dataset.url && e.button === 1) post('BookmarkOpen', { urls: [r.dataset.url], how: 'tab' }); });
+    $('list').addEventListener('contextmenu', e => {
+      e.preventDefault();
+      const r = urlOf(e);
+      if (!r) return;
+      if (r.dataset.folder != null) post('BookmarkMenu', { folder: r.dataset.folder, from: 'page', x: e.clientX, y: e.clientY });
+      else post('BookmarkMenu', { url: r.dataset.url, from: 'page', x: e.clientX, y: e.clientY });
+    });
+    $('list').addEventListener('dragstart', e => {
+      const r = urlOf(e);
+      if (!r || !r.dataset.url) return;
+      dragUrl = r.dataset.url;
+      r.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', dragUrl);
+    });
+    $('list').addEventListener('dragend', () => { dragUrl = null; clearDrop(); document.querySelectorAll('.row.dragging').forEach(x => x.classList.remove('dragging')); });
+    $('list').addEventListener('dragover', e => {
+      if (!dragUrl) return;
+      const r = urlOf(e);
+      if (!r) { if (e.target === $('list') && cur !== '*' && !query) e.preventDefault(); return; }
+      if (r.dataset.folder != null) { e.preventDefault(); markDrop(r, 'drop-before'); }
+      else if (r.dataset.url !== dragUrl && !query) { e.preventDefault(); markDrop(r, 'drop-before'); }
+    });
+    $('list').addEventListener('drop', e => {
+      if (!dragUrl) return;
+      const r = urlOf(e), u = dragUrl;
+      clearDrop();
+      if (!r) { if (e.target === $('list')) { e.preventDefault(); post('BookmarkMove', { url: u, folder: cur === '*' ? '' : cur }); } return; }
+      e.preventDefault();
+      if (r.dataset.folder != null) post('BookmarkMove', { url: u, folder: r.dataset.folder });
+      else if (r.dataset.url !== u) { const f = IDX.by.get(r.dataset.url); post('BookmarkMove', { url: u, folder: f ? f.folder || '' : '', before: r.dataset.url }); }
+    });
+    let dataKey = '', pushed = null, frame = 0;
+    window.__bookmarks = d => {
+      pushed = d;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const key = JSON.stringify(pushed);
+        if (key === dataKey) return;
+        dataKey = key;
+        BM = pushed;
+        reindex();
+        for (const u of [...selected]) if (!IDX.by.has(u)) selected.delete(u);
+        if (cur !== '*' && cur !== '' && !BM.folders.includes(cur)) cur = '*';
+        render();
+      });
+    };
+
+    /* ---- selection: marks the rows, never redraws them ---- */
+    function toggleSel(url) {
+      if (selected.has(url)) selected.delete(url); else selected.add(url);
+      const row = [...$('list').querySelectorAll('.row[data-url]')].find(r => r.dataset.url === url);
+      if (row) row.classList.toggle('sel', selected.has(url));
+      updateSelBar();
+    }
+    function selectAll() { listItems.forEach(f => selected.add(f.url)); document.querySelectorAll('.row[data-url]').forEach(r => r.classList.add('sel')); updateSelBar(); }
+    function clearSel() { selected.clear(); updateSelBar(); document.querySelectorAll('.row.sel').forEach(r => r.classList.remove('sel')); }
+    let selKey = null;
+    function updateSelBar() {
+      document.body.classList.toggle('selecting', selected.size > 0);
+      $('selbar').classList.toggle('on', selected.size > 0);
+      $('selCount').textContent = selected.size + ' selected';
+      if (selKey !== IDX.folderKey) {
+        selKey = IDX.folderKey;
+        $('selMove').innerHTML = '<option value="" disabled selected>Move to…</option><option value="/">Top level</option>' + BM.folders.map(f => '<option value="' + esc(f) + '">' + esc(f) + '</option>').join('');
+      }
+    }
+    function openSelected() { post('BookmarkOpen', { urls: [...selected], how: 'tab' }); clearSel(); }
+    function removeSelected() { post('BookmarkRemove', { urls: [...selected] }); selected.clear(); }
+    function moveSelected(folder) {
+      [...selected].forEach(u => post('BookmarkMove', { url: u, folder: folder === '/' ? '' : folder }));
+      selected.clear();
+    }
+
+    /* ---- dialogs ---- */
+    function openDialog(html) { $('dlg').innerHTML = html; $('veil').classList.add('on'); }
+    function closeDialog() { $('veil').classList.remove('on'); }
+    function folderOptions(selectedPath, skip) {
+      return '<option value="">No folder (top level)</option>' + BM.folders.filter(f => !skip || !within(f, skip)).map(f => '<option value="' + esc(f) + '"' + (f === selectedPath ? ' selected' : '') + '>' + esc(f) + '</option>').join('');
+    }
+    function editDialog(f) {
+      const adding = !f;
+      const folder = f ? (f.folder || '') : (cur !== '*' ? cur : '');
+      openDialog('<h2>' + (adding ? 'Add bookmark' : 'Edit bookmark') + '</h2>' +
+        '<label class="fld">Name<input id="eName" type="text" maxlength="120" autocomplete="off"></label>' +
+        '<label class="fld">Address<input id="eUrl" type="text" spellcheck="false" autocomplete="off" placeholder="https://"></label>' +
+        '<label class="fld">Folder<select id="eFolder">' + folderOptions(folder) + '</select></label>' +
+        '<div class="go"><button class="btn" onclick="closeDialog()">Cancel</button><button class="btn primary" id="eSave">Save</button></div>');
+      $('eName').value = f ? f.title : '';
+      $('eUrl').value = f ? f.url : '';
+      setTimeout(() => ($('eName').value ? $('eUrl') : $('eUrl')).focus(), 30);
+      const save = () => {
+        let url = $('eUrl').value.trim();
+        if (!url) return $('eUrl').focus();
+        if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) url = 'https://' + url;
+        const title = $('eName').value.trim() || url, folderSel = $('eFolder').value;
+        if (adding) { post('AddFavourite', { url, title }); if (folderSel) post('BookmarkMove', { url, folder: folderSel }); }
+        else { post('BookmarkEdit', { url: f.url, title, new_url: url }); if (folderSel !== (f.folder || '')) post('BookmarkMove', { url, folder: folderSel }); }
+        closeDialog();
+      };
+      $('eSave').onclick = save;
+      $('dlg').onkeydown = e => { if (e.key === 'Enter') save(); else if (e.key === 'Escape') closeDialog(); };
+    }
+    function folderDialog(path, renaming) {
+      const parent = renaming ? parentOf(path) : (cur !== '*' ? cur : '');
+      openDialog('<h2>' + (renaming ? 'Rename folder' : 'New folder') + '</h2>' +
+        '<label class="fld">Name<input id="fName" type="text" maxlength="60" autocomplete="off"></label>' +
+        (renaming ? '<label class="fld">Inside<select id="fParent">' + folderOptions(parent, path) + '</select></label>' : '<label class="fld">Inside<select id="fParent">' + folderOptions(parent) + '</select></label>') +
+        '<div class="go"><button class="btn" onclick="closeDialog()">Cancel</button><button class="btn primary" id="fSave">' + (renaming ? 'Save' : 'Create') + '</button></div>');
+      $('fName').value = renaming ? leafOf(path) : '';
+      setTimeout(() => { $('fName').focus(); $('fName').select(); }, 30);
+      const save = () => {
+        const name = $('fName').value.trim().replace(/\//g, '-');
+        if (!name) return $('fName').focus();
+        const into = $('fParent').value;
+        if (renaming) {
+          if (name !== leafOf(path)) post('BookmarkRenameFolder', { from: path, name });
+          const now = (parentOf(path) ? parentOf(path) + ' / ' : '') + name;
+          if (into !== parentOf(path)) post('BookmarkMoveFolder', { from: name !== leafOf(path) ? now : path, parent: into });
+        } else {
+          post('BookmarkNewFolder', { parent: into, name });
+        }
+        closeDialog();
+      };
+      $('fSave').onclick = save;
+      $('dlg').onkeydown = e => { if (e.key === 'Enter') save(); else if (e.key === 'Escape') closeDialog(); };
+    }
+    function deleteFolderDialog(path) {
+      const n = countIn(path);
+      openDialog('<h2>Delete “' + esc(leafOf(path)) + '”?</h2>' +
+        '<p>' + (n ? 'It holds ' + n + (n === 1 ? ' bookmark' : ' bookmarks') + '. You can keep them (they move up one level) or delete them with the folder.' : 'It is empty.') + '</p>' +
+        '<div class="go"><button class="btn" onclick="closeDialog()">Cancel</button>' +
+        (n ? '<button class="btn" id="dKeep">Keep bookmarks</button>' : '') +
+        '<button class="btn danger" id="dAll">' + (n ? 'Delete all' : 'Delete') + '</button></div>');
+      if (n) $('dKeep').onclick = () => { post('BookmarkDeleteFolder', { folder: path, keep_items: true }); closeDialog(); };
+      $('dAll').onclick = () => { post('BookmarkDeleteFolder', { folder: path, keep_items: false }); closeDialog(); };
+      $('dlg').onkeydown = e => { if (e.key === 'Escape') closeDialog(); };
+      $('dAll').focus();
+    }
+
+    let searchTimer = 0;
+    $('q').addEventListener('input', e => { query = e.target.value; clearTimeout(searchTimer); searchTimer = setTimeout(render, 70); });
+    addEventListener('keydown', e => {
+      if (e.target.closest && e.target.closest('input, select, #dlg')) return;
+      if (e.key === 'Delete' && selected.size) removeSelected();
+      else if (e.key === 'a' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); selectAll(); }
+      else if (e.key === 'Escape') clearSel();
+    });
+    window.__applyTheme = t => { const r = document.documentElement; r.dataset.accent = t.accent; if (t.mode) r.dataset.mode = t.mode; if (t.fonts) r.dataset.fonts = t.fonts; };
+    render();
+    post('BookmarksQuery');
+  </script>
+</body>
+</html>
