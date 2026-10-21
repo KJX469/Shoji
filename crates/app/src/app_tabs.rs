@@ -19,10 +19,12 @@ impl BrowserApp {
             .windows
             .values()
             .any(|w| w.private && w.window.id() == window.id());
-        // A container keeps its own cookies (outside private windows), for every page in the tab.
+        // A container keeps its own cookies (outside private windows and Private mode), for every
+        // page in the tab.
         let persistent = !private
             && if container.is_some() {
-                true
+                // Containers remember like the main profile does: not in Private mode.
+                !self.settings.privacy.ephemeral_default || self.settings.is_site_persistent(url)
             } else {
                 !internal && self.settings.is_site_persistent(url)
             };
