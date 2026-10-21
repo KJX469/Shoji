@@ -324,7 +324,7 @@ fn merge(base: &mut Value, over: &Value) {
 
 /// An isolated, running copy of Shoji (its own exe copy, profile and DevTools port).
 pub struct Shoji {
-    child: Child,
+    child: Mutex<Child>,
     pub cdp: u16,
     pub dir: PathBuf,
     real_lists: bool,
@@ -394,7 +394,7 @@ impl Shoji {
         }
         let child = cmd.spawn().expect("start shoji.exe");
         Self {
-            child,
+            child: Mutex::new(child),
             cdp,
             dir,
             real_lists: opts.real_lists,
@@ -443,12 +443,12 @@ impl Shoji {
         self.page_where(|u| u.contains(part), Duration::from_secs(60))
             .unwrap_or_else(|| {
                 panic!(
-                    "no page with {part:?}; targets: {:?}\nstderr: {}",
+                    "no page with {part:?}; targets: {:?}\n{}",
                     self.targets()
                         .iter()
                         .map(|t| t["url"].as_str().unwrap_or("").to_string())
                         .collect::<Vec<_>>(),
-                    std::fs::read_to_string(self.dir.join("err.log")).unwrap_or_default()
+                    self.report()
                 )
             })
     }
@@ -462,17 +462,53 @@ impl Shoji {
         .expect("chrome strip")
     }
 
-    pub fn is_running(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(None))
+    pub fn is_running(&self) -> bool {
+        matches!(self.child.lock().unwrap().try_wait(), Ok(None))
+    }
+
+    /// What there is to know when the browser didn't come up: whether it runs, its output, and
+    /// the logs and files it wrote.
+    pub fn report(&self) -> String {
+        let status = self.child.lock().unwrap().try_wait();
+        let mut out = format!("process: {status:?}\n");
+        for f in ["out.log", "err.log"] {
+            let text = std::fs::read_to_string(self.dir.join(f)).unwrap_or_default();
+            out.push_str(&format!("{f}: {text}\n"));
+        }
+        let logs = self.data_dir().join("logs");
+        for e in std::fs::read_dir(logs).into_iter().flatten().flatten() {
+            let text = std::fs::read_to_string(e.path()).unwrap_or_default();
+            out.push_str(&format!("{}: {text}\n", e.file_name().to_string_lossy()));
+        }
+        fn walk(d: &Path, depth: usize, files: &mut Vec<String>) {
+            for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
+                files.push(e.path().display().to_string());
+                if depth < 3 && e.path().is_dir() {
+                    walk(&e.path(), depth + 1, files);
+                }
+            }
+        }
+        let mut files = Vec::new();
+        walk(&self.dir, 0, &mut files);
+        out.push_str(&format!("files ({}):\n", files.len()));
+        for f in files.iter().take(60) {
+            out.push_str(&format!("  {f}\n"));
+        }
+        out
     }
 }
 
 impl Drop for Shoji {
     fn drop(&mut self) {
         let _ = Command::new("taskkill")
-            .args(["/T", "/F", "/PID", &self.child.id().to_string()])
+            .args([
+                "/T",
+                "/F",
+                "/PID",
+                &self.child.lock().unwrap().id().to_string(),
+            ])
             .output();
-        let _ = self.child.wait();
+        let _ = self.child.lock().unwrap().wait();
         if self.real_lists {
             // Keep what was downloaded for the next run.
             let lists = self.data_dir().join("byobu");
