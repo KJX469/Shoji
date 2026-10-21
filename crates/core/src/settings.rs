@@ -407,6 +407,39 @@ pub struct PrivacySettings {
     pub save_passwords: bool,
     /// What to do with open tabs after a crash or force close: "ask", "always" or "never"
     pub restore_session: String,
+    /// Media with sound waits for a click or key press on the page
+    pub block_autoplay: bool,
+    /// Sites that may play sound on their own
+    pub autoplay_sites: Vec<String>,
+    /// DNS over HTTPS (read when the engine starts): "off", "automatic" (when the system's own
+    /// resolver offers it), a provider ("cloudflare", "quad9", "nextdns", "google") or "custom"
+    pub dns_over_https: String,
+    /// The resolver address for "custom"
+    pub dns_over_https_url: String,
+}
+
+/// DNS-over-HTTPS resolvers Shoji offers by name.
+pub const DOH_PROVIDERS: [(&str, &str); 4] = [
+    ("cloudflare", "https://cloudflare-dns.com/dns-query"),
+    ("quad9", "https://dns.quad9.net/dns-query"),
+    ("nextdns", "https://dns.nextdns.io/dns-query"),
+    ("google", "https://dns.google/dns-query{?dns}"),
+];
+
+impl PrivacySettings {
+    /// The engine's DNS-over-HTTPS mode and resolver for the current choice.
+    pub fn doh(&self) -> (&'static str, String) {
+        match self.dns_over_https.as_str() {
+            "off" => ("off", String::new()),
+            "custom" if self.dns_over_https_url.starts_with("https://") => {
+                ("secure", self.dns_over_https_url.clone())
+            }
+            name => match DOH_PROVIDERS.iter().find(|p| p.0 == name) {
+                Some((_, url)) => ("secure", url.to_string()),
+                None => ("automatic", String::new()),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -511,6 +544,10 @@ impl Default for PrivacySettings {
             fingerprinting: "standard".to_string(),
             save_passwords: true,
             restore_session: "ask".to_string(),
+            block_autoplay: true,
+            autoplay_sites: Vec::new(),
+            dns_over_https: "automatic".to_string(),
+            dns_over_https_url: String::new(),
         }
     }
 }
@@ -613,6 +650,16 @@ impl Settings {
         }
         self.appearance.dark_websites == Some(true)
             || listed(&self.appearance.dark_websites_include)
+    }
+
+    /// Whether media with sound must wait for a click on `host` (or a page URL).
+    pub fn autoplay_blocked_on(&self, host: &str) -> bool {
+        let host = extract_domain(host);
+        self.privacy.block_autoplay
+            && !self.privacy.autoplay_sites.iter().any(|p| {
+                let p = p.trim_start_matches("*.");
+                host == p || host.strip_suffix(p).is_some_and(|r| r.ends_with('.'))
+            })
     }
 
     /// Is the dark-website script needed at all (the global switch, or some site that is always dark)?
@@ -724,6 +771,20 @@ impl Settings {
         ) {
             self.privacy.fingerprinting = "standard".to_string();
         }
+        let doh = self.privacy.dns_over_https.as_str();
+        if !(matches!(doh, "off" | "automatic" | "custom")
+            || DOH_PROVIDERS.iter().any(|p| p.0 == doh))
+        {
+            self.privacy.dns_over_https = "automatic".to_string();
+        }
+        let url = self.privacy.dns_over_https_url.trim();
+        self.privacy.dns_over_https_url =
+            if url.starts_with("https://") && url.len() < 500 && !url.contains(char::is_whitespace)
+            {
+                url.to_string()
+            } else {
+                String::new()
+            };
         if !matches!(self.shield.mode.as_str(), "off" | "standard" | "aggressive") {
             self.shield.mode = "standard".to_string();
         }
@@ -750,6 +811,7 @@ impl Settings {
         }
         for list in [
             &mut self.privacy.persistent_sites,
+            &mut self.privacy.autoplay_sites,
             &mut self.appearance.dark_websites_exclude,
             &mut self.appearance.dark_websites_include,
             &mut self.shield.paused_sites,

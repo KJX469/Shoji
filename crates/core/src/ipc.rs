@@ -653,6 +653,12 @@ pub enum UiToHostMessage {
     ClearSiteData,
     /// How many cookies the page in view is sent; answered with `__siteCookies`
     SiteCookies,
+    /// Whether the site in view may play sound on its own; answered with `__siteAutoplay`
+    SiteAutoplay,
+    /// Let the site in view play sound on its own, or not
+    SetSiteAutoplay {
+        allow: bool,
+    },
     /// Delete the cookies and stored data of the page in view, then reload it
     ClearSiteCookies,
     /// Settings asks for the installed extensions

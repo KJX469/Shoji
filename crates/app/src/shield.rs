@@ -471,6 +471,19 @@ pub fn init(proxy: EventLoopProxy<BrowserEvent>) {
 
 static CLEAN_LINKS: AtomicBool = AtomicBool::new(true);
 static SEND_GPC: AtomicBool = AtomicBool::new(true);
+
+/// Whether media with sound waits for a click on a page URL (reads the live settings).
+pub type AutoplayFor = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
+/// How autoplay is decided; set once by the host.
+static AUTOPLAY_FOR: OnceLock<AutoplayFor> = OnceLock::new();
+
+pub fn set_autoplay_for(f: AutoplayFor) {
+    let _ = AUTOPLAY_FOR.set(f);
+}
+
+/// Holds back media with sound until the person interacts (see `ui/autoplay.js`).
+const AUTOPLAY_SCRIPT: &str = include_str!("../ui/autoplay.js");
 static HOOK_REQUESTS: AtomicBool = AtomicBool::new(true);
 
 /// Whether tabs need to see their network requests at all: to filter them, or to add the GPC
@@ -1027,6 +1040,12 @@ pub fn attach(
                 &dark_slot,
                 crate::darkfixes::script_for(&url).as_deref(),
             );
+            if web && AUTOPLAY_FOR.get().is_some_and(|f| f(&url)) {
+                script = Some(format!(
+                    "{AUTOPLAY_SCRIPT}\n{}",
+                    script.as_deref().unwrap_or("")
+                ));
+            }
             if web && SEND_GPC.load(Ordering::Relaxed) {
                 // The header alone is not enough: consent scripts read the property.
                 let gpc = format!("{GPC_SCRIPT}\n{}", script.as_deref().unwrap_or(""));

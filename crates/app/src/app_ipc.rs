@@ -399,6 +399,40 @@ impl BrowserApp {
             }
             // Dropdowns always float; there is no pinned side panel any more.
             M::PinSidebar { .. } => {}
+            M::SiteAutoplay | M::SetSiteAutoplay { .. } => {
+                let url = self
+                    .windows
+                    .get(&win_id)
+                    .and_then(|w| w.tabs.active_tab())
+                    .map(|t| t.url.clone())
+                    .unwrap_or_default();
+                let Some(host) = extract_host(&url).filter(|_| !url.starts_with("http://shoji."))
+                else {
+                    return;
+                };
+                let host = host.strip_prefix("www.").unwrap_or(&host).to_string();
+                if let M::SetSiteAutoplay { allow } = msg {
+                    self.update_settings(|s| {
+                        s.privacy.autoplay_sites.retain(|h| h != &host);
+                        if allow {
+                            s.privacy.autoplay_sites.push(host.clone());
+                        }
+                    });
+                    // The page picks it up when it loads again.
+                    if let Some(tab) = self.windows.get(&win_id).and_then(|w| w.active()) {
+                        let _ = tab.view.evaluate_script("location.reload()");
+                    }
+                }
+                let json = serde_json::json!({
+                    "blocking": self.settings.privacy.block_autoplay,
+                    "allowed": !self.settings.autoplay_blocked_on(&host),
+                });
+                if let Some(win) = self.windows.get(&win_id) {
+                    win.eval_sidebar(&format!(
+                        "window.__siteAutoplay && window.__siteAutoplay({json})"
+                    ));
+                }
+            }
             M::SiteCookies | M::ClearSiteCookies => {
                 let clear = matches!(msg, M::ClearSiteCookies);
                 let Some(tab) = self.windows.get(&win_id).and_then(|w| w.active()) else {

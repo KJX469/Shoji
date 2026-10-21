@@ -38,7 +38,7 @@ jobs:
             Start-Process "$env:RUNNER_TEMP\wv2.exe" -ArgumentList "/silent /install" -Wait
           }
       - name: Browser tests and blocking score
-        run: cargo test -p shoji --test browser --test score --locked -- --nocapture
+        run: cargo test -p shoji --test browser --test score --test recovery --test flags --locked -- --nocapture
 
   portable:
     runs-on: ubuntu-latest
