@@ -251,6 +251,36 @@ impl BrowserApp {
             });
     }
 
+    /// Send the downloaded catalog to the open store pages.
+    pub(super) fn push_extension_catalog(&mut self) {
+        let Some(json) = extstore::read_catalog(&self.data_dir) else {
+            return;
+        };
+        let js = format!("window.__catalog && window.__catalog({json})");
+        let ids: Vec<WindowId> = self.windows.keys().copied().collect();
+        for id in ids {
+            self.eval_welcome_and_settings(id, &js);
+        }
+    }
+
+    /// Download a newer catalog if the one on disk is old, at most every six hours.
+    pub(super) fn refresh_extension_catalog(&mut self) {
+        const EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+        if self.catalog_checked.is_some_and(|t| t.elapsed() < EVERY) {
+            return;
+        }
+        self.catalog_checked = Some(Instant::now());
+        let proxy = self.proxy.clone();
+        let dir = self.data_dir.clone();
+        let _ = std::thread::Builder::new()
+            .name("shoji-extension-catalog".into())
+            .spawn(move || {
+                if extstore::refresh_catalog(&dir) == Ok(true) {
+                    let _ = proxy.send_event(BrowserEvent::CatalogUpdated);
+                }
+            });
+    }
+
     pub(super) fn push_extension_buttons(&self, win_id: WindowId) {
         if let Some(win) = self.windows.get(&win_id) {
             win.eval_chrome(&format!(

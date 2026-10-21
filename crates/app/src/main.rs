@@ -304,6 +304,8 @@ pub(crate) enum BrowserEvent {
     VaultBreaches(HashMap<String, u64>, bool),
     /// Store extensions were checked for updates: the ids that were replaced on disk
     ExtensionsUpdated(Result<Vec<String>, String>),
+    /// The store catalog was downloaded again
+    CatalogUpdated,
     /// A window's extension popup wants this size (logical px)
     ExtensionPopupSize(WindowId, f64, f64),
     /// A window's extension popup lost focus or closed itself
@@ -899,6 +901,7 @@ struct BrowserApp {
     popup_blurred: Option<(String, Instant)>,
     /// When store extensions were last checked for updates
     extensions_checked: Option<Instant>,
+    catalog_checked: Option<Instant>,
     /// The toolbar has asked the engine for the installed extensions
     extensions_asked: std::cell::Cell<bool>,
     favourites: shoji_core::userdata::Favourites,
@@ -1079,6 +1082,7 @@ impl BrowserApp {
             popup_blurred: None,
             extensions_asked: std::cell::Cell::new(false),
             extensions_checked: None,
+            catalog_checked: None,
             settings,
             settings_path,
             data_dir: data_dir.clone(),
@@ -2582,6 +2586,7 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                     self.eval_welcome_and_settings(id, &js);
                 }
             }
+            BrowserEvent::CatalogUpdated => self.push_extension_catalog(),
             BrowserEvent::ExtensionPopupSize(win_id, w, h) => {
                 self.size_extension_popup(win_id, w, h)
             }

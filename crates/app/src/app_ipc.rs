@@ -1544,6 +1544,10 @@ impl BrowserApp {
                 }
             }
             M::ExtensionsQuery => self.request_extension_list(),
+            M::ExtensionsCatalog => {
+                self.push_extension_catalog();
+                self.refresh_extension_catalog();
+            }
             M::AddExtension => self.add_extension_from_folder(),
             M::SetExtensionPinned { id, pinned } => {
                 self.update_settings(|s| {

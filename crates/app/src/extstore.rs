@@ -415,9 +415,94 @@ pub fn find<'a>(pages: &'a [ExtensionPages], id: &str, name: &str) -> Option<&'a
         .or_else(|| pages.iter().find(|p| p.name == name))
 }
 
+/// The catalog the store page browses, built weekly into the Byobu data release.
+const CATALOG_URL: &str =
+    "https://github.com/KJX469/Shoji/releases/download/byobu-data/extension-catalog.json";
+const CATALOG_MAX_BYTES: u64 = 8 * 1024 * 1024;
+const CATALOG_MAX_AGE: Duration = Duration::from_secs(3 * 24 * 60 * 60);
+
+fn catalog_file(data_dir: &Path) -> PathBuf {
+    data_dir.join("extension-catalog.json")
+}
+
+/// The catalog's entries that are well formed, as JSON. Icons must be embedded images so the
+/// store page never makes a request of its own.
+fn clean_catalog(json: &str) -> Option<String> {
+    let mut list: Vec<serde_json::Value> = serde_json::from_str(json).ok()?;
+    list.retain_mut(|e| {
+        let ok = e["id"].as_str().is_some_and(|id| parse_id(id).is_some())
+            && e["name"].as_str().is_some_and(|n| !n.is_empty());
+        if ok
+            && !e["icon"]
+                .as_str()
+                .is_some_and(|i| i.starts_with("data:image/"))
+        {
+            e["icon"] = serde_json::Value::String(String::new());
+        }
+        ok
+    });
+    (!list.is_empty())
+        .then(|| serde_json::to_string(&list).ok())
+        .flatten()
+}
+
+/// The downloaded catalog, if there is one.
+pub fn read_catalog(data_dir: &Path) -> Option<String> {
+    clean_catalog(&std::fs::read_to_string(catalog_file(data_dir)).ok()?)
+}
+
+/// Download the catalog unless the one on disk is recent. `Ok(true)` when it was replaced.
+/// Blocking.
+pub fn refresh_catalog(data_dir: &Path) -> Result<bool, String> {
+    let file = catalog_file(data_dir);
+    let fresh = std::fs::metadata(&file)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age < CATALOG_MAX_AGE);
+    if fresh {
+        return Ok(false);
+    }
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(60)))
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let mut resp = agent.get(CATALOG_URL).call().map_err(|e| e.to_string())?;
+    if resp.status().as_u16() != 200 {
+        return Err(format!("The catalog download answered {}.", resp.status()));
+    }
+    let body = resp
+        .body_mut()
+        .with_config()
+        .limit(CATALOG_MAX_BYTES)
+        .read_to_string()
+        .map_err(|e| e.to_string())?;
+    let clean = clean_catalog(&body).ok_or("The catalog download was empty.")?;
+    let tmp = file.with_extension("tmp");
+    std::fs::write(&tmp, clean).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &file).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn catalog_entries_are_checked_and_icons_kept_local() {
+        let id = "nngceckbapebfimnlniiiahkandclblb";
+        let json = format!(
+            r#"[{{"id":"{id}","name":"A","icon":"https://lh3.example/x"}},{{"id":"short","name":"B"}},{{"id":"{id}","name":"","icon":""}},{{"id":"{id}","name":"C","icon":"data:image/webp;base64,AAAA"}}]"#
+        );
+        let out: Vec<serde_json::Value> =
+            serde_json::from_str(&clean_catalog(&json).unwrap()).unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0]["icon"], "");
+        assert_eq!(out[1]["icon"], "data:image/webp;base64,AAAA");
+        assert_eq!(clean_catalog("[]"), None);
+        assert_eq!(clean_catalog("not json"), None);
+    }
 
     #[test]
     fn engine_versions_are_four_numbers() {
