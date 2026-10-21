@@ -566,3 +566,429 @@ fn test_security_parsers_survive_mutated_input() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Values a damaged or hostile browser profile can hold where a reader expects something tidy.
+const HOSTILE_SQL: &[&str] = &[
+    "NULL",
+    "0",
+    "-1",
+    "9223372036854775807",
+    "-9223372036854775808",
+    "2.5e300",
+    "''",
+    "'javascript:alert(1)'",
+    "'https://ok.test/'",
+    "'http://ok.test/x'",
+    "X'FF00FE'",
+    "X''",
+    "'v10'",
+    "'not a number'",
+];
+
+/// Create `table` with `cols`, put in the `good` rows, and fill the rest with rows mixing
+/// [`HOSTILE_SQL`] values.
+fn hostile_table(
+    c: &rusqlite::Connection,
+    table: &str,
+    cols: &[&str],
+    good: &[&str],
+    rng: &mut Rng,
+) {
+    c.execute_batch(&format!("CREATE TABLE {table}({});", cols.join(", ")))
+        .unwrap();
+    for row in good {
+        c.execute_batch(&format!("INSERT INTO {table} VALUES ({row});"))
+            .unwrap();
+    }
+    for _ in 0..60 {
+        let values: Vec<&str> = cols
+            .iter()
+            .map(|_| HOSTILE_SQL[rng.below(HOSTILE_SQL.len())])
+            .collect();
+        let _ = c.execute_batch(&format!(
+            "INSERT INTO {table} VALUES ({});",
+            values.join(", ")
+        ));
+    }
+}
+
+/// A decryptor that "decrypts" anything into short or odd byte strings.
+struct Garbled;
+impl shoji_core::import::Decryptor for Garbled {
+    fn load_key(&mut self, _: &std::path::Path) -> bool {
+        true
+    }
+    fn decrypt(&self, blob: &[u8]) -> Option<Vec<u8>> {
+        match blob.len() % 3 {
+            0 => None,
+            1 => Some(blob.iter().rev().copied().collect()),
+            _ => Some(vec![0xff; blob.len() / 2]),
+        }
+    }
+}
+
+/// Every reader of every browser family, over damaged copies of the files it reads: hostile rows
+/// in the right tables, then the same databases with bytes flipped, cut short or overwritten.
+/// Nothing may panic, and only web addresses may come out.
+#[test]
+fn test_security_profile_imports_survive_damaged_files() {
+    use shoji_core::import::{catalog, read_profile, Kinds};
+    let root = std::env::temp_dir().join(format!("shoji_fuzz_import_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let chromium = root.join("chromium");
+    let firefox = root.join("firefox");
+    std::fs::create_dir_all(chromium.join("Network")).unwrap();
+    std::fs::create_dir_all(&firefox).unwrap();
+    let mut rng = Rng(0x1a2b_3c4d_5e6f_7081);
+
+    type Table<'a> = (&'a str, &'a [&'a str], &'a [&'a str]);
+    let db = |path: PathBuf, tables: &[Table], rng: &mut Rng| {
+        let c = rusqlite::Connection::open(&path).unwrap();
+        for (t, cols, good) in tables {
+            hostile_table(&c, t, cols, good, rng);
+        }
+        path
+    };
+    let dbs = [
+        db(
+            chromium.join("History"),
+            &[(
+                "urls",
+                &[
+                    "id",
+                    "url",
+                    "title",
+                    "visit_count",
+                    "last_visit_time",
+                    "hidden",
+                ],
+                &["1, 'https://a.test/', 'A', 2, 13300000000000000, 0"],
+            )],
+            &mut rng,
+        ),
+        db(
+            chromium.join("Network").join("Cookies"),
+            &[
+                ("meta", &["key", "value"], &["'version', '24'"]),
+                (
+                    "cookies",
+                    &[
+                        "host_key",
+                        "name",
+                        "value",
+                        "encrypted_value",
+                        "path",
+                        "expires_utc",
+                        "is_secure",
+                        "is_httponly",
+                        "samesite",
+                    ],
+                    &[
+                        "'.a.test', 'n', 'v', X'', '/', 0, 1, 1, 1",
+                        "'.a.test', 'e', '', X'763130AABB', '/', 0, 1, 0, -1",
+                    ],
+                ),
+            ],
+            &mut rng,
+        ),
+        db(
+            chromium.join("Login Data"),
+            &[(
+                "logins",
+                &[
+                    "origin_url",
+                    "username_value",
+                    "password_value",
+                    "blacklisted_by_user",
+                ],
+                &["'https://a.test/', 'me', X'76313041', 0"],
+            )],
+            &mut rng,
+        ),
+        db(
+            firefox.join("places.sqlite"),
+            &[
+                (
+                    "moz_places",
+                    &[
+                        "id",
+                        "url",
+                        "title",
+                        "visit_count",
+                        "last_visit_date",
+                        "hidden",
+                    ],
+                    &["1, 'https://a.test/', 'A', 3, 1700000000000000, 0"],
+                ),
+                (
+                    "moz_bookmarks",
+                    &["id", "type", "fk", "parent", "position", "title"],
+                    &["2, 2, NULL, 1, 0, 'toolbar'", "3, 1, 1, 2, 0, 'A'"],
+                ),
+            ],
+            &mut rng,
+        ),
+        db(
+            firefox.join("cookies.sqlite"),
+            &[(
+                "moz_cookies",
+                &[
+                    "host",
+                    "name",
+                    "value",
+                    "path",
+                    "expiry",
+                    "isSecure",
+                    "isHttpOnly",
+                    "sameSite",
+                ],
+                &["'.a.test', 'n', 'v', '/', 4102444800, 1, 0, 1"],
+            )],
+            &mut rng,
+        ),
+    ];
+    let originals: Vec<Vec<u8>> = dbs.iter().map(|p| std::fs::read(p).unwrap()).collect();
+    let bookmarks = r#"{"roots":{"bookmark_bar":{"children":[{"type":"url","name":"A","url":"https://a.test/"}]}}}"#;
+    let logins = r#"{"logins":[{"hostname":"https://a.test","encryptedUsername":"x","encryptedPassword":"y"}]}"#;
+
+    let source = |id| catalog::find(id).unwrap();
+    let profile = |dir: &PathBuf| catalog::Profile {
+        name: "p".into(),
+        dir: dir.clone(),
+        local_state: dir.join("Local State"),
+    };
+    let found = std::cell::Cell::new([0usize; 4]);
+    let check = |imported: shoji_core::import::Imported| {
+        let mut n = found.get();
+        n[0] += imported.history.len();
+        n[1] += imported.favourites.len();
+        n[2] += imported.cookies.len();
+        n[3] += imported.logins.len();
+        found.set(n);
+        let web = |u: &str| u.starts_with("https://") || u.starts_with("http://");
+        assert!(imported.history.iter().all(|h| web(&h.url)));
+        assert!(imported.favourites.iter().all(|f| web(&f.url)));
+        assert!(imported.logins.iter().all(|l| web(&l.url)));
+    };
+    for round in 0..120 {
+        // Round 0 reads the hostile rows as they are; later rounds damage the files too.
+        if round > 0 {
+            for (path, original) in dbs.iter().zip(&originals) {
+                let mut bytes = original.clone();
+                match rng.below(3) {
+                    0 => bytes.truncate(rng.below(bytes.len())),
+                    1 => {
+                        for _ in 0..1 + rng.below(32) {
+                            let at = rng.below(bytes.len());
+                            bytes[at] = rng.next() as u8;
+                        }
+                    }
+                    _ => {
+                        // Overwrite a stretch past the header, where the pages are
+                        let at = 100 + rng.below(bytes.len().saturating_sub(100).max(1));
+                        let end = (at + 1 + rng.below(512)).min(bytes.len());
+                        for b in bytes.iter_mut().take(end).skip(at) {
+                            *b = rng.next() as u8;
+                        }
+                    }
+                }
+                std::fs::write(path, bytes).unwrap();
+            }
+        }
+        std::fs::write(
+            chromium.join("Bookmarks"),
+            mutate(&mut rng, bookmarks.as_bytes()),
+        )
+        .unwrap();
+        std::fs::write(
+            firefox.join("logins.json"),
+            mutate(&mut rng, logins.as_bytes()),
+        )
+        .unwrap();
+        let decryptors: [&mut dyn shoji_core::import::Decryptor; 2] =
+            [&mut shoji_core::import::NoDecryptor, &mut Garbled];
+        for d in decryptors {
+            check(read_profile(
+                source("chrome"),
+                &profile(&chromium),
+                Kinds::default(),
+                d,
+                &mut |_| {},
+            ));
+        }
+        check(read_profile(
+            source("firefox"),
+            &profile(&firefox),
+            Kinds::default(),
+            &mut Garbled,
+            &mut |_| {},
+        ));
+        if round == 0 {
+            // The tidy rows among the hostile ones still come through.
+            assert!(found.get().iter().all(|n| *n > 0), "{:?}", found.get());
+        }
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Profile discovery and Internet Explorer favourites over mutated `Local State`,
+/// `profiles.ini` and `.url` files: nothing panics, and every profile found is a real folder.
+#[test]
+fn test_security_profile_discovery_survives_mutated_files() {
+    use shoji_core::import::{bookmarks, catalog};
+    let root = std::env::temp_dir().join(format!("shoji_fuzz_profiles_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let chromium = root.join("User Data");
+    let firefox = root.join("Firefox");
+    let favorites = root.join("Favorites");
+    for d in [
+        chromium.join("Default"),
+        chromium.join("Profile 1"),
+        firefox.join("Profiles").join("a.default"),
+        favorites.join("Folder"),
+    ] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    for p in ["Default", "Profile 1"] {
+        std::fs::write(chromium.join(p).join("Preferences"), "{}").unwrap();
+    }
+    let local_state =
+        r#"{"profile":{"info_cache":{"Default":{"name":"Me"},"Profile 1":{"name":"Work"}}}}"#;
+    let ini = "[General]\nStartWithLastProfile=1\n\n[Profile0]\nName=default\nIsRelative=1\nPath=Profiles/a.default\nDefault=1\n\n[Profile1]\nName=abs\nIsRelative=0\nPath=C:\\nowhere\n";
+    let url_file = "[InternetShortcut]\r\nURL=https://a.test/\r\nIconIndex=0\r\n";
+    let mut rng = Rng(0x0dd5_eed5_0fc0_ffee);
+    for _ in 0..1500 {
+        std::fs::write(
+            chromium.join("Local State"),
+            mutate(&mut rng, local_state.as_bytes()),
+        )
+        .unwrap();
+        std::fs::write(
+            firefox.join("profiles.ini"),
+            mutate(&mut rng, ini.as_bytes()),
+        )
+        .unwrap();
+        std::fs::write(
+            favorites.join("Folder").join("A.url"),
+            mutate(&mut rng, url_file.as_bytes()),
+        )
+        .unwrap();
+        for (id, dir) in [
+            ("chrome", &chromium),
+            ("firefox", &firefox),
+            ("ie", &favorites),
+        ] {
+            for p in catalog::profiles(catalog::find(id).unwrap(), dir) {
+                assert!(p.dir.exists(), "{id}: {}", p.dir.display());
+            }
+        }
+        for f in bookmarks::from_url_files(&favorites) {
+            assert!(f.url.starts_with("https://") || f.url.starts_with("http://"));
+        }
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The settings loader with a wrong type, an odd value or a removed key at every field of a
+/// saved file: it keeps the rest of the file and every value stays one the browser accepts.
+#[test]
+fn test_security_settings_loader_survives_wrong_values_at_every_field() {
+    fn leaves(v: &serde_json::Value, at: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
+        match v {
+            serde_json::Value::Object(m) if !m.is_empty() => {
+                for (k, child) in m {
+                    at.push(k.clone());
+                    leaves(child, at, out);
+                    at.pop();
+                }
+            }
+            _ => out.push(at.clone()),
+        }
+    }
+    let base = serde_json::to_value(Settings::default()).unwrap();
+    let mut paths = Vec::new();
+    leaves(&base, &mut Vec::new(), &mut paths);
+    assert!(paths.len() > 40, "{}", paths.len());
+    let odd: Vec<serde_json::Value> = vec![
+        serde_json::Value::Null,
+        serde_json::json!(-1),
+        serde_json::json!(1e300),
+        serde_json::json!(-1e300),
+        serde_json::json!(u64::MAX),
+        serde_json::json!(""),
+        serde_json::json!("x".repeat(70_000)),
+        serde_json::json!("\u{0}\u{202e}#zz"),
+        serde_json::json!([1, "a", null]),
+        serde_json::json!({ "nested": { "deep": [] } }),
+        serde_json::json!(true),
+    ];
+    let dir = std::env::temp_dir().join(format!("shoji_fuzz_settings_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("settings.json");
+    let mut rng = Rng(0x5e77_1495_0000_0001);
+    for p in &paths {
+        for value in odd.iter().map(Some).chain([None]) {
+            let mut doc = base.clone();
+            // A recognisable value elsewhere must survive the damage here.
+            doc["search_engine"] = serde_json::json!("google");
+            let mut slot = &mut doc;
+            for k in &p[..p.len() - 1] {
+                slot = &mut slot[k.as_str()];
+            }
+            let last = p.last().unwrap().as_str();
+            match value {
+                Some(v) => slot[last] = v.clone(),
+                None => {
+                    if let Some(m) = slot.as_object_mut() {
+                        m.remove(last);
+                    }
+                }
+            }
+            let text = serde_json::to_string(&doc).unwrap();
+            // Every so often the file is also cut short, as a crash mid-write would leave it.
+            let text = if rng.below(10) == 0 {
+                text[..rng.below(text.len())].to_string()
+            } else {
+                text
+            };
+            std::fs::write(&path, &text).unwrap();
+            let s = Settings::load_from_path(&path);
+            assert!(matches!(
+                s.shield.mode.as_str(),
+                "off" | "standard" | "aggressive"
+            ));
+            assert!(matches!(
+                s.privacy.fingerprinting.as_str(),
+                "off" | "standard" | "strict"
+            ));
+            assert!(matches!(
+                s.privacy.restore_session.as_str(),
+                "ask" | "always" | "never"
+            ));
+            assert!(matches!(
+                s.appearance.theme.as_str(),
+                "system" | "light" | "dark"
+            ));
+            assert!((0.25..=3.0).contains(&s.appearance.default_zoom_level));
+            assert!(s.shield.custom_rules.len() <= 200_000);
+            for policy in [
+                &s.permissions.location,
+                &s.permissions.camera,
+                &s.permissions.microphone,
+                &s.permissions.notifications,
+            ] {
+                assert!(matches!(policy.as_str(), "ask" | "allow" | "block"));
+            }
+            if text.len() == serde_json::to_string(&doc).unwrap().len() && p[0] != "search_engine" {
+                assert_eq!(
+                    s.search_engine, "google",
+                    "{p:?} = {value:?} cost other values"
+                );
+            }
+            // Saving what was loaded gives a file that loads back the same.
+            s.save_to_path(&path).unwrap();
+            assert_eq!(Settings::load_from_path(&path), s, "{p:?}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
