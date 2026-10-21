@@ -27,7 +27,7 @@ jobs:
             Start-Process "$env:RUNNER_TEMP\wv2.exe" -ArgumentList "/silent /install" -Wait
           }
           $dirs | Where-Object { Test-Path $_ } | ForEach-Object { Get-ChildItem $_ | Select-Object -ExpandProperty Name }
-          whoami; query session
+          whoami; query session; exit 0
       - name: Tests (including the browser tests and the blocking score)
         run: cargo test --workspace --locked -- --nocapture
 
