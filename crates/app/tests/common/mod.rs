@@ -378,7 +378,8 @@ impl Shoji {
             copy_dir(&list_cache(), &data.join("byobu"));
         }
 
-        let cdp = free_port();
+        // Port 0: the engine picks a free port and writes it to `DevToolsActivePort`.
+        let cdp = 0;
         let mut args = format!(
             "--remote-debugging-port={cdp} --no-first-run --enable-logging --log-file=\"{}\"",
             dir.join("engine-debug.log").display()
@@ -425,13 +426,33 @@ impl Shoji {
 
     /// Every DevTools target (each Shoji webview is one).
     pub fn targets(&self) -> Vec<Value> {
-        let url = format!("http://127.0.0.1:{}/json", self.cdp);
-        ureq::get(&url)
-            .call()
+        self.try_targets().unwrap_or_default()
+    }
+
+    /// The DevTools port the engine actually listens on (it picks one and writes it down).
+    fn devtools_port(&self) -> Option<u16> {
+        let file = self
+            .dir
+            .join("local/Shoji/User Data/EBWebView/DevToolsActivePort");
+        std::fs::read_to_string(file)
+            .ok()?
+            .lines()
+            .next()?
+            .trim()
+            .parse()
             .ok()
-            .and_then(|mut r| r.body_mut().read_to_string().ok())
-            .and_then(|s| serde_json::from_str::<Vec<Value>>(&s).ok())
-            .unwrap_or_default()
+    }
+
+    fn try_targets(&self) -> Result<Vec<Value>, String> {
+        let port = self.devtools_port().ok_or("no DevToolsActivePort yet")?;
+        let url = format!("http://127.0.0.1:{port}/json");
+        let text = ureq::get(&url)
+            .call()
+            .map_err(|e| format!("{url}: {e}"))?
+            .body_mut()
+            .read_to_string()
+            .map_err(|e| format!("{url}: {e}"))?;
+        serde_json::from_str(&text).map_err(|e| format!("{url}: {e}: {text:.200}"))
     }
 
     /// The first page target whose URL satisfies `pick`, once it exists.
@@ -486,7 +507,11 @@ impl Shoji {
     /// What there is to know when the browser didn't come up: whether it runs, its output, and
     /// the logs and files it wrote.
     pub fn report(&self) -> String {
-        let mut out = format!("process: running {}\n", self.is_running());
+        let mut out = format!(
+            "process: running {}\ndevtools: {:?}\n",
+            self.is_running(),
+            self.try_targets().map(|t| t.len())
+        );
         let engines = Command::new("tasklist")
             .args(["/FI", "IMAGENAME eq msedgewebview2.exe"])
             .output()
