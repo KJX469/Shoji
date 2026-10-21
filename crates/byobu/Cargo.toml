@@ -5,6 +5,7 @@ edition = "2021"
 authors = ["Shoji Contributors"]
 description = "Byobu: Shoji's ad and tracker shield"
 license = "MIT"
+publish = false
 
 [dependencies]
 # Brave's matcher. `single-thread` is left off so a rebuilt engine can be built on a worker

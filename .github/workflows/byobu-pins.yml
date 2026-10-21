@@ -1,0 +1,65 @@
+# Once a week, proposes moving byobu-pins.json to the latest upstream commits, with what changed.
+# Nothing upstream is run here; merging the pull request is what publishes new data.
+name: byobu-pins
+
+on:
+  schedule:
+    - cron: "41 6 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Compare with upstream
+        id: cmp
+        run: |
+          pins=.github/byobu-pins.json
+          {
+            echo "Scriptlet and resource changes since the current pins."
+            echo
+          } > "$RUNNER_TEMP/body.md"
+          changed=0
+          for name in ublock brave; do
+            case $name in
+              ublock) url=https://github.com/gorhill/uBlock; paths="src/js/resources src/js/redirect-resources.js src/web_accessible_resources" ;;
+              brave) url=https://github.com/brave/adblock-resources; paths="dist/resources.json" ;;
+            esac
+            old=$(jq -r ".$name" "$pins")
+            new=$(git ls-remote "$url.git" refs/heads/master | cut -f1)
+            [ "$old" = "$new" ] && continue
+            git clone -q --filter=blob:none --no-checkout "$url.git" "$RUNNER_TEMP/$name"
+            diff=$(git -C "$RUNNER_TEMP/$name" diff --stat "$old" "$new" -- $paths)
+            [ -z "$diff" ] && continue
+            changed=1
+            jq --arg n "$name" --arg v "$new" '.[$n] = $v' "$pins" > "$RUNNER_TEMP/pins" && mv "$RUNNER_TEMP/pins" "$pins"
+            {
+              echo "### $name"
+              echo "$url/compare/$old...$new"
+              echo '```'
+              git -C "$RUNNER_TEMP/$name" log --oneline "$old..$new" -- $paths | head -40
+              echo
+              echo "$diff"
+              echo '```'
+            } >> "$RUNNER_TEMP/body.md"
+          done
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+      - name: Open a pull request
+        if: steps.cmp.outputs.changed == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch=byobu/pins-$(date -u +%Y%m%d)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -am "Byobu: move upstream pins"
+          git push -f origin "$branch"
+          gh pr create --title "Byobu: move upstream pins" --body-file "$RUNNER_TEMP/body.md" --head "$branch" \
+            || gh pr edit "$branch" --body-file "$RUNNER_TEMP/body.md"

@@ -226,7 +226,7 @@ mod imp {
         }
         // Windows wants BGRA.
         let mut bgra = rgba;
-        for px in bgra.chunks_exact_mut(4) {
+        for px in bgra.as_chunks_mut::<4>().0 {
             px.swap(0, 2);
         }
         let color = CreateBitmap(
@@ -265,6 +265,7 @@ mod imp {
                 // The executable's icon resource has id 1 (see build.rs): MAKEINTRESOURCE(1), a
                 // small integer in the pointer, not an address (a dangling pointer is 2 here,
                 // which is no icon at all, so the tray showed an empty slot).
+                #[allow(clippy::manual_dangling_ptr)]
                 let icon = tinted_icon()
                     .or_else(|| LoadIconW(Some(hinst.into()), PCWSTR(1 as *const u16)).ok());
                 data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;

@@ -5,6 +5,7 @@ edition = "2021"
 authors = ["Shoji Contributors"]
 description = "Fast, non-elevated installer and uninstaller for Shoji"
 license = "MIT"
+publish = false
 
 [dependencies]
 shoji-core = { path = "../core" }
