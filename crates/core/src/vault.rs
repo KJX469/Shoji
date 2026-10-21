@@ -612,7 +612,7 @@ impl Vault {
             .map(|l| l.id.clone())
             .collect();
         let mut by_pw: BTreeMap<&str, Vec<String>> = BTreeMap::new();
-        for l in &self.data.logins {
+        for l in self.data.logins.iter().filter(|l| !l.password.is_empty()) {
             by_pw
                 .entry(l.password.as_str())
                 .or_default()
