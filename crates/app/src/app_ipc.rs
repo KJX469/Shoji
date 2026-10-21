@@ -843,6 +843,7 @@ impl BrowserApp {
             }
             M::VaultLock => {
                 self.vault.lock();
+                self.forget_breaches();
                 self.push_vault();
             }
             M::VaultSetMaster { master } => {

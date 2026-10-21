@@ -300,6 +300,8 @@ pub(crate) enum BrowserEvent {
     ExtensionsChanged(Option<String>),
     /// A store extension was downloaded and unpacked; the engine can load this folder now
     ExtensionFetched(Result<PathBuf, String>),
+    /// Breach counts by password hash, and whether every lookup was answered
+    VaultBreaches(HashMap<String, u64>, bool),
     /// A window's extension popup wants this size (logical px)
     ExtensionPopupSize(WindowId, f64, f64),
     /// A window's extension popup lost focus or closed itself
@@ -924,6 +926,7 @@ struct BrowserApp {
     /// When the history and download lists were last written to disk
     stores_flushed: Instant,
     vault: shoji_core::vault::Vault,
+    breaches: app_vault::Breaches,
     /// A login the user just submitted on a page, waiting for their answer to "save it?"
     pending_login: Option<PendingLogin>,
     /// Cookies read by an import, waiting for a tab that uses the real profile (internal pages
@@ -1094,6 +1097,7 @@ impl BrowserApp {
             clear_pending: false,
             stores_flushed: Instant::now(),
             vault,
+            breaches: Default::default(),
             pending_login: None,
             pending_cookies: Mutex::new(Vec::new()),
             site_data,
@@ -2572,6 +2576,7 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 self.size_extension_popup(win_id, w, h)
             }
             BrowserEvent::ExtensionPopupClosed(win_id) => self.blur_extension_popup(win_id),
+            BrowserEvent::VaultBreaches(found, complete) => self.breaches_checked(found, complete),
             BrowserEvent::SiteCookies(win_id, n, cleared) => {
                 if let Some(win) = self.windows.get(&win_id) {
                     win.eval_sidebar(&format!(
