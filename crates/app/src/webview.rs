@@ -78,6 +78,8 @@ pub fn attach_accelerators(webview: &WebView, origin: Origin, proxy: EventLoopPr
 pub struct PopupRequest {
     pub tab_id: TabId,
     pub uri: String,
+    /// The address of the page asking
+    pub opener: String,
     args: ICoreWebView2NewWindowRequestedEventArgs,
     deferral: ICoreWebView2Deferral,
 }
@@ -394,16 +396,21 @@ pub fn attach_tab_events(
     // target="_blank" and window.open() become tabs.
     {
         let proxy = proxy.clone();
+        let core_src = core.clone();
         let handler = NewWindowRequestedEventHandler::create(Box::new(move |_, args| {
             let Some(args) = args else { return Ok(()) };
             let mut uri = PWSTR::null();
             unsafe { args.Uri(&mut uri)? };
             let uri = take(uri);
+            let mut src = PWSTR::null();
+            unsafe { core_src.Source(&mut src)? };
+            let opener = take(src);
             // Held open while the host builds a tab, which becomes the page's popup.
             if let Ok(deferral) = unsafe { args.GetDeferral() } {
                 let _ = proxy.send_event(BrowserEvent::PopupRequested(PopupRequest {
                     tab_id,
                     uri,
+                    opener,
                     args: args.clone(),
                     deferral,
                 }));
@@ -501,6 +508,12 @@ pub fn attach_tab_events(
     if let Ok(core4) = core.cast::<ICoreWebView2_4>() {
         let handler = DownloadStartingEventHandler::create(Box::new(move |_, args| {
             let Some(args) = args else { return Ok(()) };
+            // Byōbu stopped it (a dangerous download), before this handler ran.
+            let mut cancelled = BOOL(0);
+            unsafe { args.Cancel(&mut cancelled)? };
+            if cancelled.as_bool() {
+                return Ok(());
+            }
             let op = unsafe { args.DownloadOperation()? };
             let mut path = PWSTR::null();
             unsafe { op.ResultFilePath(&mut path)? };

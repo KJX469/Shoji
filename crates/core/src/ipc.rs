@@ -721,6 +721,10 @@ pub enum UiToHostMessage {
         host: String,
         url: String,
     },
+    /// Keep a download Byobu stopped as dangerous (its notice only); `id` is from the notice
+    DownloadAnyway {
+        id: u64,
+    },
     /// Explicit user bypass of an untrusted TLS certificate (interstitial page only)
     BypassCertificateError {
         tab_id: TabId,

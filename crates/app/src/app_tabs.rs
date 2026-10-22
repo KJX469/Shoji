@@ -329,8 +329,16 @@ impl BrowserApp {
                 _ => return req.refuse(),
             }
         };
+        let mode = shield::parse_mode(self.settings.shield_mode_for(&req.opener));
+        if let Some(rule) = self.shield.check_popup(&url, &req.opener, mode) {
+            shield::popup_blocked(req.tab_id, &req.opener, &url, rule);
+            return req.refuse();
+        }
         match self.create_tab_at(win_id, url, false) {
             Some(id) => {
+                if mode != shoji_byobu::Mode::Off {
+                    shield::watch_popup(id, req.tab_id, &req.opener);
+                }
                 let view = self
                     .windows
                     .get(&win_id)

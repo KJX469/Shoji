@@ -5,8 +5,10 @@
 //! fresh with conditional requests, so upstream fixes reach Shoji within hours.
 
 pub mod cname;
+pub mod headers;
 pub mod links;
 pub mod matcher;
+pub mod popups;
 pub mod shield;
 pub mod social;
 pub mod sources;
