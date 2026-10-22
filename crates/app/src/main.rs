@@ -1130,11 +1130,11 @@ impl BrowserApp {
         shield::apply_settings(&settings.shield);
         {
             let pages = pages.clone();
-            shield::set_autoplay_for(Arc::new(move |page: &str| {
+            shield::set_page_basics(Arc::new(move |key: &str| {
                 pages
                     .read()
-                    .map(|c| c.settings.autoplay_blocked_on(page))
-                    .unwrap_or(true)
+                    .map(|c| c.settings.page_basics(key))
+                    .unwrap_or_default()
             }));
         }
         darkfixes::set_enabled(settings.dark_needed());

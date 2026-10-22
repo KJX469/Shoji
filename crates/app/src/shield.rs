@@ -23,25 +23,6 @@ use wry::{WebView, WebViewExtWindows};
 /// Looks up the shield mode that applies to a page URL (reads the live settings).
 pub type ModeFor = Arc<dyn Fn(&str) -> Mode + Send + Sync>;
 
-/// Fingerprinting protection for a page.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Fp {
-    Off,
-    Standard,
-    Strict,
-}
-
-pub fn parse_fp(s: &str) -> Fp {
-    match s {
-        "off" => Fp::Off,
-        "strict" => Fp::Strict,
-        _ => Fp::Standard,
-    }
-}
-
-/// Looks up the fingerprinting protection that applies to a page URL.
-pub type FpFor = Arc<dyn Fn(&str) -> Fp + Send + Sync>;
-
 pub fn parse_mode(s: &str) -> Mode {
     match s {
         "off" => Mode::Off,
@@ -659,14 +640,95 @@ pub fn init(proxy: EventLoopProxy<BrowserEvent>) {
 static CLEAN_LINKS: AtomicBool = AtomicBool::new(true);
 static SEND_GPC: AtomicBool = AtomicBool::new(true);
 
-/// Whether media with sound waits for a click on a page URL (reads the live settings).
-pub type AutoplayFor = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+/// The base script's choices (`Settings::page_basics`) for a fingerprinting key, from the live
+/// settings.
+pub type PageBasics = Arc<dyn Fn(&str) -> serde_json::Value + Send + Sync>;
 
-/// How autoplay is decided; set once by the host.
-static AUTOPLAY_FOR: OnceLock<AutoplayFor> = OnceLock::new();
+/// Where the base script's choices come from; set once by the host.
+static PAGE_BASICS: OnceLock<PageBasics> = OnceLock::new();
 
-pub fn set_autoplay_for(f: AutoplayFor) {
-    let _ = AUTOPLAY_FOR.set(f);
+pub fn set_page_basics(f: PageBasics) {
+    let _ = PAGE_BASICS.set(f);
+}
+
+/// Every page's base protections (see `ui/page-base.js`).
+const PAGE_BASE: &str = include_str!("../ui/page-base.js");
+
+/// The base script with the current choices, or `None` before the host has set them up.
+fn base_script() -> Option<String> {
+    let basics = PAGE_BASICS.get()?(&format!("{:016x}", session_key()));
+    Some(
+        PAGE_BASE
+            .replace("__SHOJI_GPC__", GPC_SCRIPT)
+            .replace("__SHOJI_DEAMP__", DE_AMP_SCRIPT)
+            .replace("__SHOJI_AUTOPLAY__", AUTOPLAY_SCRIPT)
+            .replace(
+                "__SHOJI_FINGERPRINT__",
+                &FINGERPRINT.replace("__SHOJI_FP__", "__fp"),
+            )
+            // Last: the choices are data and never pass through the other replacements.
+            .replace("__SHOJI_BASE__", &js_data(&basics)),
+    )
+}
+
+/// A tab's base script: registered when the tab is made, and again when the choices change.
+#[derive(Default)]
+struct BaseScript {
+    hash: u64,
+    /// The registered script's id
+    id: Option<String>,
+    text: String,
+    serial: u64,
+}
+
+impl BaseScript {
+    /// Register the current base script if it differs from the tab's. The previous one stays
+    /// until the new one is in place, so no page loads with neither.
+    fn ensure(state: &Rc<RefCell<Self>>, core: &ICoreWebView2) {
+        let Some(text) = base_script() else { return };
+        let hash = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            text.hash(&mut h);
+            h.finish()
+        };
+        let serial = {
+            let mut st = state.borrow_mut();
+            if st.hash == hash {
+                return;
+            }
+            st.hash = hash;
+            st.text = text.clone();
+            st.serial += 1;
+            st.serial
+        };
+        let (st, core_done) = (state.clone(), core.clone());
+        let handler = AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(
+            move |result, id| {
+                if result.is_err() {
+                    return Ok(());
+                }
+                let old = {
+                    let mut s = st.borrow_mut();
+                    if s.serial != serial {
+                        // A newer one is on its way: this one goes.
+                        Some(id)
+                    } else {
+                        s.id.replace(id)
+                    }
+                };
+                if let Some(old) = old {
+                    let w = wide(&old);
+                    let _ = unsafe {
+                        core_done.RemoveScriptToExecuteOnDocumentCreated(PCWSTR(w.as_ptr()))
+                    };
+                }
+                Ok(())
+            },
+        ));
+        let w = wide(&text);
+        let _ = unsafe { core.AddScriptToExecuteOnDocumentCreated(PCWSTR(w.as_ptr()), &handler) };
+    }
 }
 
 /// Holds back media with sound until the person interacts (see `ui/autoplay.js`).
@@ -1025,13 +1087,7 @@ fn decode_data_url(url: &str) -> Option<(String, Vec<u8>)> {
 
 /// Subscribe a tab to the shield: block requests, and register the page's cosmetic filters
 /// and scriptlets before each navigation commits. Returns whether requests are hooked now.
-pub fn attach(
-    webview: &WebView,
-    shield: Shield,
-    mode_for: ModeFor,
-    fp_for: FpFor,
-    tab_id: TabId,
-) -> bool {
+pub fn attach(webview: &WebView, shield: Shield, mode_for: ModeFor, tab_id: TabId) -> bool {
     let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
         return false;
     };
@@ -1045,6 +1101,9 @@ pub fn attach(
     // are matched against it, which is what third-party rules expect.
     let top_target: Rc<RefCell<TabPage>> = Rc::default();
     let page_scripts: Rc<RefCell<PageScripts>> = Rc::default();
+    // Registered now, before the tab's first page.
+    let base: Rc<RefCell<BaseScript>> = Rc::default();
+    BaseScript::ensure(&base, &core);
 
     // Network: every http(s)/ws request goes through the matcher.
     {
@@ -1316,6 +1375,7 @@ pub fn attach(
         let core_nav = core.clone();
         let top_target = top_target.clone();
         let page_scripts = page_scripts.clone();
+        let base = base.clone();
         let started = std::cell::Cell::new(false);
         let dark_slot: Arc<Mutex<DocScript>> = Arc::default();
         let handler = NavigationStartingEventHandler::create(Box::new(move |_, args| {
@@ -1368,38 +1428,16 @@ pub fn attach(
             if url.starts_with("http://") || url.starts_with("https://") {
                 hub().reset_tab(tab_id.0, &url);
             }
-            let mut script = cosmetic_script(&shield, &mode_for, &url);
-            if let Some(fp) = fingerprint_script(&url, fp_for(&url)) {
-                // First, so pages read the protected values from their very first script.
-                script = Some(format!(
-                    "{fp}
-{}",
-                    script.as_deref().unwrap_or("")
-                ));
-            }
+            // GPC, De-AMP, the autoplay hold and fingerprinting are in the tab's base script
+            // (registered before any page); this one carries the site's cosmetics and scriptlets.
+            BaseScript::ensure(&base, &core_nav);
+            let script = cosmetic_script(&shield, &mode_for, &url);
             // The site's dark-mode fix depends on the path, so it has a slot of its own.
             register(
                 &core_nav,
                 &dark_slot,
                 crate::darkfixes::script_for(&url).as_deref(),
             );
-            if web && CLEAN_LINKS.load(Ordering::Relaxed) && mode_for(&url) != Mode::Off {
-                script = Some(format!(
-                    "{DE_AMP_SCRIPT}\n{}",
-                    script.as_deref().unwrap_or("")
-                ));
-            }
-            if web && AUTOPLAY_FOR.get().is_some_and(|f| f(&url)) {
-                script = Some(format!(
-                    "{AUTOPLAY_SCRIPT}\n{}",
-                    script.as_deref().unwrap_or("")
-                ));
-            }
-            if web && SEND_GPC.load(Ordering::Relaxed) {
-                // The header alone is not enough: consent scripts read the property.
-                let gpc = format!("{GPC_SCRIPT}\n{}", script.as_deref().unwrap_or(""));
-                script = Some(gpc);
-            }
             if let Some(host) = crate::extract_host(&url) {
                 // A new tab's first page would otherwise race its script's registration (and
                 // usually win); it is cancelled and opened again once the script is in place.
@@ -1429,6 +1467,12 @@ pub fn attach(
                 return Ok(());
             };
             popup_loaded(tab);
+            let base_text = base.borrow().text.clone();
+            if !base_text.is_empty() {
+                let w = wide(&base_text);
+                let done = ExecuteScriptCompletedHandler::create(Box::new(|_, _| Ok(())));
+                let _ = unsafe { core_load.ExecuteScript(PCWSTR(w.as_ptr()), &done) };
+            }
             let js = page_scripts.borrow().text(&host);
             if let Some(js) = js {
                 let w = wide(&js);
@@ -1842,7 +1886,7 @@ fn js_data(v: &serde_json::Value) -> String {
 const FINGERPRINT: &str = include_str!("../ui/fingerprint.js");
 
 /// A random key for this run of Shoji: fingerprinting noise is stable for a site until Shoji
-/// restarts, and never the same between sites.
+/// restarts, and never the same between sites (the base script seeds it with the site).
 fn session_key() -> u64 {
     static KEY: OnceLock<u64> = OnceLock::new();
     *KEY.get_or_init(|| {
@@ -1850,30 +1894,6 @@ fn session_key() -> u64 {
         let _ = ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut b);
         u64::from_le_bytes(b)
     })
-}
-
-/// The seed a page's noise comes from: its site (registrable domain) and the session key, so
-/// `a.example.com` and `b.example.com` agree and `other.com` differs.
-fn fingerprint_seed(host: &str, key: u64) -> u32 {
-    use std::hash::{Hash, Hasher};
-    let site = psl::domain_str(host).unwrap_or(host);
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    (key, site).hash(&mut h);
-    h.finish() as u32
-}
-
-/// Document-start script that adds fingerprinting noise on `url` (runs in every frame, seeded
-/// from the top page's site, as Brave does).
-fn fingerprint_script(url: &str, fp: Fp) -> Option<String> {
-    if fp == Fp::Off || !is_web(url) {
-        return None;
-    }
-    let host = crate::extract_host(url)?;
-    let data = serde_json::json!({
-        "seed": fingerprint_seed(&host, session_key()),
-        "strict": fp == Fp::Strict,
-    });
-    Some(FINGERPRINT.replace("__SHOJI_FP__", &js_data(&data)))
 }
 
 /// Global Privacy Control as a page-visible signal (the `Sec-GPC` header is sent separately).
