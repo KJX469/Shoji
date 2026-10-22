@@ -538,6 +538,16 @@ impl Shoji {
             .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
             .unwrap_or_default();
         out.push_str(&format!("engine processes: {engines}\n"));
+        let pid = self.child.lock().unwrap().id();
+        let query = format!(
+            "Get-CimInstance Win32_Process -Filter \"ParentProcessId={pid}\" | ForEach-Object {{ $_.CommandLine }}"
+        );
+        let lines = Command::new("powershell")
+            .args(["-NoProfile", "-Command", &query])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default();
+        out.push_str(&format!("engine command line: {lines}\n"));
         let debug = std::fs::read_to_string(self.dir.join("engine-debug.log")).unwrap_or_default();
         let tail: Vec<&str> = debug.lines().rev().take(40).collect();
         out.push_str(&format!("engine log, newest first:\n{}\n", tail.join("\n")));

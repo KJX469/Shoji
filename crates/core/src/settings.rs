@@ -405,6 +405,8 @@ pub struct PrivacySettings {
     pub fingerprinting: String,
     /// Offer to save and fill passwords (stored by the engine, encrypted for this Windows user)
     pub save_passwords: bool,
+    /// Check saved passwords against known breaches (only a hash prefix is sent)
+    pub breach_check: bool,
     /// What to do with open tabs after a crash or force close: "ask", "always" or "never"
     pub restore_session: String,
 }
@@ -510,6 +512,7 @@ impl Default for PrivacySettings {
             block_third_party_cookies: true,
             fingerprinting: "standard".to_string(),
             save_passwords: true,
+            breach_check: true,
             restore_session: "ask".to_string(),
         }
     }
