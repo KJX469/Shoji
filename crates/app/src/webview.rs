@@ -1239,7 +1239,11 @@ pub fn attach_focus(webview: &WebView, tab_id: TabId, proxy: EventLoopProxy<Brow
 
 /// An extension popup closes when the user clicks away from it or its page calls
 /// `window.close()`, as in Chrome.
-pub fn attach_popup_events(webview: &WebView, close: impl Fn() + Clone + 'static) {
+pub fn attach_popup_events(
+    webview: &WebView,
+    close: impl Fn() + 'static,
+    blurred: impl Fn() + 'static,
+) {
     // Only a popup that has been focused can lose focus: one that never got it (the window
     // isn't in front yet) must not close the moment it appears.
     let focused = std::rc::Rc::new(std::cell::Cell::new(false));
@@ -1248,11 +1252,9 @@ pub fn attach_popup_events(webview: &WebView, close: impl Fn() + Clone + 'static
         got.set(true);
         Ok(())
     }));
-    let on_blur = close.clone();
     let blur = FocusChangedEventHandler::create(Box::new(move |_, _| {
         if focused.get() {
-            eprintln!("extension popup: closed, it lost focus");
-            on_blur();
+            blurred();
         }
         Ok(())
     }));
