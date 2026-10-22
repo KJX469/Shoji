@@ -457,6 +457,8 @@ impl Hub {
             "lists": lists, "log": log, "total": h.total, "week": Self::week(&h),
             "updating": h.updating, "ready": h.ready,
             "stale_days": (h.oldest_age >= STALE_SECS).then_some(h.oldest_age / 86_400),
+            "runtime": RUNTIME_VERSION.get(),
+            "old_runtime": OLD_RUNTIME.load(Ordering::Relaxed),
             "timing": check_times().map(|(p50, p99)| serde_json::json!({"p50": p50, "p99": p99})),
         })
         .to_string()
@@ -565,6 +567,14 @@ pub fn init(proxy: EventLoopProxy<BrowserEvent>) {
 static CLEAN_LINKS: AtomicBool = AtomicBool::new(true);
 static SEND_GPC: AtomicBool = AtomicBool::new(true);
 static HOOK_REQUESTS: AtomicBool = AtomicBool::new(true);
+/// The WebView2 runtime lacks `ICoreWebView2_22`, so frames and workers go unfiltered
+static OLD_RUNTIME: AtomicBool = AtomicBool::new(false);
+static RUNTIME_VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Note the WebView2 runtime version at start, for the Byōbu page.
+pub fn set_runtime_version(version: &str) {
+    let _ = RUNTIME_VERSION.set(version.to_string());
+}
 
 /// Whether tabs need to see their network requests at all: to filter them, or to add the GPC
 /// header. Every hooked request waits on the UI thread, so tabs drop the hook when neither is on.
@@ -601,10 +611,10 @@ pub fn set_request_hook(webview: &WebView, on: bool) {
         };
         return;
     }
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        eprintln!("byobu: this WebView2 runtime can't filter cross-origin iframes and workers")
-    });
+    if !OLD_RUNTIME.swap(true, Ordering::Relaxed) {
+        eprintln!("byobu: this WebView2 runtime can't filter cross-origin iframes and workers");
+        hub().touch(0);
+    }
     let _ = unsafe {
         if on {
             core.AddWebResourceRequestedFilter(
