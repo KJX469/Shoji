@@ -184,6 +184,58 @@ pub fn parse_version_tuple(v: &str) -> Option<Vec<u64>> {
     }
 }
 
+/// Order two release versions (`0.1.7`, `v0.1.8-beta.2`) as semver does: by their numbers, and
+/// for equal numbers a pre-release comes before the release. `None` when either doesn't parse.
+pub fn compare_release_versions(a: &str, b: &str) -> Option<std::cmp::Ordering> {
+    use std::cmp::Ordering;
+    fn split(v: &str) -> Option<(Vec<u64>, Option<&str>)> {
+        let v = v.trim().trim_start_matches('v');
+        let (core, pre) = match v.split_once('-') {
+            Some((c, p)) if !p.is_empty() => (c, Some(p)),
+            Some(_) => return None,
+            None => (v, None),
+        };
+        let nums: Option<Vec<u64>> = core.split('.').map(|p| p.parse().ok()).collect();
+        nums.filter(|n| n.len() >= 2).map(|n| (n, pre))
+    }
+    let ((mut na, pa), (mut nb, pb)) = (split(a)?, split(b)?);
+    let n = na.len().max(nb.len());
+    na.resize(n, 0);
+    nb.resize(n, 0);
+    Some(na.cmp(&nb).then_with(|| match (pa, pb) {
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Greater,
+        (Some(_), None) => Ordering::Less,
+        (Some(x), Some(y)) => {
+            let mut xs = x.split('.');
+            let mut ys = y.split('.');
+            loop {
+                match (xs.next(), ys.next()) {
+                    (None, None) => return Ordering::Equal,
+                    (None, Some(_)) => return Ordering::Less,
+                    (Some(_), None) => return Ordering::Greater,
+                    (Some(i), Some(j)) => {
+                        let o = match (i.parse::<u64>(), j.parse::<u64>()) {
+                            (Ok(i), Ok(j)) => i.cmp(&j),
+                            (Ok(_), Err(_)) => Ordering::Less,
+                            (Err(_), Ok(_)) => Ordering::Greater,
+                            (Err(_), Err(_)) => i.cmp(j),
+                        };
+                        if o != Ordering::Equal {
+                            return o;
+                        }
+                    }
+                }
+            }
+        }
+    }))
+}
+
+/// Is `remote` a later release than `local`? Unparseable versions never are.
+pub fn is_newer_release(remote: &str, local: &str) -> bool {
+    compare_release_versions(remote, local) == Some(std::cmp::Ordering::Greater)
+}
+
 /// Inspect the host Windows system for WebView2 Runtime installation without requiring COM initialization.
 /// Evaluates system and per-user paths, sorting multiple installed directories to reliably return the latest active version.
 pub fn detect_webview2_runtime() -> Option<String> {
@@ -296,6 +348,29 @@ pub fn is_process_elevated() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn release_versions_order_like_semver() {
+        assert!(is_newer_release("0.1.7", "0.1.6"));
+        assert!(is_newer_release("v0.1.10", "0.1.9"));
+        assert!(is_newer_release("0.10.0", "0.9.0"));
+        assert!(!is_newer_release("1.0", "1.0.0"));
+        // A pre-release comes before its release and after the one before.
+        assert!(is_newer_release("0.1.7", "0.1.7-beta.2"));
+        assert!(!is_newer_release("0.1.7-beta.2", "0.1.7"));
+        assert!(is_newer_release("0.1.7-beta.1", "0.1.6"));
+        assert!(is_newer_release("0.1.7-beta.10", "0.1.7-beta.2"));
+        assert!(is_newer_release("0.1.7-rc.1", "0.1.7-beta.9"));
+        assert!(is_newer_release("0.1.7-beta.1", "0.1.7-beta"));
+        assert!(
+            is_newer_release("0.1.7-beta", "0.1.7-1"),
+            "words after numbers"
+        );
+        for bad in ["nightly", "byobu-data", "0.1.7-", "1", "0.x.1"] {
+            assert!(!is_newer_release(bad, "0.1.0"), "{bad}");
+            assert!(!is_newer_release("9.9.9", bad), "{bad}");
+        }
+    }
 
     #[test]
     fn test_parse_version_tuple_sorting() {
