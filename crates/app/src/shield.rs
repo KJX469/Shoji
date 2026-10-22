@@ -109,7 +109,10 @@ struct ListInfo {
     custom: bool,
     bytes: u64,
     rules: usize,
-    checked: u64,
+    /// When the copy in use was last confirmed current (unix seconds)
+    fresh: u64,
+    error: Option<String>,
+    error_at: u64,
 }
 
 #[derive(Default)]
@@ -129,6 +132,8 @@ struct Inner {
     synced: HashMap<String, String>,
     updating: bool,
     ready: bool,
+    /// Seconds since the stalest enabled list or resource bundle was confirmed current
+    oldest_age: u64,
 }
 
 pub struct Hub {
@@ -461,7 +466,8 @@ impl Hub {
             .map(|l| {
                 serde_json::json!({
                     "id": l.id, "title": l.title, "url": l.url, "enabled": l.enabled,
-                    "custom": l.custom, "bytes": l.bytes, "rules": l.rules, "checked": l.checked,
+                    "custom": l.custom, "bytes": l.bytes, "rules": l.rules,
+                    "fresh": l.fresh, "error": l.error, "error_at": l.error_at,
                 })
             })
             .collect();
@@ -489,6 +495,7 @@ impl Hub {
         serde_json::json!({
             "lists": lists, "log": log, "total": h.total, "week": Self::week(&h),
             "updating": h.updating, "ready": h.ready,
+            "stale_days": (h.oldest_age >= STALE_SECS).then_some(h.oldest_age / 86_400),
             "timing": check_times().map(|(p50, p99)| serde_json::json!({"p50": p50, "p99": p99})),
         })
         .to_string()
@@ -700,6 +707,9 @@ fn save_stats(dir: &std::path::Path) {
     let _ = std::fs::write(dir.join("stats.json"), json);
 }
 
+/// Lists older than this are called out on the Byōbu page.
+const STALE_SECS: u64 = 7 * 86_400;
+
 /// How often Byōbu re-checks its lists while the browser is running.
 const UPDATE_INTERVAL_SECS: u64 = 3600;
 /// How soon to retry after a pass in which a fetch failed.
@@ -754,21 +764,30 @@ pub fn spawn_updater(shield: Shield, dir: PathBuf) {
                     let infos: Vec<ListInfo> = all
                         .iter()
                         .map(|s| {
-                            let (bytes, rules, checked) = updater.list_stats(&s.id);
+                            let health = updater.list_health(&s.id);
                             ListInfo {
                                 id: s.id.clone(),
                                 title: s.title.clone(),
                                 url: s.url.clone(),
                                 enabled: !cfg.disabled.contains(&s.id),
                                 custom: s.id.starts_with("custom-"),
-                                bytes,
-                                rules,
-                                checked,
+                                bytes: health.bytes,
+                                rules: health.rules,
+                                fresh: health.fresh_at,
+                                error: health.error,
+                                error_at: health.error_at,
                             }
                         })
                         .collect();
+                    let enabled: Vec<&str> = infos
+                        .iter()
+                        .filter(|l| l.enabled)
+                        .map(|l| l.id.as_str())
+                        .collect();
+                    let oldest_age = updater.oldest_age(&enabled);
                     if let Ok(mut h) = hub().inner.lock() {
                         h.lists = infos;
+                        h.oldest_age = oldest_age;
                         h.updating = false;
                         h.ready = shield.is_ready();
                     }
@@ -914,7 +933,7 @@ pub fn attach(
                 unsafe { request.Method(&mut method)? };
                 let method = take(method);
                 phases.mark("read");
-                let generation = shield.generation();
+                let generation = shield.decision_generation();
                 let key = (url, kind, method == "GET");
                 let cached = top_target.borrow_mut().decisions.get(&key, generation);
                 let query = |url: String| Query {

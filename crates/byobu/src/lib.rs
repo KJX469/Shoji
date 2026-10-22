@@ -4,6 +4,7 @@
 //! bundled: [`updater`] fetches them from the uBlock Origin and Brave projects and keeps them
 //! fresh with conditional requests, so upstream fixes reach Shoji within hours.
 
+pub mod cname;
 pub mod links;
 pub mod matcher;
 pub mod shield;
@@ -11,6 +12,7 @@ pub mod social;
 pub mod sources;
 pub mod updater;
 
+pub use cname::{Resolution, Uncloaker};
 pub use matcher::{Answer, Matcher, Query};
 pub use shield::{CosmeticPayload, Decision, Mode, RequestKind, Shield};
 pub use updater::Updater;

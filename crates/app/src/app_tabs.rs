@@ -215,6 +215,12 @@ impl BrowserApp {
         // their own (or nothing).
         if persistent && container.is_none() {
             webview::attach_bounce_watch(&view, self.proxy.clone());
+            // The first view of the real profile can list its extensions for the toolbar.
+            if !self.extensions_asked.replace(true)
+                && EXTENSIONS_ON.load(std::sync::atomic::Ordering::Relaxed)
+            {
+                webview::list_extensions(&view, self.proxy.clone());
+            }
         }
         // Autofill only where the browser also remembers things (passwords are Shoji's own).
         webview::configure_engine(
