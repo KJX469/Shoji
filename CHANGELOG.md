@@ -2,9 +2,6 @@
 
 ## [Unreleased]
 
-### Changed
-- When Windows is low on memory, hidden tabs rest after 30 seconds; with battery saver on, after a minute, and the crane holds still.
-
 ## [0.1.6] - 2026-10-21
 
 ### Added
