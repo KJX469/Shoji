@@ -184,7 +184,8 @@
     .tab.loading .tab-crane { animation: pet-waddle .7s steps(6, end) infinite alternate; }
     .tab.loading .tab-crane path:nth-of-type(2), .tab.loading .tab-crane path:nth-of-type(3) { animation: pet-flap .3s steps(3, end) infinite alternate; }
     .tab .zz { display: none; position: absolute; left: 26px; top: 4px; font: italic 600 11px var(--font-display); color: var(--ink-3); pointer-events: none; }
-    .tab.asleep .zz { display: block; animation: zz 2.6s ease-in-out infinite; }
+    .tab.asleep .zz { display: block; opacity: .8; }
+    .tab.asleep:hover .zz { animation: zz 1.3s ease-in-out 1; }
     .tab.asleep .favicon { opacity: .55; filter: grayscale(.8); }
     .tab.asleep .title { color: var(--ink-3); }
     @keyframes zz { 0%, 100% { opacity: 0; transform: translate(0, 3px); } 50% { opacity: 1; transform: translate(2px, -1px); } }
