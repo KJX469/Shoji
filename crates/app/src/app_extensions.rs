@@ -143,6 +143,8 @@ pub(super) struct ExtensionPopup {
     right: f64,
     /// It has been sized and shown
     shown: bool,
+    /// When it was opened, and again when it was shown: focus settles for a moment after each
+    since: Instant,
 }
 
 /// Chrome's limits for a popup's size.
@@ -165,14 +167,16 @@ const POPUP_SIZE_SCRIPT: &str = r#"(() => {
     const h = Math.ceil(Math.max(d.scrollHeight, document.body ? document.body.scrollHeight : 0));
     window.ipc.postMessage(JSON.stringify({ w, h }));
   };
-  const queue = () => { if (!queued) { queued = true; requestAnimationFrame(send); } };
+  // The popup starts hidden, and a hidden page runs no animation frames or resize observers:
+  // measure on timers until it has been shown, then follow its size as it changes.
+  const queue = () => { if (!queued) { queued = true; setTimeout(send, 20); } };
   addEventListener('DOMContentLoaded', () => {
     const ro = new ResizeObserver(queue);
     ro.observe(document.documentElement);
     if (document.body) ro.observe(document.body);
     queue();
   });
-  addEventListener('load', queue);
+  addEventListener('load', () => { queue(); setTimeout(queue, 250); setTimeout(queue, 800); });
   addEventListener('keydown', e => { if (e.key === 'Escape' && !e.defaultPrevented) window.ipc.postMessage('"close"'); });
 })();"#;
 
@@ -410,6 +414,7 @@ impl BrowserApp {
             view,
             right,
             shown: false,
+            since: Instant::now(),
         });
     }
 
@@ -432,6 +437,7 @@ impl BrowserApp {
         let _ = p.view.set_bounds(bounds(x, top, w, h));
         if !p.shown {
             p.shown = true;
+            p.since = Instant::now();
             let _ = p.view.set_visible(true);
             webview::bring_to_top(&p.view);
             webview::focus(&p.view);
@@ -445,7 +451,14 @@ impl BrowserApp {
             .windows
             .get(&win_id)
             .is_some_and(|w| window::is_foreground(&w.window));
-        if active {
+        let settling = self
+            .windows
+            .get(&win_id)
+            .and_then(|w| w.ext_popup.as_ref())
+            .is_some_and(|p| p.since.elapsed() < Duration::from_millis(500));
+        if settling {
+            eprintln!("extension popup: ignored a focus change while it was opening");
+        } else if active {
             eprintln!("extension popup: closed, it lost focus");
             self.blur_extension_popup(win_id);
         } else {
