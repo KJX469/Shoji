@@ -231,6 +231,9 @@ fn blocking_score_holds() {
     let mut page = shoji.page("news.test");
     let probe = split(ADS[0].1);
     wait_for_shield(&server, &mut page, &url, (probe.0, &probe.1));
+    // A page loaded as new lists come in can still carry the previous cosmetics; the next one
+    // has the new ones.
+    page.goto(&url);
     page.call("Network.enable", json!({}));
     page.goto(&url);
     std::thread::sleep(Duration::from_secs(4));
