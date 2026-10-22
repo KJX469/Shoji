@@ -5,6 +5,7 @@
 //! browser and its installer.
 
 pub mod bounce;
+pub mod breach;
 pub mod env;
 pub mod import;
 pub mod ipc;
