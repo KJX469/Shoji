@@ -1,0 +1,28 @@
+name: Broken site
+description: A site that doesn't work right in Shoji (opened from the shield's "Report a broken site")
+labels: [bug]
+body:
+  - type: input
+    id: url
+    attributes:
+      label: Page
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What's wrong
+      description: What you expected, what happened instead, and whether pausing the shield on the site fixes it.
+    validations:
+      required: true
+  - type: textarea
+    id: protections
+    attributes:
+      label: Protections that were on
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: Shoji, WebView2 and Windows version
+    validations:
+      required: true
