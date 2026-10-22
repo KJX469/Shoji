@@ -111,8 +111,26 @@ pub struct Shield {
     popups: Arc<RwLock<Option<Arc<Popups>>>>,
     /// Canonical names of first-party subdomains, once lookups are switched on
     cname: Arc<OnceLock<Uncloaker>>,
+    /// The page-level rules (`$document`, `$doc`, `$all`) with their text, for warnings
+    documents: Arc<RwLock<Option<Arc<Engine>>>>,
+    /// The current lists compiled again with every rule's text, built only while the logger
+    /// needs to name rules (the engine above keeps none: about half its memory)
+    named: Arc<Mutex<Named>>,
+    /// How to read the current lists again (for `named`)
+    recipe: Arc<RwLock<Option<Recipe>>>,
+    /// Size of the current engine, saved, in bytes
+    size: Arc<AtomicU64>,
     /// Brave's debounce and URL-cleaning rules
     navigation: Arc<RwLock<Arc<NavigationRules>>>,
+}
+
+/// Reads the lists the current engine was built from.
+type Recipe = Arc<dyn Fn() -> Vec<(String, bool)> + Send + Sync>;
+
+#[derive(Default)]
+struct Named {
+    engine: Option<(u64, Arc<Engine>)>,
+    building: bool,
 }
 
 type Exceptions = Arc<HashSet<String>>;
@@ -138,9 +156,9 @@ impl Default for Shield {
     }
 }
 
-/// Compile list texts (`(text, trusted)`) into a matcher.
-fn compile(lists: Vec<(String, bool)>) -> Engine {
-    let mut set = FilterSet::new(true);
+/// Compile list texts (`(text, trusted)`) into a matcher; `named` keeps each rule's text.
+fn compile(lists: Vec<(String, bool)>, named: bool) -> Engine {
+    let mut set = FilterSet::new(named);
     for (text, trusted) in lists {
         let permissions = if trusted {
             PermissionMask::from_bits(1)
@@ -158,12 +176,35 @@ fn compile(lists: Vec<(String, bool)>) -> Engine {
     Engine::new_with_filter_set(set)
 }
 
+/// The rules of `lists` that act on whole pages: those whose options name the document.
+fn page_rules(lists: &[(String, bool)]) -> Vec<(String, bool)> {
+    lists
+        .iter()
+        .map(|(text, trusted)| {
+            let picked: Vec<&str> = text
+                .lines()
+                .filter(|l| {
+                    let l = l.trim();
+                    !l.starts_with('!')
+                        && !l.contains("##")
+                        && l.rsplit_once('$').is_some_and(|(_, opts)| {
+                            opts.split(',')
+                                .any(|o| matches!(o.trim(), "document" | "doc" | "all"))
+                        })
+                })
+                .collect();
+            (picked.join("\n"), *trusted)
+        })
+        .filter(|(t, _)| !t.is_empty())
+        .collect()
+}
+
 /// Identifies a set of lists, and the build of Shoji that compiled them.
 fn engine_key(lists: &[(String, bool)]) -> String {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     lists.hash(&mut h);
     format!(
-        "{} {:016x} {}",
+        "{} lean {:016x} {}",
         env!("CARGO_PKG_VERSION"),
         h.finish(),
         lists.len()
@@ -180,8 +221,17 @@ impl Shield {
             cosmetics: Arc::default(),
             popups: Arc::default(),
             cname: Arc::default(),
+            documents: Arc::default(),
+            named: Arc::default(),
+            recipe: Arc::default(),
+            size: Arc::default(),
             navigation: Arc::default(),
         }
+    }
+
+    /// Size of the current engine, saved, in bytes (0 until one is loaded).
+    pub fn engine_bytes(&self) -> u64 {
+        self.size.load(Ordering::Relaxed)
     }
 
     /// Match first-party subdomains under their canonical names too, looked up by `u`.
@@ -209,7 +259,15 @@ impl Shield {
     /// Swap in an engine built from raw list texts. Heavy: call off the UI thread.
     /// `lists` is `(text, trusted)`. Returns false when there was nothing to load.
     pub fn load(&self, lists: Vec<(String, bool)>, resource_jsons: &[String]) -> bool {
+        let again = lists.clone();
+        self.set_recipe(Arc::new(move || again.clone()));
         self.load_saved(lists, resource_jsons, None)
+    }
+
+    fn set_recipe(&self, r: Recipe) {
+        if let Ok(mut slot) = self.recipe.write() {
+            *slot = Some(r);
+        }
     }
 
     /// [`Shield::load`], reusing the engine compiled from the same lists last time when `dir`
@@ -225,6 +283,7 @@ impl Shield {
             return false;
         }
         let key = engine_key(&lists);
+        let documents = compile(page_rules(&lists), true);
         let popups = Popups::compile(&lists).map(Arc::new);
         let saved = dir.and_then(|d| {
             let same = std::fs::read_to_string(d.join(SAVED_KEY)).ok()? == key;
@@ -236,7 +295,7 @@ impl Shield {
         let mut engine = match saved {
             Some(engine) => engine,
             None => {
-                let engine = compile(lists);
+                let engine = compile(lists, false);
                 if let Some(d) = dir {
                     // Key last, so a half-written engine is never taken for a good one.
                     let _ = std::fs::remove_file(d.join(SAVED_KEY));
@@ -247,6 +306,8 @@ impl Shield {
                 engine
             }
         };
+        self.size
+            .store(engine.serialize().len() as u64, Ordering::Relaxed);
         let mut seen = std::collections::HashSet::new();
         let mut resources: Vec<Resource> = Vec::new();
         for json in resource_jsons {
@@ -260,10 +321,16 @@ impl Shield {
         if let Ok(mut slot) = self.engine.write() {
             *slot = Some(Arc::new(engine));
         }
+        if let Ok(mut slot) = self.documents.write() {
+            *slot = Some(Arc::new(documents));
+        }
         if let Ok(mut slot) = self.popups.write() {
             *slot = popups;
         }
         self.generation.fetch_add(1, Ordering::AcqRel);
+        if let Ok(mut n) = self.named.lock() {
+            n.engine = None;
+        }
         true
     }
 
@@ -285,6 +352,23 @@ impl Shield {
             .collect();
         if !own_rules.trim().is_empty() {
             lists.push((own_rules.to_string(), true));
+        }
+        {
+            let dir = updater.dir().to_path_buf();
+            let ids: Vec<(String, bool)> =
+                sources.iter().map(|s| (s.id.clone(), s.trusted)).collect();
+            let own = own_rules.to_string();
+            self.set_recipe(Arc::new(move || {
+                let u = Updater::new(&dir);
+                let mut l: Vec<(String, bool)> = ids
+                    .iter()
+                    .filter_map(|(id, t)| u.list_text(id).map(|text| (text, *t)))
+                    .collect();
+                if !own.trim().is_empty() {
+                    l.push((own.clone(), true));
+                }
+                l
+            }));
         }
         let n = lists.len();
         let navigation = updater.navigation_rules();
@@ -338,6 +422,7 @@ impl Shield {
         };
         let r = engine.check_network_request(&req);
         let blocked = r.should_block();
+        // The engine keeps no rule text; `rule_for` names the rule when the logger asks.
         let rule = r.filter.and_then(|f| f.raw_line);
         if let Some(redirect) = r.redirect {
             return (Decision::Redirect(redirect), rule);
@@ -414,7 +499,7 @@ impl Shield {
         if mode == Mode::Off {
             return None;
         }
-        let engine = self.current()?;
+        let engine = self.documents.read().ok()?.clone()?;
         let host = url::Url::parse(url).ok()?.host_str()?.to_string();
         if self
             .allowed_pages
@@ -438,6 +523,53 @@ impl Shield {
             .split(',')
             .any(|o| matches!(o.trim(), "document" | "doc" | "all"))
             .then_some(line)
+    }
+
+    /// The text of the rule that decides `url` (for the logger). Rule text is kept only in an
+    /// engine built on first ask, in the background, so this is `None` until it is ready.
+    pub fn rule_for(
+        &self,
+        url: &str,
+        source_url: &str,
+        kind: RequestKind,
+        method: &str,
+    ) -> Option<String> {
+        let generation = self.generation();
+        let engine = {
+            let mut n = self.named.lock().ok()?;
+            match &n.engine {
+                Some((g, e)) if *g == generation => Some(e.clone()),
+                _ => {
+                    if !n.building {
+                        n.building = true;
+                        let recipe = self.recipe.read().ok()?.clone()?;
+                        let named = self.named.clone();
+                        let current = self.generation.clone();
+                        let _ = std::thread::Builder::new()
+                            .name("byobu-rule-names".into())
+                            .spawn(move || {
+                                let engine = compile(recipe(), true);
+                                if let Ok(mut n) = named.lock() {
+                                    n.building = false;
+                                    if current.load(Ordering::Acquire) == generation {
+                                        n.engine = Some((generation, Arc::new(engine)));
+                                    }
+                                }
+                            });
+                    }
+                    None
+                }
+            }
+        }?;
+        let req = Request::new(url, source_url, kind.name(), method).ok()?;
+        engine.check_network_request(&req).filter?.raw_line
+    }
+
+    /// Drop the engine with rule text (the logger closed).
+    pub fn forget_rule_names(&self) {
+        if let Ok(mut n) = self.named.lock() {
+            n.engine = None;
+        }
     }
 
     /// Where a navigation to `url` should go instead: tracker redirects skipped, and tracking
@@ -758,6 +890,42 @@ news.test##.banner
         let next = s.cosmetic("https://news.test/a", Mode::Standard);
         assert!(next.hide.contains(&".promo".to_string()), "{:?}", next.hide);
         assert!(!next.hide.contains(&".banner".to_string()));
+    }
+
+    #[test]
+    fn the_engine_keeps_no_rule_text_but_can_name_rules() {
+        let s = shield(
+            "||ads.example^
+||bad.example^$document
+",
+        );
+        let (d, rule) = s.check_detailed(
+            "https://ads.example/x.js",
+            "https://news.test/",
+            RequestKind::Script,
+            Mode::Standard,
+        );
+        assert_eq!((d, rule), (Decision::Block, None));
+        assert!(s.engine_bytes() > 0);
+        // Page warnings still name their rule.
+        assert_eq!(
+            s.check_document("https://bad.example/", Mode::Standard)
+                .as_deref(),
+            Some("||bad.example^$document")
+        );
+        // Names come from an engine built on first ask.
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut name = None;
+        while name.is_none() && std::time::Instant::now() < end {
+            name = s.rule_for(
+                "https://ads.example/x.js",
+                "https://news.test/",
+                RequestKind::Script,
+                "GET",
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(name.as_deref(), Some("||ads.example^"));
     }
 
     #[test]
