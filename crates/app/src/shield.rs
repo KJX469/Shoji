@@ -403,6 +403,7 @@ impl Hub {
             "lists": lists, "log": log, "total": h.total, "week": Self::week(&h),
             "updating": h.updating, "ready": h.ready,
             "timing": check_times().map(|(p50, p99)| serde_json::json!({"p50": p50, "p99": p99})),
+            "engine_bytes": ENGINE_BYTES.load(Ordering::Relaxed),
         })
         .to_string()
     }
@@ -612,6 +613,9 @@ const UPDATE_RETRY_SECS: u64 = 600;
 /// Keep the engine fresh: serve the cache at once, check every list at launch and then hourly,
 /// and rebuild whenever a list, a setting or the user's own rules change.
 /// Runs on its own thread; a rebuilt engine is swapped in atomically.
+/// Size of the current Byōbu engine, for the Byōbu page.
+static ENGINE_BYTES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub fn spawn_updater(shield: Shield, dir: PathBuf) {
     start_matcher(&shield);
     let (tx, rx) = mpsc::channel::<bool>();
@@ -671,6 +675,7 @@ pub fn spawn_updater(shield: Shield, dir: PathBuf) {
                             }
                         })
                         .collect();
+                    ENGINE_BYTES.store(shield.engine_bytes(), Ordering::Relaxed);
                     if let Ok(mut h) = hub().inner.lock() {
                         h.lists = infos;
                         h.updating = false;
