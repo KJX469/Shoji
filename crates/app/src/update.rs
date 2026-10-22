@@ -9,6 +9,11 @@
 //! close" puts the new files in place with `--stage` straight away and finishes with `--update`
 //! once no Shoji window is open.
 //!
+//! With "Get beta updates" on, pre-releases are offered too (never the `byobu-data` release,
+//! which has no installer). If a new version keeps closing just after it starts, the version
+//! before it can be put back (see `shoji_core::launches`): its installer is kept from the
+//! update, or fetched again from its release.
+//!
 //! Limits worth knowing: the installer is not code-signed, and the checksum comes from the same
 //! release, so it protects against corruption and truncated downloads, not against a
 //! compromised GitHub account.
@@ -52,26 +57,38 @@ pub struct Release {
     pub page_url: String,
 }
 
-/// Is `remote` a higher dotted version than `local`? Unparseable versions never update.
+/// Is `remote` a later version than `local` (`0.1.8-beta.1` comes after `0.1.7` and before
+/// `0.1.8`)? Unparseable versions never update.
 pub fn is_newer(remote: &str, local: &str) -> bool {
-    let parse = |v: &str| shoji_core::env::parse_version_tuple(v.trim().trim_start_matches('v'));
-    let (Some(mut r), Some(mut l)) = (parse(remote), parse(local)) else {
-        return false;
-    };
-    let n = r.len().max(l.len());
-    r.resize(n, 0);
-    l.resize(n, 0);
-    r > l
+    shoji_core::env::is_newer_release(remote, local)
 }
 
 /// Pull the version, the two asset URLs and a few lines of notes out of GitHub's
 /// "latest release" JSON.
 pub fn parse_release(json: &str, prefix: &str) -> Option<Release> {
-    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    release_from(&serde_json::from_str(json).ok()?, prefix, false)
+}
+
+/// The newest release in GitHub's release list JSON, pre-releases included when `beta`.
+pub fn parse_releases(json: &str, prefix: &str, beta: bool) -> Option<Release> {
+    let list: Vec<serde_json::Value> = serde_json::from_str(json).ok()?;
+    list.iter()
+        .filter_map(|v| release_from(v, prefix, beta))
+        .reduce(|a, b| {
+            if is_newer(&b.version, &a.version) {
+                b
+            } else {
+                a
+            }
+        })
+}
+
+fn release_from(v: &serde_json::Value, prefix: &str, beta: bool) -> Option<Release> {
     if v.get("draft").and_then(|d| d.as_bool()).unwrap_or(false)
-        || v.get("prerelease")
-            .and_then(|d| d.as_bool())
-            .unwrap_or(false)
+        || (!beta
+            && v.get("prerelease")
+                .and_then(|d| d.as_bool())
+                .unwrap_or(false))
     {
         return None;
     }
@@ -81,6 +98,7 @@ pub fn parse_release(json: &str, prefix: &str) -> Option<Release> {
         .trim()
         .trim_start_matches('v')
         .to_string();
+    shoji_core::env::compare_release_versions(&version, "0.0")?;
     let url_of = |name: &str| -> Option<String> {
         v.get("assets")?.as_array()?.iter().find_map(|a| {
             (a.get("name")?.as_str()? == name)
@@ -231,10 +249,28 @@ fn installer_path(dir: &Path, version: &str) -> PathBuf {
     dir.join(format!("ShojiSetup-{version}.exe"))
 }
 
-/// Ask GitHub for the latest release: `Some` when it is newer than this build.
-fn check_latest(api: &str, prefix: &str) -> Result<Option<Release>, String> {
-    let json = get_text(&agent(), api, 2 * 1024 * 1024)?;
-    Ok(parse_release(&json, prefix).filter(|r| is_newer(&r.version, env!("CARGO_PKG_VERSION"))))
+/// Ask GitHub for the latest release (`api` is the "latest release" address; betas come from
+/// the release list beside it): `Some` when it is newer than this build.
+fn check_latest(api: &str, prefix: &str, beta: bool) -> Result<Option<Release>, String> {
+    let found = if beta {
+        let list = format!("{}?per_page=20", api.strip_suffix("/latest").unwrap_or(api));
+        parse_releases(&get_text(&agent(), &list, 4 * 1024 * 1024)?, prefix, true)
+    } else {
+        parse_release(&get_text(&agent(), api, 2 * 1024 * 1024)?, prefix)
+    };
+    Ok(found.filter(|r| is_newer(&r.version, env!("CARGO_PKG_VERSION"))))
+}
+
+/// The published release of `version`, at the address every release's assets have.
+pub fn release_of(version: &str) -> Release {
+    let base = format!("{DOWNLOAD_PREFIX}v{version}/");
+    Release {
+        version: version.to_string(),
+        installer_url: format!("{base}{INSTALLER_ASSET}"),
+        checksum_url: format!("{base}{CHECKSUM_ASSET}"),
+        notes: Vec::new(),
+        page_url: format!("{PAGE_PREFIX}tag/v{version}"),
+    }
 }
 
 /// Fetch and verify the installer for `release` (or reuse one fetched before).
@@ -259,10 +295,12 @@ fn download(dir: &Path, release: &Release, progress: &dyn Fn(u32)) -> Result<Pat
     let tmp = target.with_extension("part");
     std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &target).map_err(|e| e.to_string())?;
-    // Keep the folder to one file: older downloads are no longer needed.
+    // Keep the new installer and the running version's (to go back to if the new one fails);
+    // older downloads are no longer needed.
+    let running = installer_path(dir, env!("CARGO_PKG_VERSION"));
     if let Ok(entries) = std::fs::read_dir(dir) {
         for e in entries.flatten() {
-            if e.path() != target {
+            if e.path() != target && e.path() != running {
                 let _ = std::fs::remove_file(e.path());
             }
         }
@@ -312,6 +350,8 @@ pub enum Request {
     Check { manual: bool },
     /// The user said yes: fetch and verify this release's installer.
     Download(Release),
+    /// Go back to this earlier release: its installer, kept or fetched again.
+    Rollback(Release),
 }
 
 /// Start the update thread: an hourly check (while `performance.auto_update` is on, read from
@@ -347,7 +387,12 @@ pub fn spawn_checker(
                 };
                 match request {
                     Request::Check { manual } => {
-                        let result = check_latest(&api, &prefix);
+                        let beta = shoji_core::settings::Settings::load_from_path(
+                            &data_dir.join("settings.json"),
+                        )
+                        .performance
+                        .beta_updates;
+                        let result = check_latest(&api, &prefix, beta);
                         wait = if result.is_ok() { INTERVAL } else { RETRY };
                         let _ = proxy.send_event(BrowserEvent::UpdateChecked { result, manual });
                     }
@@ -359,6 +404,13 @@ pub fn spawn_checker(
                         let result = download(&dir, &release, &report);
                         let _ =
                             proxy.send_event(BrowserEvent::UpdateDownloaded { version, result });
+                    }
+                    Request::Rollback(release) => {
+                        let result = download(&dir, &release, &|_| {});
+                        let _ = proxy.send_event(BrowserEvent::RollbackReady {
+                            version: release.version,
+                            result,
+                        });
                     }
                 }
             }
@@ -521,6 +573,50 @@ mod tests {
         assert!(!is_newer("0.1.0", "0.1.1"));
         assert!(!is_newer("1.0", "1.0.0"));
         assert!(!is_newer("nightly", "0.1.0"));
+        assert!(is_newer("0.1.8-beta.1", "0.1.7"));
+        assert!(!is_newer("0.1.8-beta.1", "0.1.8"));
+    }
+
+    #[test]
+    fn betas_are_offered_only_when_asked_for() {
+        let rel = |tag: &str, pre: bool| {
+            format!(
+                r#"{{"tag_name":"{tag}","draft":false,"prerelease":{pre},"assets":[
+                  {{"name":"ShojiSetup.exe","browser_download_url":"{DOWNLOAD_PREFIX}{tag}/ShojiSetup.exe"}},
+                  {{"name":"ShojiSetup.exe.sha256","browser_download_url":"{DOWNLOAD_PREFIX}{tag}/ShojiSetup.exe.sha256"}}]}}"#
+            )
+        };
+        // The data release is a pre-release with no installer; it never counts.
+        let data = r#"{"tag_name":"byobu-data","prerelease":true,"assets":[]}"#;
+        let list = format!(
+            "[{data},{},{},{}]",
+            rel("v0.1.8-beta.2", true),
+            rel("v0.1.7", false),
+            rel("v0.1.8-beta.1", true)
+        );
+        let pick = |beta| parse_releases(&list, DOWNLOAD_PREFIX, beta).map(|r| r.version);
+        assert_eq!(pick(true).as_deref(), Some("0.1.8-beta.2"));
+        assert_eq!(pick(false).as_deref(), Some("0.1.7"));
+        // A stable release newer than every beta wins either way.
+        let list = format!("[{},{}]", rel("v0.1.8-beta.2", true), rel("v0.1.8", false));
+        assert_eq!(
+            parse_releases(&list, DOWNLOAD_PREFIX, true).map(|r| r.version),
+            Some("0.1.8".into())
+        );
+        assert!(parse_releases("{}", DOWNLOAD_PREFIX, true).is_none());
+        // A tag that isn't a version is never offered.
+        assert!(parse_release(&rel("nightly", false), DOWNLOAD_PREFIX).is_none());
+    }
+
+    #[test]
+    fn an_earlier_release_is_fetched_from_its_own_tag() {
+        let r = release_of("0.1.6");
+        assert_eq!(
+            r.installer_url,
+            "https://github.com/KJX469/Shoji/releases/download/v0.1.6/ShojiSetup.exe"
+        );
+        assert!(r.checksum_url.ends_with("/v0.1.6/ShojiSetup.exe.sha256"));
+        assert!(r.page_url.starts_with(PAGE_PREFIX));
     }
 
     #[test]
@@ -661,6 +757,12 @@ mod tests {
         // Asked again, it reuses the verified file without fetching.
         let again = download(&dir, &release("missing.sha256", "9.9.9"), &|_| {}).unwrap();
         assert_eq!(again, path);
+        // A newer download keeps the running version's installer (to go back to), not others.
+        let running = installer_path(&dir, env!("CARGO_PKG_VERSION"));
+        std::fs::write(&running, b"running").unwrap();
+        download(&dir, &release("good.sha256", "9.9.10"), &|_| {}).unwrap();
+        assert!(running.exists());
+        assert!(!path.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
