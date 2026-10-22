@@ -398,6 +398,7 @@
         <div class="card">
           <div class="row"><span>Cookies &amp; storage</span><span id="pStorage"></span></div>
           <div class="row" id="cookieRow"><span>Cookies in use</span><span id="pCookies">…</span></div>
+          <div class="switch-row" id="autoplayRow" hidden><span>Play sound without a click</span><button class="sw" id="secAutoplay" role="switch" aria-checked="false" aria-label="Play sound without a click"></button></div>
         </div>
         <button class="wide-btn" id="clearCookiesBtn" onclick="clearCookies()">Clear cookies and site data…</button>
       </section>
@@ -1044,7 +1045,8 @@
       $('pThumb').textContent = s.thumbprint || pending;
       $('pStorage').textContent = s.is_internal ? '—' : (s.is_persistent ? 'Kept across sessions' : 'Cleared on exit');
       $('cookieRow').hidden = $('clearCookiesBtn').hidden = !!s.is_internal;
-      if (!s.is_internal) { $('pCookies').textContent = '…'; resetClearBtn(); post('SiteCookies'); }
+      if (!s.is_internal) { $('pCookies').textContent = '…'; resetClearBtn(); post('SiteCookies'); post('SiteAutoplay'); }
+      else $('autoplayRow').hidden = true;
     };
 
     /* Clearing a site's cookies and stored data: the first press asks, the second does it */
@@ -1062,6 +1064,13 @@
       b.textContent = 'Clearing…';
       post('ClearSiteCookies');
     }
+    window.__siteAutoplay = d => {
+      $('autoplayRow').hidden = !d.blocking;
+      $('secAutoplay').setAttribute('aria-checked', String(!!d.allowed));
+    };
+    $('secAutoplay').onclick = () => {
+      post('SetSiteAutoplay', { allow: $('secAutoplay').getAttribute('aria-checked') !== 'true' });
+    };
     window.__siteCookies = d => {
       $('pCookies').textContent = d.cleared ? 'None' : String(d.n);
       if (d.cleared) { $('clearCookiesBtn').textContent = 'Cleared. The page was reloaded.'; setTimeout(resetClearBtn, 2500); }

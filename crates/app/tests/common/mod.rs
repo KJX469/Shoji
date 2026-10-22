@@ -300,6 +300,8 @@ pub struct Options {
     pub local_hosts: bool,
     /// Extra environment for the browser process
     pub env: Vec<(&'static str, String)>,
+    /// The engine's `Local State` preferences to start with
+    pub local_state: Option<Value>,
 }
 
 impl Default for Options {
@@ -310,6 +312,7 @@ impl Default for Options {
             engine_args: String::new(),
             local_hosts: true,
             env: Vec::new(),
+            local_state: None,
         }
     }
 }
@@ -360,6 +363,11 @@ impl Shoji {
         let data = dir.join("appdata").join("Shoji");
         std::fs::create_dir_all(&data).unwrap();
         std::fs::create_dir_all(dir.join("local")).unwrap();
+        if let Some(state) = &opts.local_state {
+            let engine = dir.join("local/Shoji/User Data/EBWebView");
+            std::fs::create_dir_all(&engine).unwrap();
+            std::fs::write(engine.join("Local State"), state.to_string()).unwrap();
+        }
         let exe = dir.join("shoji.exe");
         // `SHOJI_EXE` runs another build (a release build, for timings) instead of this one.
         let source = std::env::var_os("SHOJI_EXE")

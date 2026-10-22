@@ -266,6 +266,26 @@
           <label class="switch"><input type="checkbox" data-path="privacy.block_third_party_cookies"><span></span></label>
         </div>
         <div class="row">
+          <div class="what"><b>Sound waits for a click</b><small>Video and audio with sound start only after you click or press a key on the page. Muted video still plays. Allow a site from its This site menu</small></div>
+          <label class="switch"><input type="checkbox" data-path="privacy.block_autoplay"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="what"><b>Secure DNS</b><small>Look up site addresses over an encrypted connection. Automatic uses it when your network's own resolver offers it. Applies after a restart</small></div>
+          <select data-path="privacy.dns_over_https">
+            <option value="automatic">Automatic</option>
+            <option value="cloudflare">Cloudflare</option>
+            <option value="quad9">Quad9</option>
+            <option value="nextdns">NextDNS</option>
+            <option value="google">Google</option>
+            <option value="custom">Custom</option>
+            <option value="off">Off</option>
+          </select>
+        </div>
+        <div class="row" id="dohCustom">
+          <div class="what"><b>Custom resolver</b><small>An https:// address</small></div>
+          <input type="text" data-path="privacy.dns_over_https_url" placeholder="https://dns.example/dns-query" spellcheck="false">
+        </div>
+        <div class="row">
           <div class="what"><b>Save and fill passwords</b><small>Offers to save a login when you sign in, and fills it from Shoji's password manager. Not used in private mode. Applies to new tabs</small></div>
           <label class="switch"><input type="checkbox" data-path="privacy.save_passwords"><span></span></label>
         </div>
@@ -538,6 +558,10 @@
         el.onchange = () => save(el.dataset.path, el.dataset.type === 'number' ? Number(el.value) : el.value);
       }
     }
+    // The custom resolver's address only matters with Custom chosen.
+    const doh = document.querySelector('[data-path="privacy.dns_over_https"]');
+    $('dohCustom').hidden = doh.value !== 'custom';
+    doh.addEventListener('change', () => { $('dohCustom').hidden = doh.value !== 'custom'; });
 
     function pick(id) { post('SetAccent', { accent: id }); window.__applyTheme({ accent: id }); }
     function setMode(mode) { post('SetTheme', { theme: mode }); window.__applyTheme({ accent: S.appearance.accent, mode }); }
