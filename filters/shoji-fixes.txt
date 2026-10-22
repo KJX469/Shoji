@@ -1,0 +1,4 @@
+! Title: Shoji fixes
+! Description: Shoji's own fixes for broken sites and new ad tricks. Published with the Byobu data; Shoji checks it every hour.
+! Homepage: https://github.com/KJX469/Shoji
+! Expires: 1 hour
