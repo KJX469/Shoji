@@ -83,7 +83,10 @@ struct ListInfo {
     custom: bool,
     bytes: u64,
     rules: usize,
-    checked: u64,
+    /// When the copy in use was last confirmed current (unix seconds)
+    fresh: u64,
+    error: Option<String>,
+    error_at: u64,
 }
 
 #[derive(Default)]
@@ -101,6 +104,20 @@ struct Inner {
     synced: HashMap<String, String>,
     updating: bool,
     ready: bool,
+    /// Tabs opened as popups, until their first page is known (see [`watch_popup`])
+    popups: HashMap<u64, PopupWatch>,
+    /// Downloads stopped as dangerous, by id: the tab and the address, for "Download anyway"
+    blocked_downloads: BTreeMap<u64, (u64, String)>,
+    next_download: u64,
+    /// Seconds since the stalest enabled list or resource bundle was confirmed current
+    oldest_age: u64,
+}
+
+/// A popup tab whose navigations are checked against `$popup` rules until its first page loads:
+/// a window opened blank and sent somewhere later, or through a redirect, is the popunder trick.
+struct PopupWatch {
+    opener_tab: u64,
+    opener: String,
 }
 
 pub struct Hub {
@@ -283,6 +300,39 @@ impl Hub {
         }
     }
 
+    /// Remember a download stopped as dangerous; returns its id for "Download anyway".
+    fn block_download(&self, tab: u64, url: &str) -> u64 {
+        let Ok(mut h) = self.inner.lock() else {
+            return 0;
+        };
+        h.next_download += 1;
+        let id = h.next_download;
+        h.blocked_downloads.insert(id, (tab, url.to_string()));
+        while h.blocked_downloads.len() > 20 {
+            h.blocked_downloads.pop_first();
+        }
+        id
+    }
+
+    /// The tab and address of a stopped download the user chose to keep.
+    pub fn take_blocked_download(&self, id: u64) -> Option<(TabId, String)> {
+        let mut h = self.inner.lock().ok()?;
+        let (tab, url) = h.blocked_downloads.remove(&id)?;
+        Some((TabId(tab), url))
+    }
+
+    /// Tell the host to close a popup tab Byōbu stopped.
+    fn closing_popup(&self, tab: TabId) {
+        if let Ok(mut h) = self.inner.lock() {
+            h.popups.remove(&tab.0);
+        }
+        if let Ok(p) = self.proxy.lock() {
+            if let Some(p) = p.as_ref() {
+                let _ = p.send_event(BrowserEvent::ShieldBlockedPopup(tab));
+            }
+        }
+    }
+
     /// Ask the host to refresh whatever shows this tab's counters.
     fn touch(&self, tab: u64) {
         // A page that keeps retrying blocked requests would otherwise wake the host once per
@@ -325,6 +375,7 @@ impl Hub {
         if let Ok(mut h) = self.inner.lock() {
             h.tabs.remove(&tab);
             h.tokens.remove(&tab);
+            h.popups.remove(&tab);
         }
     }
 
@@ -374,7 +425,8 @@ impl Hub {
             .map(|l| {
                 serde_json::json!({
                     "id": l.id, "title": l.title, "url": l.url, "enabled": l.enabled,
-                    "custom": l.custom, "bytes": l.bytes, "rules": l.rules, "checked": l.checked,
+                    "custom": l.custom, "bytes": l.bytes, "rules": l.rules,
+                    "fresh": l.fresh, "error": l.error, "error_at": l.error_at,
                 })
             })
             .collect();
@@ -402,6 +454,7 @@ impl Hub {
         serde_json::json!({
             "lists": lists, "log": log, "total": h.total, "week": Self::week(&h),
             "updating": h.updating, "ready": h.ready,
+            "stale_days": (h.oldest_age >= STALE_SECS).then_some(h.oldest_age / 86_400),
             "timing": check_times().map(|(p50, p99)| serde_json::json!({"p50": p50, "p99": p99})),
         })
         .to_string()
@@ -459,6 +512,44 @@ impl Hub {
                 let _ = w.send(force);
             }
         }
+    }
+}
+
+/// Count and log a popup Byōbu stopped (the opener's tab gets the count).
+pub fn popup_blocked(opener_tab: TabId, opener: &str, url: &str, rule: String) {
+    hub().record(
+        opener_tab.0,
+        opener,
+        url,
+        RequestKind::Popup,
+        &Decision::Block,
+        Some(rule),
+    );
+}
+
+/// Check where the popup `tab`, opened by the page at `opener`, goes first.
+pub fn watch_popup(tab: TabId, opener_tab: TabId, opener: &str) {
+    if let Ok(mut h) = hub().inner.lock() {
+        h.popups.insert(
+            tab.0,
+            PopupWatch {
+                opener_tab: opener_tab.0,
+                opener: opener.to_string(),
+            },
+        );
+    }
+}
+
+/// The tab and page that opened `tab`, until its first page loads.
+fn popup_opener(tab: u64) -> Option<(u64, String)> {
+    let h = hub().inner.lock().ok()?;
+    h.popups.get(&tab).map(|w| (w.opener_tab, w.opener.clone()))
+}
+
+/// `tab` has loaded a page: it is an ordinary tab now.
+fn popup_loaded(tab: u64) {
+    if let Ok(mut h) = hub().inner.lock() {
+        h.popups.remove(&tab);
     }
 }
 
@@ -572,6 +663,8 @@ fn kind_name(k: RequestKind) -> &'static str {
         RequestKind::Xhr => "xhr",
         RequestKind::Ping => "ping",
         RequestKind::Websocket => "websocket",
+        RequestKind::Popup => "popup",
+        RequestKind::Download => "download",
         RequestKind::Other => "other",
     }
 }
@@ -616,6 +709,9 @@ fn save_stats(dir: &std::path::Path) {
     };
     let _ = std::fs::write(dir.join("stats.json"), json);
 }
+
+/// Lists older than this are called out on the Byōbu page.
+const STALE_SECS: u64 = 7 * 86_400;
 
 /// How often Byōbu re-checks its lists while the browser is running.
 const UPDATE_INTERVAL_SECS: u64 = 3600;
@@ -671,21 +767,30 @@ pub fn spawn_updater(shield: Shield, dir: PathBuf) {
                     let infos: Vec<ListInfo> = all
                         .iter()
                         .map(|s| {
-                            let (bytes, rules, checked) = updater.list_stats(&s.id);
+                            let health = updater.list_health(&s.id);
                             ListInfo {
                                 id: s.id.clone(),
                                 title: s.title.clone(),
                                 url: s.url.clone(),
                                 enabled: !cfg.disabled.contains(&s.id),
                                 custom: s.id.starts_with("custom-"),
-                                bytes,
-                                rules,
-                                checked,
+                                bytes: health.bytes,
+                                rules: health.rules,
+                                fresh: health.fresh_at,
+                                error: health.error,
+                                error_at: health.error_at,
                             }
                         })
                         .collect();
+                    let enabled: Vec<&str> = infos
+                        .iter()
+                        .filter(|l| l.enabled)
+                        .map(|l| l.id.as_str())
+                        .collect();
+                    let oldest_age = updater.oldest_age(&enabled);
                     if let Ok(mut h) = hub().inner.lock() {
                         h.lists = infos;
+                        h.oldest_age = oldest_age;
                         h.updating = false;
                         h.ready = shield.is_ready();
                     }
@@ -827,6 +932,21 @@ pub fn attach(
                 if mode == Mode::Off {
                     return Ok(());
                 }
+                if trim_request(&request, &url, &top_target.borrow(), kind) {
+                    let answer = Answer {
+                        decision: Decision::Block,
+                        rule: Some(PING_RULE.into()),
+                    };
+                    hub().record(
+                        tab,
+                        &top_target.borrow().url,
+                        &url,
+                        kind,
+                        &answer.decision,
+                        answer.rule.clone(),
+                    );
+                    return net.respond(&args, &request, &answer);
+                }
                 let mut method = PWSTR::null();
                 unsafe { request.Method(&mut method)? };
                 let method = take(method);
@@ -960,6 +1080,48 @@ pub fn attach(
         let _ = unsafe { core.add_SourceChanged(&handler, &mut token) };
     }
 
+    // Downloads from the malware and phishing lists' sites are stopped, like their pages.
+    if let Ok(core4) = core.cast::<ICoreWebView2_4>() {
+        let shield = shield.clone();
+        let top_target = top_target.clone();
+        let tab = tab_id.0;
+        let handler = DownloadStartingEventHandler::create(Box::new(move |_, args| {
+            let _doing = crate::crash::doing("byobu download");
+            let Some(args) = args else { return Ok(()) };
+            let op = unsafe { args.DownloadOperation()? };
+            let mut uri = PWSTR::null();
+            unsafe { op.Uri(&mut uri)? };
+            let url = take(uri);
+            let (page, mode) = {
+                let p = top_target.borrow();
+                (p.url.clone(), p.mode)
+            };
+            let Some(rule) = shield.check_document(&url, mode) else {
+                return Ok(());
+            };
+            unsafe {
+                args.SetCancel(true)?;
+                args.SetHandled(true)?;
+            }
+            hub().record(
+                tab,
+                &page,
+                &url,
+                RequestKind::Download,
+                &Decision::Block,
+                Some(rule),
+            );
+            let id = hub().block_download(tab, &url);
+            if let Ok(p) = hub().proxy.lock() {
+                if let Some(p) = p.as_ref() {
+                    let _ = p.send_event(BrowserEvent::ShieldBlockedDownload { id, url });
+                }
+            }
+            Ok(())
+        }));
+        let _ = unsafe { core4.add_DownloadStarting(&handler, &mut token) };
+    }
+
     // Iframes get their own host's cosmetics and scriptlets.
     let frames = Rc::new(Frames {
         core: core.clone(),
@@ -993,6 +1155,18 @@ pub fn attach(
             let mut uri = PWSTR::null();
             unsafe { args.Uri(&mut uri)? };
             let url = take(uri);
+            if is_web(&url) {
+                if let Some((opener_tab, opener)) = popup_opener(tab_id.0) {
+                    // A popup sent somewhere `$popup` rules name (often after opening blank,
+                    // or through a redirect) is closed.
+                    if let Some(rule) = shield.check_popup(&url, &opener, mode_for(&opener)) {
+                        unsafe { args.SetCancel(true)? };
+                        popup_blocked(TabId(opener_tab), &opener, &url, rule);
+                        hub().closing_popup(tab_id);
+                        return Ok(());
+                    }
+                }
+            }
             if CLEAN_LINKS.load(Ordering::Relaxed) && mode_for(&url) != Mode::Off {
                 if let Some(clean) = shoji_byobu::links::clean(&url) {
                     // Cancel and go to the cleaned address; it passes through here again
@@ -1071,6 +1245,7 @@ pub fn attach(
     // site) gets them as soon as it starts loading; they skip themselves where they already ran.
     {
         let core_load = core.clone();
+        let tab = tab_id.0;
         let handler = ContentLoadingEventHandler::create(Box::new(move |_, _| {
             let _doing = crate::crash::doing("byobu content loading");
             let mut src = PWSTR::null();
@@ -1078,6 +1253,7 @@ pub fn attach(
             let Some(host) = crate::extract_host(&take(src)) else {
                 return Ok(());
             };
+            popup_loaded(tab);
             let js = page_scripts.borrow().text(&host);
             if let Some(js) = js {
                 let w = wide(&js);
@@ -1662,6 +1838,54 @@ fn accept_rule(core: &ICoreWebView2, tab: u64, body: &str) {
     }
 }
 
+/// The logger's reason for blocking an `<a ping>` click report.
+const PING_RULE: &str = "Shoji: hyperlink auditing is off";
+
+/// Say less to other sites: a cross-site request's `Referer` is cut to the page's origin and
+/// its high-entropy client hints are removed (see `shoji_byobu::headers`). Returns true for an
+/// `<a ping>` click report, which exists only to track clicks and is blocked on every site;
+/// CSP reports, which sites use to find their own bugs, are left alone.
+fn trim_request(
+    request: &ICoreWebView2WebResourceRequest,
+    url: &str,
+    page: &TabPage,
+    kind: RequestKind,
+) -> bool {
+    let Ok(headers) = (unsafe { request.Headers() }) else {
+        return false;
+    };
+    let get = |name: &str| -> Option<String> {
+        let w = wide(name);
+        let mut found = windows::core::BOOL(0);
+        unsafe { headers.Contains(PCWSTR(w.as_ptr()), &mut found) }.ok()?;
+        if !found.as_bool() {
+            return None;
+        }
+        let mut value = PWSTR::null();
+        unsafe { headers.GetHeader(PCWSTR(w.as_ptr()), &mut value) }.ok()?;
+        Some(take(value))
+    };
+    if kind == RequestKind::Ping && get("Ping-To").is_some() {
+        return true;
+    }
+    let cross = match (&page.site, shoji_byobu::headers::site(url)) {
+        (Some(page), Some(to)) => *page != to,
+        _ => false,
+    };
+    if !cross {
+        return false;
+    }
+    if let Some(origin) = get("Referer").and_then(|r| shoji_byobu::headers::trimmed_referer(&r)) {
+        let (name, value) = (wide("Referer"), wide(&origin));
+        let _ = unsafe { headers.SetHeader(PCWSTR(name.as_ptr()), PCWSTR(value.as_ptr())) };
+    }
+    for hint in shoji_byobu::headers::HIGH_ENTROPY_HINTS {
+        let w = wide(hint);
+        let _ = unsafe { headers.RemoveHeader(PCWSTR(w.as_ptr())) };
+    }
+    false
+}
+
 /* ---------------------------------------------------------------- matching */
 
 /// The one matcher thread every tab hands its requests to (see `shoji_byobu::matcher`).
@@ -1699,6 +1923,8 @@ fn start_matcher(shield: &Shield) {
 #[derive(Default)]
 struct TabPage {
     url: String,
+    /// The page's registrable domain, for telling third-party requests apart
+    site: Option<String>,
     mode: Mode,
     decisions: DecisionCache,
 }
@@ -1708,6 +1934,7 @@ impl TabPage {
     fn set(&mut self, url: String, mode: Mode) {
         if crate::extract_host(&url) != crate::extract_host(&self.url) || mode != self.mode {
             self.decisions.clear();
+            self.site = shoji_byobu::headers::site(&url);
         }
         self.url = url;
         self.mode = mode;

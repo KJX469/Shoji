@@ -88,6 +88,7 @@
     .lrow small { font-size: 11.5px; }
     .lrow .x { border: 0; background: none; color: var(--ink-3); cursor: pointer; font-size: 16px; }
     .lrow .x:hover { color: var(--danger); }
+    .lrow small.failed, .stale { color: var(--danger); }
     textarea { width: 100%; min-height: 110px; resize: vertical; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); font-family: var(--mono); font-size: 12px; line-height: 1.5; outline: none; box-sizing: border-box; }
     textarea:focus { border-color: var(--accent); }
     .btn.danger { background: var(--danger); border-color: transparent; color: #fff; font-weight: 600; }
@@ -343,6 +344,7 @@
             <span class="what"><b>Filter lists</b><small id="listStatus">Refreshed through the day; quick fixes hourly</small></span>
             <button class="btn" id="updateBtn" onclick="updateLists()">Update now</button>
           </div>
+          <div class="hint stale" id="listStale" hidden></div>
           <div id="lists" class="lists"></div>
           <div class="add">
             <input type="text" id="listUrl" placeholder="https://example.org/my-filters.txt" spellcheck="false" onkeydown="if (event.key === 'Enter') addList()">
@@ -410,6 +412,10 @@
         <div class="row">
           <div class="what"><b>Look for new versions</b><small>Checks GitHub every hour. When there is one, the crane brings a letter: nothing is downloaded or installed until you choose to</small></div>
           <label class="switch"><input type="checkbox" data-path="performance.auto_update"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="what"><b>Get beta updates</b><small>Also offer test versions before they are released. They get new protection first and may have more bugs</small></div>
+          <label class="switch"><input type="checkbox" data-path="performance.beta_updates"><span></span></label>
         </div>
       </div>
     </section>
@@ -746,11 +752,18 @@
     let byobu = { lists: [], total: 0, week: 0, updating: false };
     function renderLists() {
       $('lists').innerHTML = byobu.lists.length ? byobu.lists.map(l => {
-        const meta = l.enabled ? `${num(l.rules)} rules · updated ${ago(l.checked)}` : 'Off';
+        const failed = l.enabled && l.error;
+        const meta = !l.enabled ? 'Off'
+          : !l.fresh ? (failed ? `Couldn't download: ${esc(l.error)}` : 'Not downloaded yet')
+          : `${num(l.rules)} rules · updated ${ago(l.fresh)}` + (failed ? ` · last check failed ${ago(l.error_at)}: ${esc(l.error)}` : '');
         const del = l.custom ? `<button class="x" onclick="removeList('${esc(l.url)}')" aria-label="Remove ${esc(l.title)}">×</button>` : '';
-        return `<div class="lrow"><span class="what"><b>${esc(l.title)}</b><small>${meta}</small></span>${del}` +
+        return `<div class="lrow"><span class="what"><b>${esc(l.title)}</b><small${failed ? ' class="failed"' : ''}>${meta}</small></span>${del}` +
           `<label class="switch"><input type="checkbox" ${l.enabled ? 'checked' : ''} onchange="toggleList('${esc(l.id)}', this.checked)"><span></span></label></div>`;
       }).join('') : '<div class="lrow"><span class="hint">Loading lists…</span></div>';
+      $('listStale').hidden = !byobu.stale_days;
+      $('listStale').textContent = byobu.stale_days
+        ? `Some of Byōbu's lists haven't updated in ${byobu.stale_days} days, so newer ads and trackers may get through. Byōbu keeps using the last copies it has. Check your connection, then choose Update now.`
+        : '';
       $('shStats').textContent = byobu.total
         ? `${num(byobu.week)} blocked this week · ${num(byobu.total)} in all`
         : "Blocks ads and trackers using uBlock Origin and Brave's lists";
