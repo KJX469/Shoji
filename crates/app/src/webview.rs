@@ -1194,6 +1194,26 @@ pub fn attach_focus(webview: &WebView, tab_id: TabId, proxy: EventLoopProxy<Brow
     let _ = unsafe { webview.controller().add_GotFocus(&handler, &mut token) };
 }
 
+/// An extension popup closes when the user clicks away from it or its page calls
+/// `window.close()`, as in Chrome.
+pub fn attach_popup_events(webview: &WebView, close: impl Fn() + Clone + 'static) {
+    let on_blur = close.clone();
+    let blur = FocusChangedEventHandler::create(Box::new(move |_, _| {
+        on_blur();
+        Ok(())
+    }));
+    let mut token = Default::default();
+    let _ = unsafe { webview.controller().add_LostFocus(&blur, &mut token) };
+    let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
+        return;
+    };
+    let closed = WindowCloseRequestedEventHandler::create(Box::new(move |_, _| {
+        close();
+        Ok(())
+    }));
+    let _ = unsafe { core.add_WindowCloseRequested(&closed, &mut token) };
+}
+
 /// Report an https:// navigation that failed because the server couldn't be reached securely
 /// (certificate problems are handled separately by the TLS interstitial).
 pub fn attach_nav_failures(webview: &WebView, tab_id: TabId, proxy: EventLoopProxy<BrowserEvent>) {
