@@ -98,6 +98,60 @@ pub fn community_lists() -> Vec<ListSource> {
     ]
 }
 
+/// AdGuard's URL Tracking filter: `$removeparam` rules for far more tracking parameters than
+/// the built-in list, applied to links you open as well as to requests.
+pub fn url_tracking_lists() -> Vec<ListSource> {
+    vec![ListSource {
+        id: "adguard-url-tracking".into(),
+        title: "AdGuard URL Tracking".into(),
+        url: "https://filters.adtidy.org/extension/ublock/filters/17.txt".into(),
+        refresh_secs: 12 * HOUR,
+        trusted: false,
+    }]
+}
+
+/// Ids of the cookie-notice lists, which the "Hide cookie notices" switch turns off together.
+pub const COOKIE_LISTS: [&str; 2] = ["easylist-cookies", "ubo-cookies"];
+
+/// Cookie notices: EasyList Cookie (as Brave uses it) and uBlock's own cookie-notice rules.
+pub fn cookie_lists() -> Vec<ListSource> {
+    vec![
+        ListSource {
+            id: COOKIE_LISTS[0].into(),
+            title: "EasyList Cookie".into(),
+            url: "https://secure.fanboy.co.nz/fanboy-cookiemonster_ubo.txt".into(),
+            refresh_secs: 12 * HOUR,
+            trusted: false,
+        },
+        ListSource {
+            id: COOKIE_LISTS[1].into(),
+            title: "uBlock cookie notices".into(),
+            url: "https://ublockorigin.github.io/uAssetsCDN/filters/annoyances-cookies.txt".into(),
+            refresh_secs: 12 * HOUR,
+            trusted: true,
+        },
+    ]
+}
+
+/// Brave's tracker-redirect rules (see [`crate::navigation`]).
+pub const DEBOUNCE_URL: &str =
+    "https://raw.githubusercontent.com/brave/adblock-lists/master/brave-lists/debounce.json";
+
+/// Brave's per-site tracking parameters (see [`crate::navigation`]).
+pub const CLEAN_URLS_URL: &str =
+    "https://raw.githubusercontent.com/brave/adblock-lists/master/brave-lists/clean-urls.json";
+
+/// The catalog's language codes for a Windows display language (`de-DE` -> `de`).
+pub fn catalog_language(tag: &str) -> Option<String> {
+    let primary = tag.split(['-', '_']).next()?.to_ascii_lowercase();
+    match primary.as_str() {
+        "" | "en" => None,
+        // Brave's Hindi list is tagged `in`.
+        "hi" => Some("in".into()),
+        _ => Some(primary),
+    }
+}
+
 #[derive(Deserialize)]
 struct CatalogEntry {
     #[serde(default)]
@@ -118,12 +172,24 @@ struct CatalogSource {
 /// Lists Brave enables by default, from its catalog JSON. Regional and iOS-only lists are
 /// skipped, and lists we already fetch are not duplicated.
 pub fn brave_lists_from_catalog(json: &str, have: &[ListSource]) -> Vec<ListSource> {
+    brave_lists_for(json, have, &[])
+}
+
+/// [`brave_lists_from_catalog`], plus the regional lists for `languages` (catalog codes, see
+/// [`catalog_language`]), as Brave enables them for the browser's language.
+pub fn brave_lists_for(json: &str, have: &[ListSource], languages: &[String]) -> Vec<ListSource> {
     let Ok(entries) = serde_json::from_str::<Vec<CatalogEntry>>(json) else {
         return Vec::new();
     };
     let mut out: Vec<ListSource> = Vec::new();
     for e in &entries {
-        if !e.default_enabled || !e.langs.is_empty() || e.title.to_lowercase().contains("ios") {
+        let regional = !e.langs.is_empty();
+        let wanted = if regional {
+            e.langs.iter().any(|l| languages.contains(l))
+        } else {
+            e.default_enabled
+        };
+        if !wanted || e.title.to_lowercase().contains("ios") {
             continue;
         }
         for s in &e.sources {
@@ -143,8 +209,9 @@ pub fn brave_lists_from_catalog(json: &str, have: &[ListSource]) -> Vec<ListSour
                 id,
                 title,
                 url: s.url.clone(),
-                refresh_secs: 6 * HOUR,
-                trusted: true,
+                refresh_secs: if regional { 12 * HOUR } else { 6 * HOUR },
+                // Regional lists are maintained outside Brave: no trusted scriptlets.
+                trusted: !regional,
             });
         }
     }
@@ -206,6 +273,25 @@ mod tests {
             .starts_with("https://github.com/KJX469/Shoji/releases/download/byobu-data/"));
         assert_eq!(f.refresh_secs, HOUR);
         assert!(f.trusted);
+    }
+
+    #[test]
+    fn regional_lists_follow_the_language() {
+        let json = r#"[
+          {"title":"German website ad blocker","langs":["de"],
+           "sources":[{"url":"https://example.org/de.txt"}]},
+          {"title":"Nordic","langs":["nb","da"],
+           "sources":[{"url":"https://example.org/nordic.txt"}]}
+        ]"#;
+        assert!(brave_lists_for(json, &[], &[]).is_empty());
+        let de = brave_lists_for(json, &[], &["de".into()]);
+        assert_eq!(de.len(), 1);
+        assert_eq!(de[0].url, "https://example.org/de.txt");
+        assert!(!de[0].trusted);
+        assert_eq!(brave_lists_for(json, &[], &["da".into()]).len(), 1);
+        assert_eq!(catalog_language("de-DE").as_deref(), Some("de"));
+        assert_eq!(catalog_language("en-US"), None);
+        assert_eq!(catalog_language("hi-IN").as_deref(), Some("in"));
     }
 
     #[test]

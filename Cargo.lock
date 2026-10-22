@@ -2713,7 +2713,9 @@ name = "shoji-byobu"
 version = "0.1.6"
 dependencies = [
  "adblock",
+ "base64 0.22.1",
  "psl",
+ "regex",
  "serde",
  "serde_json",
  "ureq",
