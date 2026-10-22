@@ -82,6 +82,17 @@ fn product_version() -> &'static str {
     })
 }
 
+/// Most requests one download may take: Google's download host drops long transfers after a few
+/// seconds on some networks, so the file is fetched in as many resumed pieces as it takes.
+const DOWNLOAD_TRIES: u32 = 80;
+/// Pieces in a row that add nothing before the download is given up.
+const DOWNLOAD_STALLS: u32 = 5;
+
+/// The total size in a `Content-Range: bytes 100-199/5000` header.
+fn content_range_total(value: &str) -> Option<u64> {
+    value.rsplit('/').next()?.trim().parse().ok()
+}
+
 fn download(id: &str) -> Result<Vec<u8>, String> {
     let url = format!(
         "https://clients2.google.com/service/update2/crx?response=redirect&prodversion={}&acceptformat=crx2,crx3&x=id%3D{id}%26installsource%3Dondemand%26uc",
@@ -92,22 +103,90 @@ fn download(id: &str) -> Result<Vec<u8>, String> {
         .http_status_as_error(false)
         .build()
         .into();
-    let mut resp = agent.get(&url).call().map_err(|e| e.to_string())?;
-    match resp.status().as_u16() {
-        200 => {}
-        204 | 404 => return Err("The Chrome Web Store has no extension with that id.".into()),
-        code => return Err(format!("The Chrome Web Store answered {code}.")),
+    let started = std::time::Instant::now();
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut total: Option<u64> = None;
+    let mut stalls = 0;
+    for attempt in 0..DOWNLOAD_TRIES {
+        if attempt > 0 {
+            // Each piece asks the store for a fresh download address (a signed address works
+            // once), so go gently.
+            std::thread::sleep(Duration::from_millis(500 * u64::from(stalls + 1).min(8)));
+        }
+        if started.elapsed() > Duration::from_secs(600) {
+            break;
+        }
+        let mut request = agent.get(&url);
+        if !bytes.is_empty() {
+            request = request.header("Range", format!("bytes={}-", bytes.len()));
+        }
+        let mut resp = match request.call() {
+            Ok(r) => r,
+            Err(_) => {
+                stalls += 1;
+                if stalls >= DOWNLOAD_STALLS {
+                    break;
+                }
+                continue;
+            }
+        };
+        match resp.status().as_u16() {
+            200 => {
+                // The whole file again (the Range was not honoured).
+                bytes.clear();
+                total = resp.body().content_length();
+            }
+            206 => {
+                total = resp
+                    .headers()
+                    .get("content-range")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(content_range_total)
+                    .or(total);
+            }
+            204 | 404 => return Err("The Chrome Web Store has no extension with that id.".into()),
+            429 | 500..=599 => {
+                stalls += 1;
+                if stalls >= DOWNLOAD_STALLS {
+                    break;
+                }
+                continue;
+            }
+            code => return Err(format!("The Chrome Web Store answered {code}.")),
+        }
+        if total.is_some_and(|t| t > MAX_CRX_BYTES) {
+            return Err("That extension is too large.".into());
+        }
+        let before = bytes.len();
+        let mut reader = resp.body_mut().with_config().limit(MAX_CRX_BYTES).reader();
+        let mut buf = [0u8; 64 * 1024];
+        let clean_end = loop {
+            match std::io::Read::read(&mut reader, &mut buf) {
+                Ok(0) => break true,
+                Ok(n) => {
+                    bytes.extend_from_slice(&buf[..n]);
+                    if bytes.len() as u64 > MAX_CRX_BYTES {
+                        return Err("That extension is too large.".into());
+                    }
+                }
+                Err(_) => break false,
+            }
+        };
+        match total {
+            Some(t) if bytes.len() as u64 >= t => return Ok(bytes),
+            None if clean_end || is_complete_package(&bytes) => return Ok(bytes),
+            _ => {}
+        }
+        if bytes.len() > before {
+            stalls = 0;
+        } else {
+            stalls += 1;
+            if stalls >= DOWNLOAD_STALLS {
+                break;
+            }
+        }
     }
-    // Google's download host closes the connection without a TLS close_notify once the whole
-    // file is sent, which the stream reports as an error. A package that is complete anyway
-    // (its zip index is at the end, so a cut one never parses) is taken as it is.
-    let mut bytes = Vec::new();
-    let mut reader = resp.body_mut().with_config().limit(MAX_CRX_BYTES).reader();
-    match std::io::Read::read_to_end(&mut reader, &mut bytes) {
-        Ok(_) => Ok(bytes),
-        Err(_) if is_complete_package(&bytes) => Ok(bytes),
-        Err(e) => Err(e.to_string()),
-    }
+    Err("The download kept breaking off. Check your connection and try again.".into())
 }
 
 /// `bytes` is a whole CRX package: a header and a zip that opens.
@@ -596,6 +675,16 @@ mod tests {
         assert!(is_complete_package(&crx));
         assert!(!is_complete_package(&crx[..crx.len() - 10]));
         assert!(!is_complete_package(b""));
+    }
+
+    #[test]
+    fn content_range_gives_the_whole_size() {
+        assert_eq!(
+            content_range_total("bytes 2300000-24900000/24900001"),
+            Some(24900001)
+        );
+        assert_eq!(content_range_total("bytes 0-9/*"), None);
+        assert_eq!(content_range_total(""), None);
     }
 
     #[test]
