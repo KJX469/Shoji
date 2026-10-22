@@ -831,7 +831,7 @@ pub fn attach(
                 unsafe { request.Method(&mut method)? };
                 let method = take(method);
                 phases.mark("read");
-                let generation = shield.generation();
+                let generation = shield.decision_generation();
                 let key = (url, kind, method == "GET");
                 let cached = top_target.borrow_mut().decisions.get(&key, generation);
                 let query = |url: String| Query {

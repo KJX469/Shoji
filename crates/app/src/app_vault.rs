@@ -2,6 +2,19 @@
 
 use super::*;
 
+/// A breach check that couldn't reach the service is tried again after this.
+const BREACH_RETRY: Duration = Duration::from_secs(10 * 60);
+
+/// What the breach check has found while the vault is open, by password hash.
+#[derive(Default)]
+pub(super) struct Breaches {
+    counts: HashMap<String, u64>,
+    running: bool,
+    failed_at: Option<Instant>,
+    /// The passwords page's search, to list again when an answer arrives
+    query: String,
+}
+
 impl BrowserApp {
     /// Make the vault usable: open an OS-protected one, or (when `create`) start one. A vault
     /// with a master password only opens when the user types it.
@@ -49,9 +62,29 @@ impl BrowserApp {
         if !self.vault.is_unlocked() {
             return;
         }
+        self.breaches.query = query.to_string();
         let audit = self.vault.audit();
         let weak: HashSet<&String> = audit.weak.iter().collect();
         let reused: HashSet<&String> = audit.reused.iter().flatten().collect();
+        let check = self.settings.privacy.breach_check;
+        // Hashes are kept only while the vault is open, and never written anywhere.
+        let hashes: HashMap<&str, String> = if check {
+            self.vault
+                .logins()
+                .iter()
+                .filter(|l| !l.password.is_empty())
+                .map(|l| (l.id.as_str(), shoji_core::breach::sha1_hex(&l.password)))
+                .collect()
+        } else {
+            HashMap::new()
+        };
+        let seen = |id: &str| {
+            hashes
+                .get(id)
+                .and_then(|h| self.breaches.counts.get(h))
+                .copied()
+                .unwrap_or(0)
+        };
         let items: Vec<serde_json::Value> = self
             .vault
             .search(query)
@@ -61,15 +94,93 @@ impl BrowserApp {
                     "id": l.id, "title": l.title, "url": l.url, "host": l.host(),
                     "username": l.username, "modified": l.modified,
                     "weak": weak.contains(&l.id), "reused": reused.contains(&l.id),
+                    "breached": seen(&l.id),
                 })
             })
             .collect();
+        let breached = self
+            .vault
+            .logins()
+            .iter()
+            .filter(|l| seen(&l.id) > 0)
+            .count();
+        let unknown: Vec<String> = hashes
+            .values()
+            .filter(|h| !self.breaches.counts.contains_key(*h))
+            .cloned()
+            .collect();
+        let status = if !check {
+            "off"
+        } else if self.breaches.running {
+            "checking"
+        } else if unknown.is_empty() {
+            "done"
+        } else if self
+            .breaches
+            .failed_at
+            .is_some_and(|t| t.elapsed() < BREACH_RETRY)
+        {
+            "failed"
+        } else {
+            self.start_breach_check(unknown);
+            "checking"
+        };
         let payload = serde_json::json!({
             "items": items, "weak": audit.weak.len(), "reused": audit.reused.iter().map(Vec::len).sum::<usize>(),
+            "breached": breached, "breachCheck": status,
         });
         self.eval_all_internal(&format!(
             "window.__vaultList && window.__vaultList({payload})"
         ));
+    }
+
+    /// Look `hashes` up in the background; the answer comes back as `VaultBreaches`.
+    fn start_breach_check(&mut self, hashes: Vec<String>) {
+        self.breaches.running = true;
+        let proxy = self.proxy.clone();
+        let spawned = std::thread::Builder::new()
+            .name("shoji-breaches".into())
+            .spawn(move || {
+                let agent: ureq::Agent = ureq::Agent::config_builder()
+                    .timeout_global(Some(Duration::from_secs(20)))
+                    .build()
+                    .into();
+                let mut all = true;
+                let found = shoji_core::breach::check(hashes.iter().map(String::as_str), |p| {
+                    let body = agent
+                        .get(&format!("{}{p}", shoji_core::breach::RANGE_URL))
+                        // Every answer is padded to a similar size, so its length says nothing.
+                        .header("Add-Padding", "true")
+                        .header("User-Agent", "Shoji")
+                        .call()
+                        .ok()
+                        .and_then(|mut r| r.body_mut().read_to_string().ok());
+                    all &= body.is_some();
+                    body
+                });
+                let _ = proxy.send_event(BrowserEvent::VaultBreaches(found, all));
+            });
+        if spawned.is_err() {
+            self.breaches.running = false;
+        }
+    }
+
+    /// A breach check finished: `found` has a count for each hash it could look up.
+    pub(super) fn breaches_checked(&mut self, found: HashMap<String, u64>, complete: bool) {
+        self.breaches.running = false;
+        self.breaches.failed_at = (!complete).then(Instant::now);
+        if !self.vault.is_unlocked() {
+            return;
+        }
+        self.breaches.counts.extend(found);
+        let query = self.breaches.query.clone();
+        self.push_vault_list(&query);
+    }
+
+    /// Forget what the breach check learned (the vault was locked).
+    pub(super) fn forget_breaches(&mut self) {
+        self.breaches.counts.clear();
+        self.breaches.failed_at = None;
     }
 
     pub(super) fn vault_changed(&mut self) {
@@ -200,6 +311,7 @@ impl BrowserApp {
     /// Lock an idle master-password vault.
     pub(super) fn vault_tick(&mut self) -> Option<Instant> {
         if self.vault.lock_if_idle(VAULT_IDLE) {
+            self.forget_breaches();
             self.push_vault();
         }
         self.vault.idle_deadline(VAULT_IDLE)

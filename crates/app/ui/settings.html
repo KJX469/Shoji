@@ -289,7 +289,11 @@
           <label class="switch"><input type="checkbox" data-path="privacy.save_passwords"><span></span></label>
         </div>
         <div class="row">
-          <div class="what"><b>Password manager</b><small>See, search, add and import your logins, check for weak and reused ones, and lock them with a master password</small></div>
+          <div class="what"><b>Check passwords for breaches</b><small>Marks saved passwords that appear in known data breaches. Only the first 5 characters of each password's hash are sent to Have I Been Pwned</small></div>
+          <label class="switch"><input type="checkbox" data-path="privacy.breach_check"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="what"><b>Password manager</b><small>See, search, add and import your logins, check for breached, weak and reused ones, and lock them with a master password</small></div>
           <button class="btn" onclick="post('Navigate', { url: 'shoji://passwords' })">Open</button>
         </div>
         <div class="row">
