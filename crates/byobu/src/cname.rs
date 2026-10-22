@@ -210,12 +210,13 @@ mod tests {
                 ttl: Duration::from_secs(30),
             })
         }));
+        // Before the first ask: the lookup it queues may finish at once.
+        let e0 = u.epoch();
         assert_eq!(
             u.canonical("metrics.news.test"),
             None,
             "first ask is queued"
         );
-        let e0 = u.epoch();
         assert_eq!(
             wait_for(&u, "metrics.news.test").as_deref(),
             Some("news.tracker.example")

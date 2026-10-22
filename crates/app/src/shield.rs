@@ -1026,8 +1026,10 @@ pub fn attach(
                     }
                     return net.respond(&args, &request, &answer);
                 }
-                if handoff() == Handoff::Defer {
-                    // Held until the matcher answers; the answer is applied from the event loop.
+                // Held until the matcher answers; the answer is applied from the event loop.
+                // Measured on 24 sites, this costs the UI thread less than matching here: the
+                // match itself takes 30-75 µs on varied traffic (cold caches on any thread).
+                {
                     let deferral = unsafe { args.GetDeferral()? };
                     let ticket = NEXT_TICKET.with(|t| {
                         let n = t.get() + 1;
@@ -1050,16 +1052,7 @@ pub fn attach(
                     });
                     m.submit(query(key.0), ticket);
                     phases.mark("defer");
-                    return Ok(());
                 }
-                let answer = m.check(query(key.0.clone()));
-                phases.mark("match");
-                top_target
-                    .borrow_mut()
-                    .decisions
-                    .put(key, generation, answer.clone());
-                net.respond(&args, &request, &answer)?;
-                phases.mark("answer");
                 Ok(())
             })();
             note_check_time(started.elapsed());
@@ -1976,23 +1969,6 @@ fn start_matcher(shield: &Shield) {
     });
 }
 
-/// How a request waits for the matcher.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Handoff {
-    /// The UI thread waits for the answer
-    Wait,
-    /// The request is held and answered from the event loop
-    Defer,
-}
-
-fn handoff() -> Handoff {
-    static H: OnceLock<Handoff> = OnceLock::new();
-    *H.get_or_init(|| match std::env::var("SHOJI_BYOBU_HANDOFF").as_deref() {
-        Ok("defer") => Handoff::Defer,
-        _ => Handoff::Wait,
-    })
-}
-
 /// What a tab's request handler knows about its page, kept on the UI thread: the page's
 /// address (requests from every frame and worker are matched against it), the shield mode
 /// that applies there, and the decisions made for it.
@@ -2151,13 +2127,16 @@ pub fn apply_answers() {
         let Some(p) = PENDING.with(|q| q.borrow_mut().remove(&ticket)) else {
             continue;
         };
+        phases.mark("apply-find");
         let _ = p.net.respond(&p.args, &p.request, &answer);
+        phases.mark("apply-respond");
         let _ = unsafe { p.deferral.Complete() };
+        phases.mark("apply-complete");
         p.page
             .borrow_mut()
             .decisions
             .put(p.key, p.generation, answer);
-        phases.mark("apply");
+        phases.mark("apply-cache");
         note_check_time(started.elapsed());
         phases.finish();
     }

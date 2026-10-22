@@ -493,11 +493,31 @@ impl Shoji {
 
     /// The window's toolbar strip (the chrome page with tabs in it).
     pub fn chrome(&self) -> Page {
-        self.page_where(
-            |u| u.starts_with("data:") || u.starts_with("about:blank"),
-            Duration::from_secs(30),
-        )
-        .expect("chrome strip")
+        // Other surfaces (side panel, dropdowns) are inline pages too; the strip has the tabs.
+        let end = Instant::now() + Duration::from_secs(30);
+        loop {
+            for t in self.targets() {
+                let url = t["url"].as_str().unwrap_or("");
+                if t["type"] != "page" || !(url.starts_with("data:") || url == "about:blank") {
+                    continue;
+                }
+                let Some(ws) = t["webSocketDebuggerUrl"].as_str() else {
+                    continue;
+                };
+                if let Some(mut p) = Page::connect(ws) {
+                    if p.eval("document.querySelectorAll('#tabs .tab').length") != 0 {
+                        return p;
+                    }
+                }
+            }
+            assert!(Instant::now() < end, "no chrome strip");
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+
+    /// The browser's process id.
+    pub fn pid(&self) -> u32 {
+        self.child.lock().unwrap().id()
     }
 
     pub fn is_running(&self) -> bool {
@@ -610,6 +630,12 @@ impl Page {
 
     /// Call a protocol method and wait for its result.
     pub fn call(&mut self, method: &str, params: Value) -> Value {
+        self.try_call(method, params.clone())
+            .unwrap_or_else(|e| panic!("{method} failed: {e}"))
+    }
+
+    /// [`Page::call`], returning the protocol's error instead of failing.
+    pub fn try_call(&mut self, method: &str, params: Value) -> Result<Value, Value> {
         self.next += 1;
         let id = self.next;
         let msg = json!({ "id": id, "method": method, "params": params }).to_string();
@@ -624,9 +650,9 @@ impl Page {
             };
             if v["id"] == id {
                 if !v["error"].is_null() {
-                    panic!("{method} failed: {}", v["error"]);
+                    return Err(v["error"].clone());
                 }
-                return v["result"].clone();
+                return Ok(v["result"].clone());
             }
             if v["method"].is_string() {
                 self.events.push(v);
@@ -636,10 +662,24 @@ impl Page {
 
     /// Evaluate `expr` in the page (promises are awaited) and return its value.
     pub fn eval(&mut self, expr: &str) -> Value {
-        let r = self.call(
-            "Runtime.evaluate",
-            json!({ "expression": expr, "awaitPromise": true, "returnByValue": true }),
-        );
+        let params = json!({ "expression": expr, "awaitPromise": true, "returnByValue": true });
+        // A page that navigates meanwhile (a new tab's first page is opened twice) has no
+        // context for a moment: ask again in the new document.
+        let mut tries = 0;
+        let r = loop {
+            match self.try_call("Runtime.evaluate", params.clone()) {
+                Ok(r) => break r,
+                Err(e)
+                    if tries < 50
+                        && (e.to_string().contains("navigated")
+                            || e.to_string().contains("execution context")) =>
+                {
+                    tries += 1;
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+                Err(e) => panic!("Runtime.evaluate failed: {e}"),
+            }
+        };
         if let Some(ex) = r.get("exceptionDetails") {
             panic!("script failed: {expr}\n{ex}");
         }
