@@ -208,10 +208,18 @@ fn serve(stream: TcpStream, hits: &Mutex<Vec<Hit>>, router: &Router) {
         hits.lock().unwrap().push(hit.clone());
         let reply = router(&hit);
         let mut out = format!(
-            "HTTP/1.1 {} X\r\nContent-Length: {}\r\nCache-Control: no-store\r\n",
+            "HTTP/1.1 {} X\r\nContent-Length: {}\r\n",
             reply.status,
             reply.body.len()
         );
+        // Not cached, unless the route says otherwise.
+        if !reply
+            .headers
+            .iter()
+            .any(|(k, _)| k.eq_ignore_ascii_case("cache-control"))
+        {
+            out.push_str("Cache-Control: no-store\r\n");
+        }
         for (k, v) in &reply.headers {
             out.push_str(&format!("{k}: {v}\r\n"));
         }
