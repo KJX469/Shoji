@@ -20,6 +20,19 @@ pub fn parse_id(input: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// The extension id of a Chrome Web Store detail page address, `None` for any other address.
+pub fn store_page_id(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("https://")?;
+    let (host, path) = rest.split_once('/')?;
+    let path = path.split(['?', '#']).next()?;
+    let detail = match host {
+        "chromewebstore.google.com" => path.starts_with("detail/"),
+        "chrome.google.com" => path.starts_with("webstore/detail/"),
+        _ => false,
+    };
+    detail.then(|| parse_id(path)).flatten()
+}
+
 /// The zip archive inside a CRX package (versions 2 and 3).
 pub fn crx_payload(bytes: &[u8]) -> Option<&[u8]> {
     if bytes.get(..4)? != b"Cr24" {
@@ -533,6 +546,26 @@ mod tests {
         std::fs::write(dir.join("manifest.json"), r#"{"manifest_version":3}"#).unwrap();
         assert!(unsupported(&dir).is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn store_detail_pages_are_recognised() {
+        let id = "nngceckbapebfimnlniiiahkandclblb";
+        for url in [
+            format!("https://chromewebstore.google.com/detail/bitwarden/{id}"),
+            format!("https://chromewebstore.google.com/detail/{id}?hl=en"),
+            format!("https://chrome.google.com/webstore/detail/bitwarden/{id}"),
+        ] {
+            assert_eq!(store_page_id(&url).as_deref(), Some(id), "{url}");
+        }
+        for url in [
+            "https://chromewebstore.google.com/".to_string(),
+            format!("https://chromewebstore.google.com/search/{id}"),
+            format!("https://evil.example/detail/x/{id}"),
+            format!("http://chromewebstore.google.com/detail/x/{id}"),
+        ] {
+            assert_eq!(store_page_id(&url), None, "{url}");
+        }
     }
 
     #[test]
