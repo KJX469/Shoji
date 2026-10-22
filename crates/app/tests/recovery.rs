@@ -104,7 +104,17 @@ fn a_hung_page_offers_wait_or_close() {
             .any(|t| t["url"].as_str().unwrap_or("").contains("busy.test")),
         "the hung tab is still open"
     );
-    assert!(shoji.is_running());
+    // It was the window's only tab, so the window may close with it; nothing crashed.
+    let crashes = std::fs::read_dir(shoji.data_dir().join("crashes"))
+        .map(|d| d.count())
+        .unwrap_or(0);
+    assert_eq!(
+        crashes,
+        0,
+        "Shoji crashed
+{}",
+        shoji.report()
+    );
 }
 
 /// The engine's browser process: the `msedgewebview2.exe` that Shoji started itself.

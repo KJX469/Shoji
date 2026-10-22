@@ -114,6 +114,10 @@
     .dl-ring .fill { stroke: var(--accent); stroke-dasharray: 69.1; stroke-dashoffset: 69.1; stroke-linecap: round; transition: stroke-dashoffset .25s linear; }
     #btnDark.on { color: var(--accent); }
     #btnNotes.open { background: var(--tint); color: var(--ink); }
+    .ext-btns { display: flex; gap: 2px; flex-shrink: 0; }
+    .ext-btns:empty { display: none; }
+    .ext-btns img { width: 18px; height: 18px; object-fit: contain; pointer-events: none; }
+    .ext-btns .letter { font-size: 12px; font-weight: 600; }
     .dl-count { position: absolute; top: 1px; right: 0; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; font-size: 9px; font-weight: 700; line-height: 14px; background: var(--tone); color: var(--on-tone); }
 
     /* Bookmarks bar */
@@ -474,6 +478,7 @@
     <button class="btn" id="btnPanel" onclick="post('RunAction', { value: 'bookmarks-panel' })" title="Bookmarks panel" aria-label="Bookmarks panel" hidden>
       <svg class="i" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M9.5 5v14"/></svg>
     </button>
+    <div class="ext-btns" id="extBtns" role="group" aria-label="Extensions"></div>
     <button class="btn" id="btnNotes" onclick="post('ToggleNotes')" title="Quick note" aria-label="Quick note">
       <svg class="i" viewBox="0 0 24 24"><path d="M7 3.5h8.5L19 7v13.5H7z"/><path d="M15.5 3.5V7H19M10 11h6M10 14.5h6M10 18h3.5"/><path d="M4.5 6v15"/></svg>
     </button>
@@ -1665,6 +1670,31 @@
     $('bmItems').ondrop = e => { if (dragUrl && e.target === $('bmItems')) { e.preventDefault(); const u = dragUrl; clearDrop(); post('BookmarkMove', { url: u, folder: '' }); } };
     addEventListener('resize', () => { if (prefs.bookmarksBar) fitBar(); });
 
+    /* Extensions: one button each, opening its popup under it. */
+    window.__extButtons = list => {
+      const box = $('extBtns');
+      box.textContent = '';
+      list.forEach(x => {
+        const b = document.createElement('button');
+        b.className = 'btn';
+        b.title = x.name;
+        b.setAttribute('aria-label', x.name);
+        if (x.icon) {
+          const img = document.createElement('img');
+          img.src = x.icon; img.alt = '';
+          b.appendChild(img);
+        } else {
+          const l = document.createElement('span');
+          l.className = 'letter';
+          l.textContent = (x.name || '?').trim().charAt(0).toUpperCase();
+          b.appendChild(l);
+        }
+        b.onclick = () => post('ToggleExtensionPopup', { id: x.id, right: Math.round(b.getBoundingClientRect().right) });
+        box.appendChild(b);
+      });
+      reportAnchors();
+    };
+
     /* Toolbar anchors: the dropdowns hang from the button that opened them. */
     let anchorFrame = 0;
     function reportAnchors() {
@@ -1689,7 +1719,7 @@
 
 
     /* ---------- Split view toolbars ---------- */
-    const toolIds = ['splitCtl', 'btnPanel', 'btnNotes', 'btnDownloads', 'btnMenu'];
+    const toolIds = ['splitCtl', 'btnPanel', 'extBtns', 'btnNotes', 'btnDownloads', 'btnMenu'];
     const toolMarks = toolIds.map(id => { const n = $(id); const m = document.createComment(id); n.before(m); return [n, m]; });
     let splitBarsOn = false, barsKey = '', curOmni = null;
     const PB = {

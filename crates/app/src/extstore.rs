@@ -151,9 +151,185 @@ fn display_name(dir: &Path, manifest: &serde_json::Value) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// The pages an installed extension offers: (name, popup path, options path), for each folder
-/// under `extensions_dir`.
-pub fn pages(extensions_dir: &Path) -> Vec<(String, Option<String>, Option<String>)> {
+/// `a` is a newer extension version than `b` (dotted numbers; a missing part is 0).
+pub fn newer(a: &str, b: &str) -> bool {
+    let parts = |v: &str| -> Vec<u64> {
+        v.split('.')
+            .map(|p| p.trim().parse::<u64>().unwrap_or(0))
+            .collect()
+    };
+    let (a, b) = (parts(a), parts(b));
+    (0..a.len().max(b.len())).find_map(|i| {
+        let (x, y) = (
+            a.get(i).copied().unwrap_or(0),
+            b.get(i).copied().unwrap_or(0),
+        );
+        (x != y).then_some(x > y)
+    }) == Some(true)
+}
+
+/// The store's update check for `installed` (id, version) pairs: one request answers for all.
+pub fn update_check_url(installed: &[(String, String)]) -> String {
+    let mut x = String::new();
+    for (id, version) in installed {
+        if !x.is_empty() {
+            x.push_str("%26x%3D");
+        }
+        x.push_str(&format!("id%3D{id}%26v%3D{version}%26uc"));
+    }
+    format!(
+        "https://clients2.google.com/service/update2/crx?response=updatecheck&prodversion=130.0.0.0&acceptformat=crx2,crx3&x={x}"
+    )
+}
+
+/// (id, version) of each `<app>` the update answer says has a newer version than the one
+/// installed.
+pub fn updates_in(xml: &str, installed: &[(String, String)]) -> Vec<(String, String)> {
+    let attr = |tag: &str, name: &str| -> Option<String> {
+        let at = tag.find(&format!(" {name}=\""))? + name.len() + 3;
+        let end = tag[at..].find('"')?;
+        Some(tag[at..at + end].to_string())
+    };
+    let mut out = Vec::new();
+    let mut app: Option<String> = None;
+    for tag in xml.split('<').skip(1) {
+        let tag = tag.split('>').next().unwrap_or("");
+        if tag.starts_with("app ") {
+            app = attr(tag, "appid");
+        } else if tag.starts_with("updatecheck ") {
+            let (Some(id), Some(version)) = (app.take(), attr(tag, "version")) else {
+                continue;
+            };
+            let current = installed.iter().find(|(i, _)| *i == id).map(|(_, v)| v);
+            if attr(tag, "status").as_deref() == Some("ok")
+                && current.is_some_and(|c| newer(&version, c))
+            {
+                out.push((id, version));
+            }
+        }
+    }
+    out
+}
+
+/// (store id, version) of each store-installed extension under `extensions_dir` (those unpacked
+/// into a folder named by their id).
+pub fn installed_versions(extensions_dir: &Path) -> Vec<(String, String)> {
+    let Ok(entries) = std::fs::read_dir(extensions_dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|e| {
+            let id = e.file_name().to_string_lossy().into_owned();
+            parse_id(&id).filter(|i| *i == id)?;
+            let text = std::fs::read_to_string(e.path().join("manifest.json")).ok()?;
+            let m: serde_json::Value =
+                serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()?;
+            Some((id, m.get("version")?.as_str()?.to_string()))
+        })
+        .collect()
+}
+
+/// Ask the store which installed extensions have a newer version and download them over the old
+/// folders. Returns the ids updated. Blocking.
+pub fn update_all(extensions_dir: &Path) -> Result<Vec<String>, String> {
+    let installed = installed_versions(extensions_dir);
+    if installed.is_empty() {
+        return Ok(Vec::new());
+    }
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(60)))
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let mut resp = agent
+        .get(&update_check_url(&installed))
+        .call()
+        .map_err(|e| e.to_string())?;
+    if resp.status().as_u16() != 200 {
+        return Err(format!("The Chrome Web Store answered {}.", resp.status()));
+    }
+    let xml = resp
+        .body_mut()
+        .with_config()
+        .limit(1024 * 1024)
+        .read_to_string()
+        .map_err(|e| e.to_string())?;
+    let mut done = Vec::new();
+    for (id, _) in updates_in(&xml, &installed) {
+        if fetch(&id, extensions_dir).is_ok() {
+            done.push(id);
+        }
+    }
+    Ok(done)
+}
+
+/// What an installed extension offers the browser's own UI.
+#[derive(Debug, Default, PartialEq)]
+pub struct ExtensionPages {
+    /// The folder it was loaded from (the store id for store installs)
+    pub folder: String,
+    pub name: String,
+    /// Paths inside the extension
+    pub popup: Option<String>,
+    pub options: Option<String>,
+    /// Its toolbar icon as a `data:` URL
+    pub icon: Option<String>,
+}
+
+/// The toolbar icon a manifest names: `action.default_icon` (a path, or paths by size), then
+/// the extension's own `icons`. The size nearest 32 px wins (16 px at 200%).
+fn icon_path(m: &serde_json::Value) -> Option<String> {
+    let pick = |v: &serde_json::Value| -> Option<String> {
+        if let Some(p) = v.as_str() {
+            return Some(p.to_string());
+        }
+        v.as_object()?
+            .iter()
+            .filter_map(|(size, p)| Some((size.parse::<i64>().ok()?, p.as_str()?)))
+            .min_by_key(|(size, _)| ((size - 32).abs(), -size))
+            .map(|(_, p)| p.to_string())
+    };
+    [
+        "/action/default_icon",
+        "/browser_action/default_icon",
+        "/icons",
+    ]
+    .iter()
+    .find_map(|k| m.pointer(k).and_then(pick))
+}
+
+/// `path` inside `dir` as a `data:` URL, if it is a small image that stays inside `dir`.
+fn icon_data(dir: &Path, path: &str) -> Option<String> {
+    let rel = Path::new(path.trim_start_matches('/'));
+    if rel
+        .components()
+        .any(|c| !matches!(c, std::path::Component::Normal(_)))
+    {
+        return None;
+    }
+    let mime = match rel.extension()?.to_str()?.to_ascii_lowercase().as_str() {
+        "png" => "image/png",
+        "svg" => "image/svg+xml",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "ico" => "image/x-icon",
+        _ => return None,
+    };
+    let bytes = std::fs::read(dir.join(rel)).ok()?;
+    if bytes.len() > 256 * 1024 {
+        return None;
+    }
+    use base64::Engine as _;
+    Some(format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
+}
+
+/// What each extension folder under `extensions_dir` offers.
+pub fn pages(extensions_dir: &Path) -> Vec<ExtensionPages> {
     let mut out = Vec::new();
     let Ok(entries) = std::fs::read_dir(extensions_dir) else {
         return out;
@@ -173,6 +349,7 @@ pub fn pages(extensions_dir: &Path) -> Vec<(String, Option<String>, Option<Strin
         let path = |v: Option<&serde_json::Value>| {
             v.and_then(|p| p.as_str())
                 .map(|p| p.trim_start_matches('/').to_string())
+                .filter(|p| !p.is_empty())
         };
         let popup = path(
             m.pointer("/action/default_popup")
@@ -182,9 +359,25 @@ pub fn pages(extensions_dir: &Path) -> Vec<(String, Option<String>, Option<Strin
             m.get("options_page")
                 .or_else(|| m.pointer("/options_ui/page")),
         );
-        out.push((name, popup, options));
+        let icon = icon_path(&m).and_then(|p| icon_data(&dir, &p));
+        out.push(ExtensionPages {
+            folder: e.file_name().to_string_lossy().into_owned(),
+            name,
+            popup,
+            options,
+            icon,
+        });
     }
     out
+}
+
+/// The entry in `pages` for the engine's extension `id` called `name`: by folder first (store
+/// installs are unpacked under their id), then by name.
+pub fn find<'a>(pages: &'a [ExtensionPages], id: &str, name: &str) -> Option<&'a ExtensionPages> {
+    pages
+        .iter()
+        .find(|p| p.folder == id)
+        .or_else(|| pages.iter().find(|p| p.name == name))
 }
 
 #[cfg(test)]
@@ -230,6 +423,68 @@ mod tests {
 
         assert_eq!(crx_payload(b"PK\x03\x04"), None);
         assert_eq!(crx_payload(b"Cr24\x03\x00\x00\x00\xff\xff\xff\x7f"), None);
+    }
+
+    #[test]
+    fn toolbar_icons_come_from_the_manifest_and_stay_inside_the_extension() {
+        let dir = std::env::temp_dir().join(format!("shoji-ext-{}", std::process::id()));
+        let ext = dir.join("abcdefghijklmnopabcdefghijklmnop");
+        std::fs::create_dir_all(ext.join("img")).unwrap();
+        std::fs::write(ext.join("img/32.png"), b"\x89PNG").unwrap();
+        std::fs::write(
+            ext.join("manifest.json"),
+            r#"{"name":"Vault","manifest_version":3,"background":{"service_worker":"sw.js"},
+               "action":{"default_popup":"/popup/index.html",
+                         "default_icon":{"16":"img/16.png","32":"img/32.png","128":"img/128.png"}},
+               "options_ui":{"page":"options.html"}}"#,
+        )
+        .unwrap();
+        let found = pages(&dir);
+        assert_eq!(found.len(), 1);
+        let p = &found[0];
+        assert_eq!(p.popup.as_deref(), Some("popup/index.html"));
+        assert_eq!(p.options.as_deref(), Some("options.html"));
+        assert_eq!(p.icon.as_deref(), Some("data:image/png;base64,iVBORw=="));
+        assert_eq!(
+            find(&found, "abcdefghijklmnopabcdefghijklmnop", "x").map(|p| p.name.as_str()),
+            Some("Vault")
+        );
+        assert_eq!(
+            find(&found, "other", "Vault").map(|p| p.name.as_str()),
+            Some("Vault")
+        );
+        assert_eq!(icon_data(&ext, "../../secret.png"), None);
+        assert_eq!(icon_data(&ext, "img/32.exe"), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn update_answers_name_only_newer_versions() {
+        assert!(newer("1.10.0", "1.9.9"));
+        assert!(newer("2", "1.99"));
+        assert!(!newer("1.0", "1.0.0"));
+        assert!(!newer("1.0.1", "1.0.2"));
+        let installed = vec![
+            ("a".repeat(32), "1.0.0".to_string()),
+            ("b".repeat(32), "3.1".to_string()),
+        ];
+        let url = update_check_url(&installed);
+        assert!(url.contains(&format!(
+            "id%3D{}%26v%3D1.0.0%26uc%26x%3Did%3D{}",
+            "a".repeat(32),
+            "b".repeat(32)
+        )));
+        let xml = format!(
+            r#"<?xml version="1.0"?><gupdate xmlns="http://www.google.com/update2/response" protocol="2.0">
+               <app appid="{a}" status="ok"><updatecheck codebase="https://x/a.crx" version="1.2.0" status="ok"/></app>
+               <app appid="{b}" status="ok"><updatecheck status="noupdate"/></app></gupdate>"#,
+            a = "a".repeat(32),
+            b = "b".repeat(32)
+        );
+        assert_eq!(
+            updates_in(&xml, &installed),
+            vec![("a".repeat(32), "1.2.0".to_string())]
+        );
     }
 
     struct Rng(u64);

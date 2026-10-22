@@ -37,6 +37,13 @@ jobs:
             Invoke-WebRequest https://go.microsoft.com/fwlink/p/?LinkId=2124703 -OutFile "$env:RUNNER_TEMP\wv2.exe"
             Start-Process "$env:RUNNER_TEMP\wv2.exe" -ArgumentList "/silent /install" -Wait
           }
+      - name: Engine policies on the runner
+        shell: pwsh
+        run: |
+          foreach ($k in "HKLM:\SOFTWARE\Policies\Microsoft\Edge", "HKLM:\SOFTWARE\Policies\Microsoft\Edge\WebView2", "HKCU:\SOFTWARE\Policies\Microsoft\Edge") {
+            if (Test-Path $k) { Write-Output $k; Get-ItemProperty $k | Format-List | Out-String | Write-Output }
+          }
+          exit 0
       - name: Browser tests and blocking score
         run: cargo test -p shoji --test browser --test score --test recovery --test flags --locked -- --nocapture
 

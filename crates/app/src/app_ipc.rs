@@ -28,6 +28,7 @@ impl BrowserApp {
                 }
                 self.push_data();
                 self.push_update();
+                self.push_extension_buttons(win_id);
                 if self.settings.first_run_complete {
                     self.greet_after_update();
                     self.mention_crash();
@@ -876,6 +877,7 @@ impl BrowserApp {
             }
             M::VaultLock => {
                 self.vault.lock();
+                self.forget_breaches();
                 self.push_vault();
             }
             M::VaultSetMaster { master } => {
@@ -1576,6 +1578,9 @@ impl BrowserApp {
             }
             M::ExtensionsQuery => self.request_extension_list(),
             M::AddExtension => self.add_extension_from_folder(),
+            M::ToggleExtensionPopup { id, right } => {
+                self.toggle_extension_popup(win_id, &id, right)
+            }
             M::InstallExtension { source } => self.install_extension_from_store(&source),
             M::RemoveExtension { id } => {
                 if let Some(view) = self.persistent_view() {
