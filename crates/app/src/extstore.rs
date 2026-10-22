@@ -49,6 +49,108 @@ pub fn crx_payload(bytes: &[u8]) -> Option<&[u8]> {
     bytes.get(start..)
 }
 
+/// The store id an extension public key (DER) belongs to: the first 16 bytes of its SHA-256,
+/// each nibble written as a letter from `a` to `p`.
+fn id_of_key(der: &[u8]) -> String {
+    ring::digest::digest(&ring::digest::SHA256, der).as_ref()[..16]
+        .iter()
+        .flat_map(|b| [b >> 4, b & 15])
+        .map(|n| char::from(b'a' + n))
+        .collect()
+}
+
+/// The bytes of every length-delimited field `number` in a protobuf message.
+fn proto_fields(mut msg: &[u8], number: u64) -> Vec<&[u8]> {
+    let varint = |m: &mut &[u8]| -> Option<u64> {
+        let mut v = 0u64;
+        for shift in (0..64).step_by(7) {
+            let (&b, rest) = m.split_first()?;
+            *m = rest;
+            v |= u64::from(b & 0x7f) << shift;
+            if b & 0x80 == 0 {
+                return Some(v);
+            }
+        }
+        None
+    };
+    let mut out = Vec::new();
+    while !msg.is_empty() {
+        let Some(tag) = varint(&mut msg) else { break };
+        match tag & 7 {
+            0 => {
+                if varint(&mut msg).is_none() {
+                    break;
+                }
+            }
+            1 => msg = msg.get(8..).unwrap_or_default(),
+            5 => msg = msg.get(4..).unwrap_or_default(),
+            2 => {
+                let Some(len) = varint(&mut msg).and_then(|l| usize::try_from(l).ok()) else {
+                    break;
+                };
+                let Some(field) = msg.get(..len) else { break };
+                if tag >> 3 == number {
+                    out.push(field);
+                }
+                msg = &msg[len..];
+            }
+            _ => break,
+        }
+    }
+    out
+}
+
+/// The public key (DER) the package is signed with that gives the extension its store id.
+fn crx_public_key(bytes: &[u8], id: &str) -> Option<Vec<u8>> {
+    let word = |at: usize| -> Option<usize> {
+        Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?) as usize)
+    };
+    let keys: Vec<&[u8]> = match word(4)? {
+        2 => vec![bytes.get(16..16usize.checked_add(word(8)?)?)?],
+        3 => {
+            let header = bytes.get(12..12usize.checked_add(word(8)?)?)?;
+            // AsymmetricKeyProof { public_key = 1 }, as sha256_with_rsa = 2 or sha256_with_ecdsa = 3.
+            [2, 3]
+                .into_iter()
+                .flat_map(|n| proto_fields(header, n))
+                .filter_map(|proof| proto_fields(proof, 1).into_iter().next())
+                .collect()
+        }
+        _ => return None,
+    };
+    keys.into_iter()
+        .find(|k| id_of_key(k) == id)
+        .map(<[u8]>::to_vec)
+}
+
+/// Put the store key into the unpacked manifest, so the engine gives the extension its store id
+/// instead of one made up from the folder (extensions and their desktop apps know each other by
+/// that id).
+fn pin_store_id(dir: &Path, key_der: &[u8]) -> Result<(), String> {
+    use base64::Engine as _;
+    let file = dir.join("manifest.json");
+    let text = std::fs::read_to_string(&file).map_err(|e| e.to_string())?;
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|e| e.to_string())?;
+    let Some(map) = manifest.as_object_mut() else {
+        return Ok(());
+    };
+    if !map.contains_key("key") {
+        map.insert(
+            "key".into(),
+            base64::engine::general_purpose::STANDARD
+                .encode(key_der)
+                .into(),
+        );
+        std::fs::write(
+            &file,
+            serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Used when the engine's version can't be read: the store withholds extensions that need a
 /// newer Chrome than the one claimed (1Password asks for 140).
 const FALLBACK_VERSION: &str = "140.0.0.0";
@@ -257,6 +359,9 @@ pub fn fetch(id: &str, extensions_dir: &Path) -> Result<PathBuf, String> {
     let existed = dest.exists();
     std::fs::create_dir_all(extensions_dir).map_err(|e| e.to_string())?;
     unpack(zip, &dest)?;
+    if let Some(key) = crx_public_key(&bytes, id) {
+        pin_store_id(&dest, &key)?;
+    }
     if let Some(why) = unsupported(&dest) {
         if !existed {
             let _ = std::fs::remove_dir_all(&dest);
@@ -685,6 +790,55 @@ mod tests {
         );
         assert_eq!(content_range_total("bytes 0-9/*"), None);
         assert_eq!(content_range_total(""), None);
+    }
+
+    #[test]
+    fn the_store_key_comes_out_of_the_package_header() {
+        let key = b"not a real key, only bytes".to_vec();
+        let id = id_of_key(&key);
+        assert_eq!(id.len(), 32);
+        assert!(id.bytes().all(|b| (b'a'..=b'p').contains(&b)));
+        // CrxFileHeader { sha256_with_rsa(2) = { public_key(1) = key, signature(2) = .. } }
+        let mut proof = vec![0x0a, key.len() as u8];
+        proof.extend_from_slice(&key);
+        proof.extend_from_slice(&[0x12, 2, 9, 9]);
+        let mut header = vec![0x12, proof.len() as u8];
+        header.extend_from_slice(&proof);
+        // an unrelated key first, and a varint field the parser has to step over
+        let mut other = vec![0x1a, 4, 0x0a, 2, 1, 2, 0x50, 7];
+        other.extend_from_slice(&header);
+        let mut crx = b"Cr24".to_vec();
+        crx.extend_from_slice(&3u32.to_le_bytes());
+        crx.extend_from_slice(&(other.len() as u32).to_le_bytes());
+        crx.extend_from_slice(&other);
+        crx.extend_from_slice(b"zip");
+        assert_eq!(crx_public_key(&crx, &id), Some(key.clone()));
+        assert_eq!(crx_public_key(&crx, "a".repeat(32).as_str()), None);
+        // version 2: the key sits right after the two lengths
+        let mut old = b"Cr24".to_vec();
+        old.extend_from_slice(&2u32.to_le_bytes());
+        old.extend_from_slice(&(key.len() as u32).to_le_bytes());
+        old.extend_from_slice(&0u32.to_le_bytes());
+        old.extend_from_slice(&key);
+        assert_eq!(crx_public_key(&old, &id), Some(key));
+    }
+
+    #[test]
+    fn the_key_is_added_to_a_manifest_once() {
+        let dir = std::env::temp_dir().join(format!("shoji-key-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("manifest.json"), "\u{feff}{\"name\":\"x\"}").unwrap();
+        pin_store_id(&dir, b"abc").unwrap();
+        let m: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap())
+                .unwrap();
+        assert_eq!(m["key"], "YWJj");
+        pin_store_id(&dir, b"zzz").unwrap();
+        let m: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap())
+                .unwrap();
+        assert_eq!(m["key"], "YWJj");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
