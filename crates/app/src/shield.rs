@@ -58,6 +58,8 @@ struct Config {
     custom: Vec<String>,
     disabled: Vec<String>,
     rules: String,
+    /// Catalog codes of the regional lists to follow (empty: none)
+    languages: Vec<String>,
 }
 
 struct TabStats {
@@ -624,10 +626,19 @@ pub fn apply_settings(s: &ShieldSettings) {
     CLEAN_LINKS.store(s.clean_links, Ordering::Relaxed);
     SEND_GPC.store(s.send_gpc, Ordering::Relaxed);
     HOOK_REQUESTS.store(s.mode != "off" || s.send_gpc, Ordering::Relaxed);
+    let mut disabled = s.disabled_lists.clone();
+    if !s.hide_cookie_notices {
+        disabled.extend(shoji_byobu::sources::COOKIE_LISTS.map(String::from));
+    }
     let new = Config {
         custom: s.custom_lists.clone(),
-        disabled: s.disabled_lists.clone(),
+        disabled,
         rules: s.custom_rules.clone(),
+        languages: if s.regional_lists {
+            display_languages()
+        } else {
+            Vec::new()
+        },
     };
     let changed = hub().config.lock().map(|mut c| {
         let changed = *c != new;
@@ -637,6 +648,44 @@ pub fn apply_settings(s: &ShieldSettings) {
     if changed.unwrap_or(false) {
         hub().refresh(false);
     }
+}
+
+/// The catalog codes of Windows' display languages, for regional lists (English needs none).
+fn display_languages() -> Vec<String> {
+    use windows::Win32::Globalization::{GetUserPreferredUILanguages, MUI_LANGUAGE_NAME};
+    static LANGS: OnceLock<Vec<String>> = OnceLock::new();
+    LANGS
+        .get_or_init(|| {
+            let (mut count, mut len) = (0u32, 0u32);
+            if unsafe { GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &mut count, None, &mut len) }
+                .is_err()
+            {
+                return Vec::new();
+            }
+            let mut buf = vec![0u16; len as usize];
+            if unsafe {
+                GetUserPreferredUILanguages(
+                    MUI_LANGUAGE_NAME,
+                    &mut count,
+                    Some(PWSTR(buf.as_mut_ptr())),
+                    &mut len,
+                )
+            }
+            .is_err()
+            {
+                return Vec::new();
+            }
+            let mut out: Vec<String> = Vec::new();
+            for tag in String::from_utf16_lossy(&buf).split('\0') {
+                if let Some(l) = shoji_byobu::sources::catalog_language(tag) {
+                    if !out.contains(&l) {
+                        out.push(l);
+                    }
+                }
+            }
+            out
+        })
+        .clone()
 }
 
 fn kind_name(k: RequestKind) -> &'static str {
@@ -741,20 +790,24 @@ pub fn spawn_updater(shield: Shield, dir: PathBuf) {
                     hub().touch(0);
                     // Serve from the cache before the network, so a cold start isn't unprotected.
                     if !shield.is_ready() {
-                        let cached = updater.sources_with(false, &cfg.custom);
+                        let cached = updater.sources_for(false, &cfg.custom, &cfg.languages);
                         let cached: Vec<_> = cached
                             .into_iter()
                             .filter(|s| !cfg.disabled.contains(&s.id))
                             .collect();
                         shield.rebuild_with(&updater, &cached, &cfg.rules);
                     }
-                    let (sources, r) =
-                        updater.refresh_with(force || hourly, &cfg.custom, &cfg.disabled);
+                    let (sources, r) = updater.refresh_for(
+                        force || hourly,
+                        &cfg.custom,
+                        &cfg.disabled,
+                        &cfg.languages,
+                    );
                     if r.changed > 0 || config_changed || built.is_none() {
                         shield.rebuild_with(&updater, &sources, &cfg.rules);
                     }
                     built = Some(cfg.clone());
-                    let all = updater.sources_with(false, &cfg.custom);
+                    let all = updater.sources_for(false, &cfg.custom, &cfg.languages);
                     let infos: Vec<ListInfo> = all
                         .iter()
                         .map(|s| {
@@ -1167,7 +1220,7 @@ pub fn attach(
                 }
             }
             if CLEAN_LINKS.load(Ordering::Relaxed) && mode_for(&url) != Mode::Off {
-                if let Some(clean) = shoji_byobu::links::clean(&url) {
+                if let Some(clean) = shield.clean_link(&url, mode_for(&url), true) {
                     // Cancel and go to the cleaned address; it passes through here again
                     // and is left alone, since there is nothing more to clean.
                     unsafe { args.SetCancel(true)? };
@@ -1213,6 +1266,12 @@ pub fn attach(
                 &dark_slot,
                 crate::darkfixes::script_for(&url).as_deref(),
             );
+            if web && CLEAN_LINKS.load(Ordering::Relaxed) && mode_for(&url) != Mode::Off {
+                script = Some(format!(
+                    "{DE_AMP_SCRIPT}\n{}",
+                    script.as_deref().unwrap_or("")
+                ));
+            }
             if web && SEND_GPC.load(Ordering::Relaxed) {
                 // The header alone is not enough: consent scripts read the property.
                 let gpc = format!("{GPC_SCRIPT}\n{}", script.as_deref().unwrap_or(""));
@@ -1691,6 +1750,18 @@ fn fingerprint_script(url: &str, fp: Fp) -> Option<String> {
 
 /// Global Privacy Control as a page-visible signal (the `Sec-GPC` header is sent separately).
 const GPC_SCRIPT: &str = "try{Object.defineProperty(Navigator.prototype,'globalPrivacyControl',{get:function(){return true},configurable:true,enumerable:true})}catch(e){}";
+
+/// An AMP page goes to its publisher's own page (`<link rel="canonical">`) before the AMP
+/// scripts run. Once per AMP address in a tab, so a site that sends you back isn't a loop.
+const DE_AMP_SCRIPT: &str = "(function(){if(window.top!==window)return;var d=document,o;\
+function go(){var h=d.documentElement;if(!h)return;\
+if(!h.hasAttribute('amp')&&!h.hasAttribute('\\u26a1')){o&&o.disconnect();return}\
+var l=d.querySelector('link[rel=\"canonical\"]');if(!l||!l.href)return;o&&o.disconnect();\
+var u;try{u=new URL(l.href,location.href)}catch(e){return}\
+if(!/^https?:$/.test(u.protocol)||u.href===location.href)return;\
+try{var k='__shojiDeAmp:'+location.href;if(sessionStorage.getItem(k))return;sessionStorage.setItem(k,'1')}catch(e){}\
+location.replace(u.href)}\
+o=new MutationObserver(go);o.observe(d,{childList:true,subtree:true});go()})();";
 
 /// The in-page runtime (hide rules, procedural filters, generic-rule bridge).
 const COSMETIC_RUNTIME: &str = include_str!("../ui/byobu-cosmetic.js");

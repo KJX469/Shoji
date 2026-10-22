@@ -27,8 +27,10 @@ Shoji is MIT licensed. It includes, links or downloads the following, each under
 | Data | Licence |
 | --- | --- |
 | [uBlock Origin](https://github.com/gorhill/uBlock) scriptlets and [uAssets](https://github.com/uBlockOrigin/uAssets) lists | GPL-3.0 |
-| [EasyList and EasyPrivacy](https://easylist.to) | GPL-3.0 / CC BY-SA 3.0 |
-| [Brave lists and resources](https://github.com/brave/adblock-resources) | MPL-2.0 |
+| [EasyList, EasyPrivacy and EasyList Cookie](https://easylist.to) | GPL-3.0 / CC BY-SA 3.0 |
+| [Brave lists and resources](https://github.com/brave/adblock-resources), [debounce and URL-cleaning rules](https://github.com/brave/adblock-lists) | MPL-2.0 |
+| [AdGuard URL Tracking filter](https://github.com/AdguardTeam/AdguardFilters) | GPL-3.0 |
+| Regional lists from Brave's catalog, for the display language | Each list's own |
 
 These are never compiled into `shoji.exe`. The `byobu-data` release carries a build of uBlock
 Origin's scriptlets (GPL-3.0) and an unmodified copy of Brave's resources (MPL-2.0).

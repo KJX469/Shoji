@@ -87,7 +87,7 @@ fn test_settings_default_and_roundtrip() {
     // Remember like a normal browser unless the user opts into private mode.
     assert!(!settings.privacy.ephemeral_default);
     assert!(!settings.privacy.mode_chosen);
-    assert_eq!(settings.performance.sleep_after_secs, 300);
+    assert_eq!(settings.performance.sleep_after_secs, 30);
     assert_eq!(settings.search_engine, "duckduckgo");
     assert_eq!(
         settings.search_url_template(),
@@ -609,7 +609,7 @@ fn test_run_in_background_defaults_on_and_can_be_switched_off() {
     assert!(s.apply_patch(&serde_json::json!({ "performance": { "run_in_background": false } })));
     assert!(!s.performance.run_in_background);
     // The sibling setting is untouched by the patch.
-    assert_eq!(s.performance.sleep_after_secs, 300);
+    assert_eq!(s.performance.sleep_after_secs, 30);
 
     // Settings files written before the option existed load with it on.
     let old: Settings =

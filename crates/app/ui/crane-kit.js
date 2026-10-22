@@ -1,6 +1,11 @@
 /* Shared crane behaviour (see crane-kit.css). Exposes window.Pet. */
 (() => {
   const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Battery saver: the crane holds still (crane-kit.css). The browser flips it as it changes.
+  const lowPower = false;
+  const root = document.documentElement;
+  if (lowPower) root.classList.add('low-power');
+  window.__lowPower = on => root.classList.toggle('low-power', !!on);
   const LOOPING = new Set(['guard', 'carry', 'sleep']);
   const timers = new WeakMap();
 
@@ -20,7 +25,7 @@
     },
     /** A flock crosses the page, wings beating, then is gone. */
     flock(count = 7, source = document.querySelector('.crane')) {
-      if (calm || !source || !document.body.animate) return;
+      if (calm || root.classList.contains('low-power') || !source || !document.body.animate) return;
       const w = innerWidth, h = innerHeight;
       for (let i = 0; i < count; i++) {
         const c = source.cloneNode(true);
