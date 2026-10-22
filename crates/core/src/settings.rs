@@ -443,6 +443,8 @@ pub struct PerformanceSettings {
     pub run_in_background: bool,
     /// Download new Shoji releases and install them while no window is open
     pub auto_update: bool,
+    /// Also offer pre-releases (betas) of Shoji
+    pub beta_updates: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -551,6 +553,7 @@ impl Default for PerformanceSettings {
             sleep_after_secs: 300,
             run_in_background: true,
             auto_update: true,
+            beta_updates: false,
         }
     }
 }

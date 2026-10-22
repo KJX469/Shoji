@@ -9,6 +9,7 @@ pub mod breach;
 pub mod env;
 pub mod import;
 pub mod ipc;
+pub mod launches;
 pub mod notes;
 pub mod settings;
 #[cfg(windows)]

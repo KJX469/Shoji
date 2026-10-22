@@ -31,7 +31,9 @@ impl BrowserApp {
                 self.push_extension_buttons(win_id);
                 if self.settings.first_run_complete {
                     self.greet_after_update();
-                    self.mention_crash();
+                    if !self.offer_rollback() {
+                        self.mention_crash();
+                    }
                 }
             }
             M::MinimizeWindow | M::ToggleMaximize | M::StartWindowResize => {
@@ -1659,6 +1661,22 @@ impl BrowserApp {
                             let _ = tab.view.load_url(&url);
                         }
                     }
+                }
+            }
+            M::DownloadAnyway { id } => {
+                let Some((tab_id, url)) = shield::hub().take_blocked_download(id) else {
+                    return;
+                };
+                let Some(host) = extract_host(&url) else {
+                    return;
+                };
+                self.shield.allow_page_host(&host);
+                let view = self
+                    .owner(tab_id)
+                    .and_then(|w| self.windows.get(&w))
+                    .and_then(|w| w.views.get(&tab_id));
+                if let Some(tab) = view {
+                    let _ = tab.view.load_url(&url);
                 }
             }
             M::BypassCertificateError { tab_id, host, url } => {
