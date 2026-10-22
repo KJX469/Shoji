@@ -150,6 +150,9 @@ pub(super) struct ExtensionPopup {
 /// Chrome's limits for a popup's size.
 const POPUP_MIN: (f64, f64) = (25.0, 25.0);
 const POPUP_MAX: (f64, f64) = (800.0, 600.0);
+/// The size a popup is laid out at before it is measured. Wide enough that a page sized to its
+/// window doesn't read back as a sliver; short so the height measured is the content's own.
+const POPUP_START: (f64, f64) = (400.0, 25.0);
 
 /// Runs in the popup's own page: report the size its content wants, as it changes. Measured at
 /// its natural width, and from a short viewport so content taller than it shows.
@@ -360,9 +363,9 @@ impl BrowserApp {
         let close_proxy = self.proxy.clone();
         let dark = window::is_dark(&win.window, &self.settings.appearance.theme);
         let top = CHROME_HEIGHT + 2.0;
-        let x = (right - POPUP_MIN.0).clamp(8.0, (win.width - POPUP_MIN.0 - 8.0).max(8.0));
+        let x = (right - POPUP_START.0).clamp(8.0, (win.width - POPUP_START.0 - 8.0).max(8.0));
         let view = new_builder()
-            .with_bounds(bounds(x, top, POPUP_MIN.0, POPUP_MIN.1))
+            .with_bounds(bounds(x, top, POPUP_START.0, POPUP_START.1))
             .with_visible(false)
             // The real profile, where extensions and their storage live.
             .with_incognito(false)
