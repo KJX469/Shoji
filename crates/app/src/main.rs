@@ -57,9 +57,17 @@ use wry::{Rect, WebView, WebViewBuilder, WebViewBuilderExtWindows, WebViewExtWin
 /// they share one engine; it is read once at startup.
 static EXTENSIONS_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// The engine's command-line switches, the same for every webview (they share one engine).
+static ENGINE_ARGS: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// wry's own defaults, which giving our own switches replaces.
+const WRY_ENGINE_ARGS: &str =
+    "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required";
+
 fn new_builder<'a>() -> WebViewBuilder<'a> {
     WebViewBuilder::new()
         .with_browser_extensions_enabled(EXTENSIONS_ON.load(std::sync::atomic::Ordering::Relaxed))
+        .with_additional_browser_args(ENGINE_ARGS.get().map_or(WRY_ENGINE_ARGS, String::as_str))
 }
 
 const CHROME_HEIGHT: f64 = 84.0;
@@ -3346,14 +3354,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         startup_settings.extensions.enabled,
         std::sync::atomic::Ordering::Relaxed,
     );
-    if startup_settings.privacy.block_third_party_cookies {
-        let mut flags = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").unwrap_or_default();
-        if !flags.is_empty() {
-            flags.push(' ');
+    // Engine switches go through the engine's creation options: some machines (elevated ones,
+    // CI's among them) ignore WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS. Switches given there are
+    // passed on the same way.
+    {
+        let mut args = WRY_ENGINE_ARGS.to_string();
+        if startup_settings.privacy.block_third_party_cookies {
+            args.push_str(" --test-third-party-cookie-phaseout");
         }
-        flags.push_str("--test-third-party-cookie-phaseout");
-        // SAFETY: still single-threaded.
-        unsafe { std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", flags) };
+        if let Ok(extra) = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") {
+            args.push(' ');
+            args.push_str(extra.trim());
+            // SAFETY: still single-threaded.
+            unsafe { std::env::remove_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") };
+        }
+        let _ = ENGINE_ARGS.set(args);
     }
 
     let Some(engine_version) = detect_webview2_runtime() else {
