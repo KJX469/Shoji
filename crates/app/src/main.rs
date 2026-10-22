@@ -2,6 +2,7 @@
 //! Shoji — a paper-thin browser shell around the system WebView2 runtime.
 
 mod app_extensions;
+mod app_forget;
 mod app_ipc;
 mod app_menus;
 mod app_panels;
@@ -12,6 +13,7 @@ mod app_vault;
 mod bookmarks;
 mod browser_window;
 mod cert;
+mod consent;
 mod crash;
 mod darkfixes;
 mod default_browser;
@@ -266,8 +268,14 @@ pub(crate) enum BrowserEvent {
         permission_id: u64,
         origin: String,
         kind: &'static str,
+        /// Asked from a click or key press on the page
+        user: bool,
     },
     TabCrashed(TabId, i32),
+    /// The engine finished deleting site data (a job from `app_forget`)
+    SiteDataForgotten(u64),
+    /// The tab's page was reloaded twice soon after Byōbu blocked something on it
+    OfferLowerShields(TabId),
     /// A tab passed through `host` as a redirect hop, or the user visited it (see `bounce`)
     Bounce {
         host: String,
@@ -1006,6 +1014,16 @@ struct BrowserApp {
     upgraded: HashMap<String, Instant>,
     /// Per tab: the last address upgraded, to break upgrade/redirect loops
     last_upgrade: HashMap<TabId, (String, Instant)>,
+    /// Site-data deletions under way (see `app_forget`), with a closed tab's view when it is
+    /// the one doing the work
+    forgetting: HashMap<u64, (Option<Tab>, Instant)>,
+    next_forget: u64,
+    /// Closing waits for `forgetting` to finish, until the deadline
+    leaving: Option<(app_forget::Leaving, Instant)>,
+    /// Set while closing goes ahead after that wait
+    left_clean: bool,
+    /// When this run of Shoji started (Unix ms)
+    started_ms: u64,
 }
 
 impl BrowserApp {
@@ -1111,6 +1129,7 @@ impl BrowserApp {
             }));
         }
         darkfixes::set_enabled(settings.dark_needed());
+        consent::init(shoji_byobu::Updater::new(data_dir.join("byobu")).consent_rules_path());
         shield::spawn_updater(shield.clone(), data_dir.join("byobu"));
         Self {
             windows: HashMap::new(),
@@ -1176,6 +1195,11 @@ impl BrowserApp {
             session_dirty: true,
             sync_pending: true,
             perm_pending: HashMap::new(),
+            forgetting: HashMap::new(),
+            next_forget: 0,
+            leaving: None,
+            left_clean: false,
+            started_ms: now_ms(),
             insecure_hosts: Arc::new(Mutex::new(HashSet::new())),
             upgraded: HashMap::new(),
             last_upgrade: HashMap::new(),
@@ -1347,11 +1371,18 @@ impl BrowserApp {
         if !self.windows.contains_key(&id) {
             return; // the hidden spare, or a window that is already gone
         }
+        // Sites to forget on closing go first; the window waits, hidden, until they are gone.
+        if self.windows.len() == 1 && self.leave_clean(&[id], app_forget::Leaving::Close(id)) {
+            return;
+        }
         // Closing the last window is a normal quit: keep its tabs and mark the exit clean.
         if self.windows.len() == 1 && self.windows.contains_key(&id) {
             self.write_session(true);
         }
-        self.windows.remove(&id);
+        if let Some(mut win) = self.windows.remove(&id) {
+            let closed: Vec<Tab> = win.views.drain().map(|(_, t)| t).collect();
+            self.forget_closed_tabs(closed);
+        }
         self.session_dirty = true;
         if self.windows.is_empty() {
             self.spare = None;
@@ -1464,6 +1495,10 @@ impl BrowserApp {
     /// Save the session and leave the event loop (tray menu, or the installer's `--quit`).
     fn quit(&mut self, event_loop: &ActiveEventLoop) {
         self.settle_launch();
+        let open: Vec<WindowId> = self.windows.keys().copied().collect();
+        if self.leave_clean(&open, app_forget::Leaving::Quit) {
+            return;
+        }
         self.history.flush();
         if !self.windows.is_empty() {
             self.write_session(true);
@@ -1823,12 +1858,17 @@ impl BrowserApp {
                     .map(|t| t.url.clone())
                     .unwrap_or_default();
                 let persistent = win.active().is_some_and(|t| t.persistent);
-                let info = self.cert_cache.describe(
+                let mut info = self.cert_cache.describe(
                     &url,
                     persistent,
                     win.sidebar_mode == "security",
                     proxy,
                 );
+                if persistent && !info.is_internal {
+                    info.forget_on_close = self.settings.forgets_on_close(&url);
+                    info.clear_on_exit =
+                        self.settings.privacy.clear_on_exit && !self.settings.keeps_site(&url);
+                }
                 let msg = HostToUiMessage::SidebarStateSync {
                     open: true,
                     mode: win.sidebar_mode.to_string(),
@@ -1884,12 +1924,26 @@ impl BrowserApp {
                     "none"
                 } else if self.settings.shield.mode == "off" {
                     "off"
-                } else if self.settings.shield_mode_for(&url) == "off" {
+                } else if self.settings.shield_paused(&url) {
                     "paused"
                 } else {
                     "on"
                 };
-                let json = shield::hub().tab_json(tab, &host, state);
+                // Per category: on here, or "off" in Settings (the site's switch can't help).
+                let on: serde_json::Map<String, serde_json::Value> =
+                    shoji_core::settings::SHIELD_CATEGORIES
+                        .iter()
+                        .map(|c| {
+                            let v: serde_json::Value = if !self.settings.shield_category_enabled(c)
+                            {
+                                "off".into()
+                            } else {
+                                self.settings.shield_on(&url, c).into()
+                            };
+                            (c.to_string(), v)
+                        })
+                        .collect();
+                let json = shield::hub().tab_json(tab, &host, state, on.into());
                 let key = u64::from(win.window.id());
                 if shield::hub().changed(&format!("c{key}"), &json) {
                     win.eval_chrome(&format!(
@@ -1919,7 +1973,7 @@ impl BrowserApp {
                             "none"
                         } else if self.settings.shield.mode == "off" {
                             "off"
-                        } else if self.settings.shield_mode_for(&t.url) == "off" {
+                        } else if self.settings.shield_paused(&t.url) {
                             "paused"
                         } else {
                             "on"
@@ -2128,6 +2182,33 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
         match event {
             BrowserEvent::Tray(tray::Action::Open(url)) => self.reopen(event_loop, url),
             BrowserEvent::Tray(tray::Action::Quit) => self.quit(event_loop),
+            BrowserEvent::SiteDataForgotten(job) => self.site_data_forgotten(job, event_loop),
+            BrowserEvent::OfferLowerShields(tab_id) => {
+                let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get(&id)) else {
+                    return;
+                };
+                if win.tabs.active_tab_id() != Some(tab_id) {
+                    return;
+                }
+                let url = win
+                    .tabs
+                    .get_tab_by_id(tab_id)
+                    .map(|t| t.url.clone())
+                    .unwrap_or_default();
+                let Some(host) = extract_host(&url) else {
+                    return;
+                };
+                let toast = serde_json::json!({
+                    "title": "Lower shields for this site?",
+                    "text": format!("If {host} isn't working, Byōbu may be blocking something it needs. You can turn the shield back on from the shield button."),
+                    "ms": 12000,
+                    "pose": "tilt",
+                    "actions": [
+                        {"label": "Lower shields", "action": "LowerShields", "payload": {"host": host}, "primary": true},
+                    ],
+                });
+                win.eval_chrome(&format!("window.__toast && window.__toast({toast})"));
+            }
             BrowserEvent::ImportProgress { win, text } => {
                 self.eval_welcome_and_settings(
                     win,
@@ -2417,12 +2498,28 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 permission_id,
                 origin,
                 kind,
+                user,
             } => match self.settings.permission_policy(kind) {
                 "allow" => webview::resolve_permission(permission_id, true),
                 "block" => webview::resolve_permission(permission_id, false),
                 _ if self.site_data.permission(&origin, kind).is_some() => {
                     let allow = self.site_data.permission(&origin, kind).unwrap_or(false);
                     webview::resolve_permission(permission_id, allow)
+                }
+                // Most notification requests come unprompted as a page opens: refuse them
+                // quietly and leave a mark in the address bar that allows them instead.
+                "ask"
+                    if kind == "Notifications"
+                        && !user
+                        && self.settings.permissions.quiet_notifications =>
+                {
+                    webview::resolve_permission(permission_id, false);
+                    if let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get(&id)) {
+                        let json = serde_json::json!({ "tab": tab_id.0, "host": origin });
+                        win.eval_chrome(&format!(
+                            "window.__quietPermission && window.__quietPermission({json})"
+                        ));
+                    }
                 }
                 _ => {
                     let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get(&id)) else {
@@ -3109,6 +3206,7 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
         let vault_due = self.vault_tick();
         let hover_due = self.step_hover();
         let warm_due = self.warm_sidebars();
+        let forget_due = self.forget_tick(event_loop);
         let next = self
             .rest_background_tabs()
             .into_iter()
@@ -3117,6 +3215,7 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
             .chain(pop_due)
             .chain(hover_due)
             .chain(warm_due)
+            .chain(forget_due)
             .chain(self.launch_settles)
             .chain(
                 self.spare
