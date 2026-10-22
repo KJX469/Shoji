@@ -18,6 +18,22 @@ const FUN: &str = include_str!("../ui/fun.html");
 const CRANE_KIT_CSS: &str = include_str!("../ui/crane-kit.css");
 /// Small controller for the crane's poses and flocks (`window.Pet`).
 const PET_JS: &str = include_str!("../ui/crane-kit.js");
+static PET_JS_LOW_POWER: LazyLock<String> =
+    LazyLock::new(|| PET_JS.replacen("const lowPower = false;", "const lowPower = true;", 1));
+static LOW_POWER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Battery saver is on: pages built from now on start with the crane holding still.
+pub fn set_low_power(on: bool) {
+    LOW_POWER.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn pet_js() -> &'static str {
+    if LOW_POWER.load(std::sync::atomic::Ordering::Relaxed) {
+        &PET_JS_LOW_POWER
+    } else {
+        PET_JS
+    }
+}
 const HOME: &str = include_str!("../ui/home.html");
 const WELCOME: &str = include_str!("../ui/welcome.html");
 const PASSWORDS: &str = include_str!("../ui/passwords.html");
@@ -389,7 +405,7 @@ pub fn chrome(s: &Settings, private: bool) -> String {
                 "CRANE_MARK_TAB",
                 &theme::crane_svg("t", "tab-crane pet").replace('"', "'"),
             ),
-            ("PET_JS", PET_JS),
+            ("PET_JS", pet_js()),
             (
                 "FROST",
                 if s.appearance.frosted_toolbar {
@@ -521,7 +537,7 @@ pub fn sidebar(s: &Settings) -> String {
             ("CRANE_GUARD", &theme::crane_svg("g", "pet")),
             ("CRANE_PET", &theme::crane_svg("d", "pet")),
             ("ACCENTS_JSON", &theme::accents_json()),
-            ("PET_JS", PET_JS),
+            ("PET_JS", pet_js()),
         ],
     )
 }
@@ -542,7 +558,7 @@ pub fn fun(s: &Settings, kind: &str, cranes: u32, memory: &str) -> String {
             ("CRANES", &cranes.to_string()),
             ("MEMORY_JSON", memory),
             ("ACCENTS_JSON", &theme::accents_json()),
-            ("PET_JS", PET_JS),
+            ("PET_JS", pet_js()),
         ],
     )
 }
@@ -560,7 +576,7 @@ pub fn history(s: &Settings, tab: &str) -> String {
             ("CRANE_B", &theme::crane_svg("b", "")),
             ("CRANE_C", &theme::crane_svg("e", "")),
             ("TAB", tab),
-            ("PET_JS", PET_JS),
+            ("PET_JS", pet_js()),
         ],
     )
 }
@@ -575,7 +591,7 @@ pub fn bookmarks(s: &Settings) -> String {
             ("MODE", &s.appearance.theme),
             ("FONTS", s.fonts().id),
             ("CRANE", &theme::crane_svg("c", "")),
-            ("PET_JS", PET_JS),
+            ("PET_JS", pet_js()),
         ],
     )
 }
@@ -615,7 +631,7 @@ pub fn home(s: &Settings, data: &HomeData, memory: &str) -> String {
                 },
             ),
             ("ACCENTS_JSON", &theme::accents_json()),
-            ("PET_JS", PET_JS),
+            ("PET_JS", pet_js()),
         ],
     )
 }
@@ -630,7 +646,7 @@ pub fn welcome(s: &Settings) -> String {
             ("FONTS", s.fonts().id),
             ("CRANE", &theme::crane_svg("c", "hero")),
             ("CRANE_KAGE", &theme::crane_svg("kg", "")),
-            ("PET_JS", PET_JS),
+            ("PET_JS", pet_js()),
             ("SWATCHES", &swatches()),
             (
                 "DARK_CHECKED",
@@ -723,7 +739,7 @@ pub fn settings(
             ("SITE_CHOICES", &site_choices.to_string()),
             ("MEMORY_JSON", memory),
             ("CRANE_ABOUT", &theme::crane_svg("ab", "pet")),
-            ("PET_JS", PET_JS),
+            ("PET_JS", pet_js()),
         ],
     )
 }

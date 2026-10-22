@@ -523,7 +523,7 @@ impl Default for PrivacySettings {
 impl Default for PerformanceSettings {
     fn default() -> Self {
         Self {
-            sleep_after_secs: 300,
+            sleep_after_secs: 30,
             run_in_background: true,
             auto_update: true,
             beta_updates: false,
