@@ -493,11 +493,32 @@ impl Shoji {
 
     /// The window's toolbar strip (the chrome page with tabs in it).
     pub fn chrome(&self) -> Page {
-        self.page_where(
-            |u| u.starts_with("data:") || u.starts_with("about:blank"),
-            Duration::from_secs(30),
-        )
-        .expect("chrome strip")
+        // Menus and panels are data pages too; the strip is the one with the toast in it.
+        let end = Instant::now() + Duration::from_secs(30);
+        loop {
+            for t in self.targets() {
+                let url = t["url"].as_str().unwrap_or("");
+                if t["type"] != "page"
+                    || !(url.starts_with("data:") || url.starts_with("about:blank"))
+                {
+                    continue;
+                }
+                let Some(ws) = t["webSocketDebuggerUrl"].as_str() else {
+                    continue;
+                };
+                if let Some(mut p) = Page::connect(ws) {
+                    let r = p.call(
+                        "Runtime.evaluate",
+                        json!({ "expression": "!!document.getElementById('toastTitle')", "returnByValue": true }),
+                    );
+                    if r["result"]["value"] == true {
+                        return p;
+                    }
+                }
+            }
+            assert!(Instant::now() < end, "chrome strip");
+            std::thread::sleep(Duration::from_millis(200));
+        }
     }
 
     pub fn is_running(&self) -> bool {
