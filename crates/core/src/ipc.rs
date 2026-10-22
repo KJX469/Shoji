@@ -682,6 +682,8 @@ pub enum UiToHostMessage {
     ClearSiteCookies,
     /// Settings asks for the installed extensions
     ExtensionsQuery,
+    /// The store page wants the downloaded catalog (and a refresh of it)
+    ExtensionsCatalog,
     /// Choose an unpacked extension folder and install it
     AddExtension,
     /// Install an extension from the Chrome Web Store, given its link or id
@@ -690,6 +692,21 @@ pub enum UiToHostMessage {
     },
     RemoveExtension {
         id: String,
+    },
+    /// Put an extension on the toolbar or take it off
+    SetExtensionPinned {
+        id: String,
+        pinned: bool,
+    },
+    /// Turn an installed extension on or off
+    SetExtensionEnabled {
+        id: String,
+        enabled: bool,
+    },
+    /// The puzzle button: the list of extensions, to open one or manage them
+    ExtensionsMenu {
+        x: f64,
+        y: f64,
     },
     /// An extension's toolbar button was clicked; `right` is the button's right edge (logical px)
     ToggleExtensionPopup {

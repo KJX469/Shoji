@@ -149,11 +149,16 @@ impl ContainerSettings {
 #[serde(default)]
 pub struct ExtensionSettings {
     pub enabled: bool,
+    /// Ids of extensions the user took off the toolbar (new ones start pinned)
+    pub unpinned: Vec<String>,
 }
 
 impl Default for ExtensionSettings {
     fn default() -> Self {
-        Self { enabled: true }
+        Self {
+            enabled: true,
+            unpinned: Vec::new(),
+        }
     }
 }
 
