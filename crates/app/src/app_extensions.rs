@@ -251,6 +251,28 @@ impl BrowserApp {
             });
     }
 
+    /// A tab reached a Chrome Web Store page for an extension that isn't installed: offer to add
+    /// it, once per extension each session.
+    pub(super) fn offer_store_extension(&mut self, url: &str) {
+        if !EXTENSIONS_ON.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        let Some(id) = extstore::store_page_id(url) else {
+            return;
+        };
+        let installed = extstore::installed_versions(&self.data_dir.join("Extensions"));
+        if installed.iter().any(|(i, _)| *i == id) || !self.extensions_offered.insert(id.clone()) {
+            return;
+        }
+        self.toast(&serde_json::json!({
+            "title": "Add this extension to Shoji?",
+            "text": "It is downloaded from the Chrome Web Store and added in a moment.",
+            "pose": "unfold",
+            "ms": 12000,
+            "actions": [{ "label": "Add to Shoji", "primary": true, "action": "InstallExtension", "payload": { "source": id } }],
+        }));
+    }
+
     /// Send the downloaded catalog to the open store pages.
     pub(super) fn push_extension_catalog(&mut self) {
         let Some(json) = extstore::read_catalog(&self.data_dir) else {

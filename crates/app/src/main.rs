@@ -902,6 +902,7 @@ struct BrowserApp {
     /// When store extensions were last checked for updates
     extensions_checked: Option<Instant>,
     catalog_checked: Option<Instant>,
+    extensions_offered: std::collections::HashSet<String>,
     /// The toolbar has asked the engine for the installed extensions
     extensions_asked: std::cell::Cell<bool>,
     favourites: shoji_core::userdata::Favourites,
@@ -1083,6 +1084,7 @@ impl BrowserApp {
             extensions_asked: std::cell::Cell::new(false),
             extensions_checked: None,
             catalog_checked: None,
+            extensions_offered: Default::default(),
             settings,
             settings_path,
             data_dir: data_dir.clone(),
@@ -2299,6 +2301,7 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 win.ui_dirty |= changed;
                 // A different site: use its remembered zoom (or the default).
                 if let Some((old, new)) = moved {
+                    self.offer_store_extension(&new);
                     if extract_host(&old) != extract_host(&new) && extract_host(&new).is_some() {
                         let zoom = self.zoom_for(&new);
                         if let Some(win) =
