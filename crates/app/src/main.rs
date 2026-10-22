@@ -310,6 +310,8 @@ pub(crate) enum BrowserEvent {
     ExtensionPopupSize(WindowId, f64, f64),
     /// A window's extension popup lost focus or closed itself
     ExtensionPopupClosed(WindowId),
+    /// A window's extension popup lost focus
+    ExtensionPopupBlurred(WindowId),
     /// The search engine's suggestions for what was typed in a window's address bar
     SuggestWords(WindowId, u64, Vec<String>, bool),
     /// Cookies of a window's page: how many, and whether they were just deleted
@@ -2600,6 +2602,7 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 self.size_extension_popup(win_id, w, h)
             }
             BrowserEvent::ExtensionPopupClosed(win_id) => self.blur_extension_popup(win_id),
+            BrowserEvent::ExtensionPopupBlurred(win_id) => self.extension_popup_blurred(win_id),
             BrowserEvent::ExtensionsUpdated(result) => {
                 if let Ok(ids) = result {
                     if !ids.is_empty() {

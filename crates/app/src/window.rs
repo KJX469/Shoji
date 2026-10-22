@@ -274,3 +274,20 @@ pub fn remove_caption(window: &Window) {
 
 #[cfg(not(windows))]
 pub fn remove_caption(_window: &Window) {}
+
+/// Whether `window` (or something inside it, like a web view) is the window in front on the
+/// desktop.
+pub fn is_foreground(window: &Window) -> bool {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GetForegroundWindow, GA_ROOT};
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let Ok(handle) = window.window_handle() else {
+        return false;
+    };
+    let RawWindowHandle::Win32(h) = handle.as_raw() else {
+        return false;
+    };
+    let hwnd = HWND(h.hwnd.get() as _);
+    let front = unsafe { GetForegroundWindow() };
+    !front.is_invalid() && (front == hwnd || unsafe { GetAncestor(front, GA_ROOT) } == hwnd)
+}

@@ -394,9 +394,16 @@ impl BrowserApp {
             }
         };
         eprintln!("extension popup: opened {target}");
-        webview::attach_popup_events(&view, move || {
-            let _ = close_proxy.send_event(BrowserEvent::ExtensionPopupClosed(win_id));
-        });
+        let blur_proxy = self.proxy.clone();
+        webview::attach_popup_events(
+            &view,
+            move || {
+                let _ = close_proxy.send_event(BrowserEvent::ExtensionPopupClosed(win_id));
+            },
+            move || {
+                let _ = blur_proxy.send_event(BrowserEvent::ExtensionPopupBlurred(win_id));
+            },
+        );
         webview::bring_to_top(&view);
         win.ext_popup = Some(ExtensionPopup {
             id: id.to_string(),
@@ -431,7 +438,22 @@ impl BrowserApp {
         }
     }
 
-    /// The popup lost focus (or closed itself).
+    /// The popup lost focus. It closes only if Shoji is the active window: when focus has gone
+    /// to another app (or Shoji isn't in front at all), the popup stays where it is.
+    pub(super) fn extension_popup_blurred(&mut self, win_id: WindowId) {
+        let active = self
+            .windows
+            .get(&win_id)
+            .is_some_and(|w| window::is_foreground(&w.window));
+        if active {
+            eprintln!("extension popup: closed, it lost focus");
+            self.blur_extension_popup(win_id);
+        } else {
+            eprintln!("extension popup: lost focus, but Shoji isn't the active window");
+        }
+    }
+
+    /// The popup closed itself, or lost focus inside Shoji.
     pub(super) fn blur_extension_popup(&mut self, win_id: WindowId) {
         if let Some(p) = self.windows.get(&win_id).and_then(|w| w.ext_popup.as_ref()) {
             self.popup_blurred = Some((p.id.clone(), Instant::now()));
