@@ -340,6 +340,13 @@ pub(crate) enum BrowserEvent {
         tab_id: TabId,
         url: String,
     },
+    /// Byobu stopped a download from a dangerous site; `id` lets the user keep it anyway
+    ShieldBlockedDownload {
+        id: u64,
+        url: String,
+    },
+    /// Byobu stopped a popup tab on its way to a `$popup` address: close it
+    ShieldBlockedPopup(TabId),
     /// The element picker produced a rule for `host`
     ShieldRule {
         host: String,
@@ -2776,6 +2783,24 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                     let _ = tab
                         .view
                         .load_url(&format!("{INTERNAL_ORIGIN}notice-{}/", tab_id.0));
+                }
+            }
+            BrowserEvent::ShieldBlockedDownload { id, url } => {
+                let host = extract_host(&url).unwrap_or_default();
+                let toast = serde_json::json!({
+                    "title": "Download blocked",
+                    "text": format!("{host} is on a list of dangerous sites (malware, phishing or scams)"),
+                    "pose": "tilt",
+                    "ms": 12000,
+                    "actions": [
+                        {"label": "Download anyway", "action": "DownloadAnyway", "payload": {"id": id}},
+                    ],
+                });
+                self.toast(&toast);
+            }
+            BrowserEvent::ShieldBlockedPopup(tab_id) => {
+                if let Some(win_id) = self.owner(tab_id) {
+                    self.close_tab(win_id, tab_id, event_loop);
                 }
             }
             BrowserEvent::ShieldRule { host, selector } => {

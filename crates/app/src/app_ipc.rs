@@ -1613,6 +1613,22 @@ impl BrowserApp {
                     }
                 }
             }
+            M::DownloadAnyway { id } => {
+                let Some((tab_id, url)) = shield::hub().take_blocked_download(id) else {
+                    return;
+                };
+                let Some(host) = extract_host(&url) else {
+                    return;
+                };
+                self.shield.allow_page_host(&host);
+                let view = self
+                    .owner(tab_id)
+                    .and_then(|w| self.windows.get(&w))
+                    .and_then(|w| w.views.get(&tab_id));
+                if let Some(tab) = view {
+                    let _ = tab.view.load_url(&url);
+                }
+            }
             M::BypassCertificateError { tab_id, host, url } => {
                 if let Ok(mut set) = self.allowed_cert_hosts.lock() {
                     set.insert(host);
