@@ -31,6 +31,23 @@ pub const RESOURCES_URL: &str =
 pub const UBO_RESOURCES_URL: &str =
     "https://github.com/KJX469/Shoji/releases/download/byobu-data/ubo-resources.json";
 
+/// Shoji's own fixes (`filters/shoji-fixes.txt` in the repository), published with the Byōbu
+/// data so a broken site or a new ad trick can be fixed for everyone without a release.
+pub const SHOJI_FIXES_URL: &str =
+    "https://github.com/KJX469/Shoji/releases/download/byobu-data/shoji-fixes.txt";
+
+/// Shoji's fix list. Checked hourly, like uBlock's quick fixes, and trusted for scriptlets: it is
+/// reviewed in this repository like the code.
+pub fn shoji_fixes() -> ListSource {
+    ListSource {
+        id: "shoji-fixes".into(),
+        title: "Shoji fixes".into(),
+        url: SHOJI_FIXES_URL.into(),
+        refresh_secs: HOUR,
+        trusted: true,
+    }
+}
+
 /// Brave's list catalog; its default-enabled lists are followed automatically.
 pub const CATALOG_URL: &str =
     "https://raw.githubusercontent.com/brave/adblock-resources/master/filter_lists/list_catalog.json";
@@ -179,6 +196,16 @@ mod tests {
         let got = brave_lists_from_catalog(json, &community_lists());
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].url, "https://example.org/brave-firstparty.txt");
+    }
+
+    #[test]
+    fn shoji_fixes_come_from_this_projects_data_release() {
+        let f = shoji_fixes();
+        assert!(f
+            .url
+            .starts_with("https://github.com/KJX469/Shoji/releases/download/byobu-data/"));
+        assert_eq!(f.refresh_secs, HOUR);
+        assert!(f.trusted);
     }
 
     #[test]

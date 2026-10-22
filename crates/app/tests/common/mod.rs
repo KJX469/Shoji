@@ -328,9 +328,6 @@ fn merge(base: &mut Value, over: &Value) {
 /// An isolated, running copy of Shoji (its own exe copy, profile and DevTools port).
 pub struct Shoji {
     child: Mutex<Child>,
-    exe: PathBuf,
-    /// Started as a standard user from an elevated runner
-    lowered: bool,
     pub cdp: u16,
     pub dir: PathBuf,
     real_lists: bool,
@@ -381,7 +378,8 @@ impl Shoji {
             copy_dir(&list_cache(), &data.join("byobu"));
         }
 
-        let cdp = free_port();
+        // Port 0: the engine picks a free port and writes it to `DevToolsActivePort`.
+        let cdp = 0;
         let mut args = format!(
             "--remote-debugging-port={cdp} --no-first-run --enable-logging --log-file=\"{}\"",
             dir.join("engine-debug.log").display()
@@ -412,59 +410,14 @@ impl Shoji {
                 .env("HTTP_PROXY", "http://127.0.0.1:9")
                 .env("ALL_PROXY", "http://127.0.0.1:9");
         }
-        // An elevated test runner (CI's is) starts the browser as a standard user, as people
-        // run it: the engine doesn't create its views in an elevated process.
-        let lowered = shoji_core::env::is_process_elevated();
-        let child = if lowered {
-            let mut script = String::from("@echo off\r\n");
-            for (k, v) in cmd.get_envs() {
-                let k = k.to_string_lossy();
-                match v {
-                    Some(v) => script.push_str(&format!("set {k}={}\r\n", v.to_string_lossy())),
-                    None => script.push_str(&format!("set {k}=\r\n")),
-                }
-            }
-            script.push_str(&format!(
-                "\"{}\" \"{url}\" > \"{}\" 2> \"{}\"\r\n",
-                exe.display(),
-                dir.join("out.log").display(),
-                dir.join("err.log").display()
-            ));
-            let launcher = dir.join("launch.cmd");
-            std::fs::write(&launcher, script).unwrap();
-            Command::new("runas")
-                .arg("/trustlevel:0x20000")
-                .arg(launcher.display().to_string())
-                .spawn()
-                .expect("start shoji.exe as a standard user")
-        } else {
-            cmd.spawn().expect("start shoji.exe")
-        };
+        let child = cmd.spawn().expect("start shoji.exe");
         Self {
             child: Mutex::new(child),
-            exe,
-            lowered,
             cdp,
             dir,
             real_lists: opts.real_lists,
             _turn: turn,
         }
-    }
-
-    /// The browser's process id (with a standard-user launch, found by its exe path).
-    fn pid(&self) -> Option<u32> {
-        if !self.lowered {
-            return Some(self.child.lock().unwrap().id());
-        }
-        let query = format!(
-            "(Get-Process shoji -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -eq '{}' }} | Select-Object -First 1).Id",
-            self.exe.display()
-        );
-        let out = Command::new("powershell")
-            .args(["-NoProfile", "-Command", &query])
-            .output()
-            .ok()?;
-        String::from_utf8_lossy(&out.stdout).trim().parse().ok()
     }
 
     pub fn data_dir(&self) -> PathBuf {
@@ -473,13 +426,33 @@ impl Shoji {
 
     /// Every DevTools target (each Shoji webview is one).
     pub fn targets(&self) -> Vec<Value> {
-        let url = format!("http://127.0.0.1:{}/json", self.cdp);
-        ureq::get(&url)
-            .call()
+        self.try_targets().unwrap_or_default()
+    }
+
+    /// The DevTools port the engine actually listens on (it picks one and writes it down).
+    fn devtools_port(&self) -> Option<u16> {
+        let file = self
+            .dir
+            .join("local/Shoji/User Data/EBWebView/DevToolsActivePort");
+        std::fs::read_to_string(file)
+            .ok()?
+            .lines()
+            .next()?
+            .trim()
+            .parse()
             .ok()
-            .and_then(|mut r| r.body_mut().read_to_string().ok())
-            .and_then(|s| serde_json::from_str::<Vec<Value>>(&s).ok())
-            .unwrap_or_default()
+    }
+
+    fn try_targets(&self) -> Result<Vec<Value>, String> {
+        let port = self.devtools_port().ok_or("no DevToolsActivePort yet")?;
+        let url = format!("http://127.0.0.1:{port}/json");
+        let text = ureq::get(&url)
+            .call()
+            .map_err(|e| format!("{url}: {e}"))?
+            .body_mut()
+            .read_to_string()
+            .map_err(|e| format!("{url}: {e}"))?;
+        serde_json::from_str(&text).map_err(|e| format!("{url}: {e}: {text:.200}"))
     }
 
     /// The first page target whose URL satisfies `pick`, once it exists.
@@ -528,9 +501,6 @@ impl Shoji {
     }
 
     pub fn is_running(&self) -> bool {
-        if self.lowered {
-            return self.pid().is_some();
-        }
         matches!(self.child.lock().unwrap().try_wait(), Ok(None))
     }
 
@@ -538,9 +508,9 @@ impl Shoji {
     /// the logs and files it wrote.
     pub fn report(&self) -> String {
         let mut out = format!(
-            "process: running {} (standard-user launch: {})\n",
+            "process: running {}\ndevtools: {:?}\n",
             self.is_running(),
-            self.lowered
+            self.try_targets().map(|t| t.len())
         );
         let engines = Command::new("tasklist")
             .args(["/FI", "IMAGENAME eq msedgewebview2.exe"])
@@ -548,6 +518,16 @@ impl Shoji {
             .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
             .unwrap_or_default();
         out.push_str(&format!("engine processes: {engines}\n"));
+        let pid = self.child.lock().unwrap().id();
+        let query = format!(
+            "Get-CimInstance Win32_Process -Filter \"ParentProcessId={pid}\" | ForEach-Object {{ $_.CommandLine }}"
+        );
+        let lines = Command::new("powershell")
+            .args(["-NoProfile", "-Command", &query])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default();
+        out.push_str(&format!("engine command line: {lines}\n"));
         let debug = std::fs::read_to_string(self.dir.join("engine-debug.log")).unwrap_or_default();
         let tail: Vec<&str> = debug.lines().rev().take(40).collect();
         out.push_str(&format!("engine log, newest first:\n{}\n", tail.join("\n")));
@@ -563,7 +543,7 @@ impl Shoji {
         fn walk(d: &Path, depth: usize, files: &mut Vec<String>) {
             for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
                 files.push(e.path().display().to_string());
-                if depth < 3 && e.path().is_dir() {
+                if depth < 6 && e.path().is_dir() {
                     walk(&e.path(), depth + 1, files);
                 }
             }
@@ -571,8 +551,16 @@ impl Shoji {
         let mut files = Vec::new();
         walk(&self.dir, 0, &mut files);
         out.push_str(&format!("files ({}):\n", files.len()));
-        for f in files.iter().take(60) {
+        for f in files.iter().take(120) {
             out.push_str(&format!("  {f}\n"));
+        }
+        for f in files
+            .iter()
+            .filter(|f| f.ends_with(".log") && f.contains("EBWebView"))
+        {
+            let text = std::fs::read_to_string(f).unwrap_or_default();
+            let tail: Vec<&str> = text.lines().rev().take(30).collect();
+            out.push_str(&format!("{f}, newest first:\n{}\n", tail.join("\n")));
         }
         out
     }
@@ -580,11 +568,10 @@ impl Shoji {
 
 impl Drop for Shoji {
     fn drop(&mut self) {
-        if let Some(pid) = self.pid() {
-            let _ = Command::new("taskkill")
-                .args(["/T", "/F", "/PID", &pid.to_string()])
-                .output();
-        }
+        let pid = self.child.lock().unwrap().id();
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &pid.to_string()])
+            .output();
         let _ = self.child.lock().unwrap().wait();
         if self.real_lists {
             // Keep what was downloaded for the next run.
