@@ -666,6 +666,11 @@ pub enum UiToHostMessage {
     RemoveExtension {
         id: String,
     },
+    /// An extension's toolbar button was clicked; `right` is the button's right edge (logical px)
+    ToggleExtensionPopup {
+        id: String,
+        right: f64,
+    },
     /// Settings asks for the list of remembered site choices
     SiteChoicesQuery,
     /// Forget one remembered choice: a permission name, "zoom", or `None` for the whole site
