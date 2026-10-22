@@ -2469,7 +2469,28 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 if kind == 0 {
                     return self.restart_engine();
                 }
-                if kind != 1 && kind != 2 {
+                // A page that stopped responding may still come back: the user chooses.
+                if kind == 2 {
+                    let title = self
+                        .owner(tab_id)
+                        .and_then(|id| self.windows.get(&id))
+                        .and_then(|w| w.tabs.get_tab_by_id(tab_id))
+                        .map(|t| t.title.clone())
+                        .filter(|t| !t.is_empty())
+                        .unwrap_or_else(|| "This page".into());
+                    self.toast(&serde_json::json!({
+                        "title": format!("{title} isn't responding"),
+                        "text": "You can wait for it, or close the page.",
+                        "pose": "unfold",
+                        "ms": 30000,
+                        "actions": [
+                            {"label": "Wait", "primary": true},
+                            {"label": "Close page", "action": "CloseTab", "payload": {"id": tab_id.0}},
+                        ],
+                    }));
+                    return;
+                }
+                if kind != 1 {
                     return; // GPU / utility processes restart on their own
                 }
                 let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) else {
