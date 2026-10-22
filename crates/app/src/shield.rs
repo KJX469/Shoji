@@ -450,7 +450,6 @@ impl Hub {
     }
 
     /// A popup or popunder from the page in `tab` was stopped.
-    #[allow(dead_code)] // called by popup blocking
     pub fn note_popup(&self, tab: u64) {
         if let Ok(mut h) = self.inner.lock() {
             h.tabs.entry(tab).or_default().popups += 1;
@@ -616,6 +615,7 @@ pub fn popup_blocked(opener_tab: TabId, opener: &str, url: &str, rule: String) {
         &Decision::Block,
         Some(rule),
     );
+    hub().note_popup(opener_tab.0);
 }
 
 /// Check where the popup `tab`, opened by the page at `opener`, goes first.

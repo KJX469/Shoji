@@ -329,7 +329,11 @@ impl BrowserApp {
                 _ => return req.refuse(),
             }
         };
-        let mode = shield::parse_mode(self.settings.shield_mode_for(&req.opener));
+        let mode = if self.settings.shield_on(&req.opener, "popups") {
+            shield::parse_mode(self.settings.shield_mode_for(&req.opener))
+        } else {
+            shoji_byobu::Mode::Off
+        };
         if let Some(rule) = self.shield.check_popup(&url, &req.opener, mode) {
             shield::popup_blocked(req.tab_id, &req.opener, &url, rule);
             return req.refuse();
