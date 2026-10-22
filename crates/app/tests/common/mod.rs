@@ -506,7 +506,9 @@ impl Shoji {
         loop {
             for t in self.targets() {
                 let url = t["url"].as_str().unwrap_or("");
-                if t["type"] != "page" || !(url.starts_with("data:") || url == "about:blank") {
+                if t["type"] != "page"
+                    || !(url.starts_with("data:") || url.starts_with("about:blank"))
+                {
                     continue;
                 }
                 let Some(ws) = t["webSocketDebuggerUrl"].as_str() else {
