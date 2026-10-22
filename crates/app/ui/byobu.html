@@ -43,6 +43,7 @@
       <div class="stat"><b id="sWeek">0</b><span>blocked this week</span></div>
       <div class="stat"><b id="sTotal">0</b><span>blocked in all</span></div>
       <div class="stat" id="speed" hidden><b id="sSpeed">0</b><span id="sSpeedSub">µs per request</span></div>
+      <div class="stat" id="size" hidden><b id="sSize">0</b><span>engine, all lists</span></div>
     </div>
     <div class="tools">
       <input type="text" id="q" placeholder="Filter by site, address or rule" spellcheck="false">
@@ -78,6 +79,8 @@
       $('sShown').textContent = num(rows.length);
       $('sWeek').textContent = num(data.week);
       $('sTotal').textContent = num(data.total);
+      $('size').hidden = !data.engine_bytes;
+      if (data.engine_bytes) $('sSize').textContent = (data.engine_bytes / 1048576).toFixed(1) + ' MB';
       $('speed').hidden = !data.timing;
       if (data.timing) {
         $('sSpeed').textContent = data.timing.p50 + ' µs';
