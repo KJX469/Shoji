@@ -316,9 +316,11 @@ impl BrowserApp {
     /// is the one open. An extension without a popup opens its options page in a tab.
     pub(super) fn toggle_extension_popup(&mut self, win_id: WindowId, id: &str, right: f64) {
         let Some((target, is_popup)) = self.extension_popups.get(id).cloned() else {
+            eprintln!("extension popup: no page known for {id}");
             return;
         };
         if !right.is_finite() {
+            eprintln!("extension popup: bad button position {right}");
             return;
         }
         let same = self
@@ -332,6 +334,7 @@ impl BrowserApp {
                 .is_some_and(|(b, at)| b == id && at.elapsed() < Duration::from_millis(400));
         self.close_extension_popup(win_id);
         if same {
+            eprintln!("extension popup: {id} was open, closed it");
             return;
         }
         if !is_popup {
@@ -378,9 +381,19 @@ impl BrowserApp {
             })
             .with_url(&target)
             .build_as_child(win.window.as_ref());
-        let Ok(view) = view else {
-            return;
+        let view = match view {
+            Ok(view) => view,
+            Err(e) => {
+                eprintln!("extension popup: could not open {target}: {e:?}");
+                self.toast(&serde_json::json!({
+                    "title": "That extension's popup wouldn't open.",
+                    "text": format!("{e}"),
+                    "pose": "unfold",
+                }));
+                return;
+            }
         };
+        eprintln!("extension popup: opened {target}");
         webview::attach_popup_events(&view, move || {
             let _ = close_proxy.send_event(BrowserEvent::ExtensionPopupClosed(win_id));
         });
