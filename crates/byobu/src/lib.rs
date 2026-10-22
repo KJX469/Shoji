@@ -8,6 +8,7 @@ pub mod cname;
 pub mod headers;
 pub mod links;
 pub mod matcher;
+pub mod navigation;
 pub mod popups;
 pub mod shield;
 pub mod sources;
