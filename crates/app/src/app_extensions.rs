@@ -145,6 +145,9 @@ pub(super) struct ExtensionPopup {
     shown: bool,
     /// When it was opened, and again when it was shown: focus settles for a moment after each
     since: Instant,
+    /// Since when its measured height has been no more than the viewport it was laid out in
+    /// (a page that fills its window reads back as the window)
+    flat_since: Option<Instant>,
 }
 
 /// Chrome's limits for a popup's size.
@@ -418,6 +421,7 @@ impl BrowserApp {
             right,
             shown: false,
             since: Instant::now(),
+            flat_since: None,
         });
     }
 
@@ -429,6 +433,19 @@ impl BrowserApp {
         let (width, height) = (win.width, win.height);
         let Some(p) = win.ext_popup.as_mut() else {
             return;
+        };
+        // A page that never grows past the 25 px it is laid out in is sized to its window, not to
+        // its content. Once that has held through the page's settling measurements, give it the
+        // largest popup there is.
+        let h = if !p.shown && h <= POPUP_START.1 + 2.0 {
+            let since = *p.flat_since.get_or_insert_with(Instant::now);
+            if since.elapsed() < Duration::from_millis(700) {
+                return;
+            }
+            POPUP_MAX.1
+        } else {
+            p.flat_since = None;
+            h
         };
         let top = CHROME_HEIGHT + 2.0;
         let w = w.clamp(POPUP_MIN.0, POPUP_MAX.0.min(width - 16.0).max(POPUP_MIN.0));
