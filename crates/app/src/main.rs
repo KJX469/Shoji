@@ -2210,6 +2210,7 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 history,
                 favicon,
             } => {
+                let reported = url.clone();
                 let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) else {
                     return;
                 };
@@ -2299,9 +2300,14 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                     }
                 }
                 win.ui_dirty |= changed;
+                // A tab that opens straight at a store page never "moves" there, so every report
+                // of the front tab's address is looked at.
+                let front = win.tabs.active_tab_id() == Some(tab_id);
+                if let Some(address) = reported.filter(|_| front) {
+                    self.offer_store_extension(&address);
+                }
                 // A different site: use its remembered zoom (or the default).
                 if let Some((old, new)) = moved {
-                    self.offer_store_extension(&new);
                     if extract_host(&old) != extract_host(&new) && extract_host(&new).is_some() {
                         let zoom = self.zoom_for(&new);
                         if let Some(win) =

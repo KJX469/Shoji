@@ -98,11 +98,21 @@ fn download(id: &str) -> Result<Vec<u8>, String> {
         204 | 404 => return Err("The Chrome Web Store has no extension with that id.".into()),
         code => return Err(format!("The Chrome Web Store answered {code}.")),
     }
-    resp.body_mut()
-        .with_config()
-        .limit(MAX_CRX_BYTES)
-        .read_to_vec()
-        .map_err(|e| e.to_string())
+    // Google's download host closes the connection without a TLS close_notify once the whole
+    // file is sent, which the stream reports as an error. A package that is complete anyway
+    // (its zip index is at the end, so a cut one never parses) is taken as it is.
+    let mut bytes = Vec::new();
+    let mut reader = resp.body_mut().with_config().limit(MAX_CRX_BYTES).reader();
+    match std::io::Read::read_to_end(&mut reader, &mut bytes) {
+        Ok(_) => Ok(bytes),
+        Err(_) if is_complete_package(&bytes) => Ok(bytes),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// `bytes` is a whole CRX package: a header and a zip that opens.
+fn is_complete_package(bytes: &[u8]) -> bool {
+    crx_payload(bytes).is_some_and(|zip| zip::ZipArchive::new(std::io::Cursor::new(zip)).is_ok())
 }
 
 /// Unpack `zip_bytes` into `dest`, replacing what is there. Entries that would land outside
@@ -566,6 +576,26 @@ mod tests {
         ] {
             assert_eq!(store_page_id(&url), None, "{url}");
         }
+    }
+
+    #[test]
+    fn a_cut_package_is_not_complete() {
+        use std::io::Write;
+        let mut zip = Vec::new();
+        {
+            let mut w = zip::ZipWriter::new(std::io::Cursor::new(&mut zip));
+            w.start_file("manifest.json", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            w.write_all(b"{}").unwrap();
+            w.finish().unwrap();
+        }
+        let mut crx = b"Cr24".to_vec();
+        crx.extend_from_slice(&3u32.to_le_bytes());
+        crx.extend_from_slice(&0u32.to_le_bytes());
+        crx.extend_from_slice(&zip);
+        assert!(is_complete_package(&crx));
+        assert!(!is_complete_package(&crx[..crx.len() - 10]));
+        assert!(!is_complete_package(b""));
     }
 
     #[test]
