@@ -825,6 +825,49 @@ pub fn remove_extension(webview: &WebView, id: String, proxy: EventLoopProxy<Bro
     let _ = unsafe { profile.GetBrowserExtensions(&handler) };
 }
 
+/// Turn the extension with `id` on or off.
+pub fn set_extension_enabled(
+    webview: &WebView,
+    id: String,
+    enabled: bool,
+    proxy: EventLoopProxy<BrowserEvent>,
+) {
+    let Some(profile) = extension_profile(webview) else {
+        return;
+    };
+    let handler =
+        ProfileGetBrowserExtensionsCompletedHandler::create(Box::new(move |result, list| {
+            let mut found = None;
+            if result.is_ok() {
+                if let Some(list) = list {
+                    each_extension(&list, |ext, ext_id, _, _| {
+                        if ext_id == id {
+                            found = Some(ext.clone());
+                        }
+                    });
+                }
+            }
+            match found {
+                Some(ext) => {
+                    let proxy = proxy.clone();
+                    let done =
+                        BrowserExtensionEnableCompletedHandler::create(Box::new(move |result| {
+                            let _ = proxy.send_event(BrowserEvent::ExtensionsChanged(
+                                result.err().map(|e| e.message().to_string()),
+                            ));
+                            Ok(())
+                        }));
+                    let _ = unsafe { ext.Enable(enabled, &done) };
+                }
+                None => {
+                    let _ = proxy.send_event(BrowserEvent::ExtensionsChanged(None));
+                }
+            }
+            Ok(())
+        }));
+    let _ = unsafe { profile.GetBrowserExtensions(&handler) };
+}
+
 /* ---------- Native dialogs ---------- */
 
 fn show_save_dialog(default_name: &str) -> Option<PathBuf> {
@@ -1360,18 +1403,33 @@ pub fn attach_focus(webview: &WebView, tab_id: TabId, proxy: EventLoopProxy<Brow
 
 /// An extension popup closes when the user clicks away from it or its page calls
 /// `window.close()`, as in Chrome.
-pub fn attach_popup_events(webview: &WebView, close: impl Fn() + Clone + 'static) {
-    let on_blur = close.clone();
+pub fn attach_popup_events(
+    webview: &WebView,
+    close: impl Fn() + 'static,
+    blurred: impl Fn() + 'static,
+) {
+    // Only a popup that has been focused can lose focus: one that never got it (the window
+    // isn't in front yet) must not close the moment it appears.
+    let focused = std::rc::Rc::new(std::cell::Cell::new(false));
+    let got = focused.clone();
+    let gained = FocusChangedEventHandler::create(Box::new(move |_, _| {
+        got.set(true);
+        Ok(())
+    }));
     let blur = FocusChangedEventHandler::create(Box::new(move |_, _| {
-        on_blur();
+        if focused.get() {
+            blurred();
+        }
         Ok(())
     }));
     let mut token = Default::default();
+    let _ = unsafe { webview.controller().add_GotFocus(&gained, &mut token) };
     let _ = unsafe { webview.controller().add_LostFocus(&blur, &mut token) };
     let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
         return;
     };
     let closed = WindowCloseRequestedEventHandler::create(Box::new(move |_, _| {
+        eprintln!("extension popup: closed, the page asked to close");
         close();
         Ok(())
     }));

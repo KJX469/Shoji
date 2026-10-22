@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en" data-accent="{{ACCENT}}" data-mode="{{MODE}}" data-fonts="{{FONTS}}">
+<head>
+  <meta charset="UTF-8">
+  <title>Extensions</title>
+  <style>
+{{THEME_CSS}}
+    body { padding: 48px 32px 96px; font-size: 13px; line-height: 1.5; }
+    button, select, input { font: inherit; color: inherit; }
+    [hidden] { display: none !important; }
+    .wrap { max-width: 900px; margin: 0 auto; }
+    header { display: flex; align-items: center; gap: 16px; margin-bottom: 22px; }
+    header .crane { width: 44px; height: 44px; }
+    header .grow { flex: 1; }
+    h1 { font-family: var(--font-display); font-size: 26px; font-weight: 400; }
+    h1 + p { color: var(--ink-3); font-size: 12px; }
+    .btn { height: 34px; padding: 0 14px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface-2); cursor: pointer; outline: none; white-space: nowrap; }
+    .btn:hover { border-color: var(--line-strong); }
+    .btn:focus-visible, .chip:focus-visible, .tab:focus-visible, .icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .btn.primary { background: var(--tone); color: var(--on-tone); border-color: transparent; font-weight: 600; }
+    .btn.primary[disabled] { opacity: .6; cursor: default; }
+    .btn.small { height: 28px; padding: 0 10px; font-size: 12px; }
+    .btn.danger { color: var(--danger); }
+    input[type=search], input[type=text] { width: 100%; height: 40px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); outline: none; user-select: text; }
+    input:focus { border-color: var(--accent); }
+    .card { border-radius: 14px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); }
+    .tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+    .tab { padding: 8px 14px; border: 0; background: none; cursor: pointer; color: var(--ink-3); border-bottom: 2px solid transparent; margin-bottom: -1px; outline: none; }
+    .tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+    .tab .n { margin-left: 6px; font-size: 11px; color: var(--ink-3); }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 18px; }
+    .chip { height: 28px; padding: 0 12px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); cursor: pointer; outline: none; }
+    .chip[aria-pressed="true"] { border-color: var(--accent); background: var(--tint-soft); color: var(--ink); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+    .ext { display: flex; flex-direction: column; gap: 10px; padding: 16px; }
+    .ext .top { display: flex; gap: 12px; align-items: center; }
+    .tile { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; font-weight: 700; font-size: 18px; color: #fff; flex-shrink: 0; overflow: hidden; }
+    .tile img { width: 100%; height: 100%; object-fit: contain; background: var(--surface-2); }
+    .ext .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ext .cat { color: var(--ink-3); font-size: 12px; }
+    .ext p { color: var(--ink-2); flex: 1; min-height: 38px; }
+    .ext .foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .ext .tag { font-size: 11px; color: var(--ink-3); }
+    .row { display: flex; align-items: center; gap: 14px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+    .row:last-child { border-bottom: 0; }
+    .row .what { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .row .what b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row .what small { color: var(--ink-3); font-size: 12px; }
+    .row .acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+    .row.off .tile { opacity: .45; }
+    .switch { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
+    .switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+    .switch span { position: absolute; inset: 0; border-radius: 10px; background: var(--line-strong); transition: background .12s; pointer-events: none; }
+    .switch span::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .12s; }
+    .switch input:checked + span { background: var(--accent); }
+    .switch input:checked + span::after { transform: translateX(16px); }
+    .switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .pin[aria-pressed="true"] { border-color: var(--accent); background: var(--tint-soft); }
+    .empty, .off-note { padding: 40px 24px; text-align: center; color: var(--ink-2); }
+    .empty h2 { font-family: var(--font-display); font-size: 20px; font-weight: 400; margin-bottom: 6px; }
+    .by-link { margin-bottom: 16px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
+    .by-link .what { flex: 1; min-width: 0; }
+    .by-link .what small { display: block; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .toast { position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 20px); padding: 9px 16px; border-radius: 10px; background: var(--ink); color: var(--bg); opacity: 0; transition: .2s; pointer-events: none; }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+    .more-row { display: flex; justify-content: center; margin: 14px 0 0; }
+    .foot-note { margin-top: 22px; color: var(--ink-3); font-size: 12px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="crane">{{CRANE}}</div>
+      <div class="grow"><h1>Extensions</h1><p>Add features to Shoji from the Chrome Web Store</p></div>
+      <button class="btn" onclick="post('AddExtension')">Load unpacked…</button>
+    </header>
+
+    <div class="card off-note" id="offNote" hidden>Extensions are off. Switch them on in Settings and restart Shoji.</div>
+
+    <div id="app" hidden>
+      <input type="search" id="q" placeholder="Search extensions, or paste a Chrome Web Store link" oninput="shownMax = 48; render()" autocomplete="off" aria-label="Search extensions">
+      <div class="tabs" role="tablist" style="margin-top:16px">
+        <button class="tab" role="tab" id="tabFind" aria-selected="true" onclick="setTab('find')">Discover</button>
+        <button class="tab" role="tab" id="tabMine" aria-selected="false" onclick="setTab('mine')">Installed<span class="n" id="mineN"></span></button>
+      </div>
+
+      <section id="find">
+        <div id="byLink" class="card by-link" hidden>
+          <div class="what"><b>Add this extension</b><small id="byLinkId"></small></div>
+          <button class="btn primary" id="byLinkBtn">Add to Shoji</button>
+        </div>
+        <div class="chips" id="chips" role="group" aria-label="Categories"></div>
+        <div class="grid" id="grid"></div>
+        <div class="more-row" id="more" hidden><button class="btn" id="moreBtn">Show more</button></div>
+        <div class="card empty" id="noMatch" hidden><h2>Nothing like that here</h2><p>Search the Chrome Web Store, then paste the extension's link in the box above.</p></div>
+      </section>
+
+      <section id="mine" hidden>
+        <div class="card" id="list"></div>
+        <div class="card empty" id="noneYet" hidden><h2>No extensions yet</h2><p>Add one from Discover. It appears on the toolbar so you can open it with one click.</p></div>
+      </section>
+
+      <p class="foot-note">Extensions come from the Chrome Web Store and are checked for updates every few hours. They can see the pages you visit: add only what you trust.</p>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const ON = {{EXTENSIONS_ON}};
+    const $ = id => document.getElementById(id);
+    function post(action, payload = null) { if (window.ipc) window.ipc.postMessage(JSON.stringify({ action, payload })); }
+    let toastTimer;
+    function toast(t) { $('toast').textContent = t; $('toast').classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').classList.remove('show'), 2400); }
+
+    /* Starter catalog: the host replaces it with the fuller list when one is downloaded. */
+    let catalog = [
+      { id: 'ddkjiahejlhfcafbddmgiahcphecmpfh', name: 'uBlock Origin Lite', cat: 'Privacy', text: 'A light content blocker that uses the browser’s own rules.' },
+      { id: 'pkehgijcmpdhfbdbbnkijodmdjhbjlgp', name: 'Privacy Badger', cat: 'Privacy', text: 'Learns which trackers follow you and stops them.' },
+      { id: 'nngceckbapebfimnlniiiahkandclblb', name: 'Bitwarden', cat: 'Passwords', text: 'An open-source password manager that syncs between devices.' },
+      { id: 'aeblfdkhhhdcdjpifhhbdiojplfjncoa', name: '1Password', cat: 'Passwords', text: 'Saves and fills passwords and passkeys from your 1Password account.' },
+      { id: 'hdokiejnpimakedhajhdlcegeplioahd', name: 'LastPass', cat: 'Passwords', text: 'Password manager with autofill across your devices.' },
+      { id: 'eimadpbcbfnmbkopoojfekhnkhdbieeh', name: 'Dark Reader', cat: 'Appearance', text: 'Gives every website a dark theme you can tune.' },
+      { id: 'kbfnbcaeplbcioakkpcpgfkobkghlhen', name: 'Grammarly', cat: 'Writing', text: 'Checks spelling, grammar and tone as you type.' },
+      { id: 'mnjggcdmjocbbbhaepdhchncahnbgone', name: 'SponsorBlock', cat: 'Video', text: 'Skips sponsor segments and other interruptions in YouTube videos.' },
+      { id: 'gebbhagfogifgggkldgodflihgfeehhg', name: 'Return YouTube Dislike', cat: 'Video', text: 'Shows dislike counts on YouTube again.' },
+      { id: 'dbepggeogbaibhgnhhndojpepiihcmeb', name: 'Vimium', cat: 'Productivity', text: 'Browse and navigate with the keyboard, in the style of Vim.' },
+    ];
+    window.__catalog = list => { if (Array.isArray(list) && list.length) { catalog = list; render(); } };
+
+    let tab = 'find', cat = '', shownMax = 48, items = [], pending = {}, active = ON;
+    const TONES = ['#c0563c', '#b8872f', '#4f8a5b', '#3f7fa6', '#6c5aa8', '#a24b78', '#5b6f7a'];
+    const tone = s => TONES[[...s].reduce((a, c) => a + c.charCodeAt(0), 0) % TONES.length];
+
+    function tile(name, id, icon) {
+      const t = document.createElement('div');
+      t.className = 'tile';
+      if (icon) { const i = document.createElement('img'); i.src = icon; i.alt = ''; t.appendChild(i); }
+      else { t.style.background = tone(id || name); t.textContent = (name[0] || '?').toUpperCase(); }
+      return t;
+    }
+    function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+
+    function setTab(t) {
+      tab = t;
+      $('tabFind').setAttribute('aria-selected', t === 'find');
+      $('tabMine').setAttribute('aria-selected', t === 'mine');
+      $('find').hidden = t !== 'find';
+      $('mine').hidden = t !== 'mine';
+      render();
+    }
+    function setCat(c) { cat = cat === c ? '' : c; shownMax = 48; render(); }
+    const count = n => n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\.0$/, '') + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'K' : String(n);
+    const installed = id => items.find(x => x.id === id);
+    function install(id) {
+      pending[id] = Date.now();
+      post('InstallExtension', { source: id });
+      render();
+      setTimeout(() => { if (pending[id] && Date.now() - pending[id] > 25000) { delete pending[id]; render(); } }, 26000);
+    }
+
+    function render() {
+      const q = $('q').value.trim();
+      $('mineN').textContent = items.length ? items.length : '';
+      /* a pasted link or id */
+      const pasted = (q.match(/[a-p]{32}/) || [])[0];
+      $('byLink').hidden = !pasted || !!installed(pasted);
+      if (pasted) { $('byLinkId').textContent = pasted; $('byLinkBtn').onclick = () => install(pasted); $('byLinkBtn').disabled = !!pending[pasted]; $('byLinkBtn').textContent = pending[pasted] ? 'Adding…' : 'Add to Shoji'; }
+
+      const cats = [...new Set(catalog.map(c => c.cat))];
+      const chips = $('chips');
+      chips.textContent = '';
+      cats.forEach(c => { const b = el('button', 'chip', c); b.setAttribute('aria-pressed', cat === c); b.onclick = () => setCat(c); chips.appendChild(b); });
+
+      const words = pasted ? [] : q.toLowerCase().split(/\s+/).filter(Boolean);
+      const shown = catalog.filter(c => (!cat || c.cat === cat) && words.every(w => (c.name + ' ' + c.text + ' ' + c.cat).toLowerCase().includes(w)));
+      const grid = $('grid');
+      grid.textContent = '';
+      shown.slice(0, shownMax).forEach(c => {
+        const card = el('div', 'card ext');
+        const top = el('div', 'top');
+        top.appendChild(tile(c.name, c.id, c.icon));
+        const names = el('div');
+        names.style.minWidth = 0;
+        names.append(el('div', 'name', c.name), el('div', 'cat', c.rating ? c.cat + ' · ★ ' + c.rating + (c.users ? ' · ' + count(c.users) + ' users' : '') : c.cat));
+        top.appendChild(names);
+        const foot = el('div', 'foot');
+        const have = installed(c.id);
+        if (have) foot.appendChild(el('span', 'tag', have.enabled ? 'Added' : 'Added, off'));
+        else foot.appendChild(el('span', 'tag', ''));
+        const b = el('button', 'btn small' + (have ? '' : ' primary'), have ? 'Open' : pending[c.id] ? 'Adding…' : 'Add to Shoji');
+        b.disabled = !!pending[c.id] && !have;
+        b.onclick = () => have ? setTab('mine') : install(c.id);
+        foot.appendChild(b);
+        card.append(top, el('p', null, c.text), foot);
+        grid.appendChild(card);
+      });
+      $('more').hidden = shown.length <= shownMax;
+      $('noMatch').hidden = shown.length > 0 || !!pasted;
+
+      /* installed */
+      const list = $('list');
+      list.textContent = '';
+      $('noneYet').hidden = items.length > 0;
+      list.hidden = !items.length;
+      items.forEach(x => {
+        const row = el('div', 'row' + (x.enabled ? '' : ' off'));
+        const what = el('div', 'what');
+        what.append(el('b', null, x.name || x.id), el('small', null, x.enabled ? (x.popup ? 'Opens from the toolbar' : 'Works in the background') : 'Off'));
+        const acts = el('div', 'acts');
+        if (x.popup) {
+          const pin = el('button', 'btn small pin', x.pinned ? 'Pinned' : 'Pin');
+          pin.setAttribute('aria-pressed', !!x.pinned);
+          pin.title = x.pinned ? 'Take off the toolbar' : 'Show on the toolbar';
+          pin.onclick = () => post('SetExtensionPinned', { id: x.id, pinned: !x.pinned });
+          acts.appendChild(pin);
+        }
+        if (x.options) { const o = el('button', 'btn small', 'Options'); o.onclick = () => post('CreateTab', { url: x.options }); acts.appendChild(o); }
+        const rm = el('button', 'btn small danger', 'Remove');
+        rm.onclick = () => { if (confirm('Remove ' + (x.name || 'this extension') + '?')) post('RemoveExtension', { id: x.id }); };
+        const sw = el('label', 'switch');
+        sw.title = x.enabled ? 'Turn off' : 'Turn on';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.checked = !!x.enabled; cb.setAttribute('aria-label', 'Enabled');
+        cb.onchange = () => post('SetExtensionEnabled', { id: x.id, enabled: cb.checked });
+        sw.append(cb, document.createElement('span'));
+        acts.append(rm, sw);
+        row.append(tile(x.name || '?', x.id, x.icon), what, acts);
+        list.appendChild(row);
+      });
+    }
+
+    window.__extensions = d => {
+      active = d.active;
+      const before = new Set(items.map(x => x.id));
+      items = d.items || [];
+      items.forEach(x => {
+        if (pending[x.id]) { delete pending[x.id]; if (!before.has(x.id)) toast((x.name || 'Extension') + ' added'); }
+      });
+      $('offNote').hidden = active;
+      $('app').hidden = !active;
+      render();
+    };
+    $('offNote').hidden = ON;
+    $('app').hidden = !ON;
+    render();
+    $('moreBtn').onclick = () => { shownMax += 48; render(); };
+    post('ExtensionsQuery');
+    post('ExtensionsCatalog');
+  </script>
+</body>
+</html>

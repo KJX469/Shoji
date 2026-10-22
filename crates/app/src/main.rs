@@ -328,10 +328,14 @@ pub(crate) enum BrowserEvent {
     VaultBreaches(HashMap<String, u64>, bool),
     /// Store extensions were checked for updates: the ids that were replaced on disk
     ExtensionsUpdated(Result<Vec<String>, String>),
+    /// The store catalog was downloaded again
+    CatalogUpdated,
     /// A window's extension popup wants this size (logical px)
     ExtensionPopupSize(WindowId, f64, f64),
     /// A window's extension popup lost focus or closed itself
     ExtensionPopupClosed(WindowId),
+    /// A window's extension popup lost focus
+    ExtensionPopupBlurred(WindowId),
     /// The search engine's suggestions for what was typed in a window's address bar
     SuggestWords(WindowId, u64, Vec<String>, bool),
     /// Cookies of a window's page: how many, and whether they were just deleted
@@ -442,6 +446,7 @@ fn internal_page(ctx: &PageContext, page: &str) -> Option<String> {
         ),
         "welcome" => pages::welcome(s),
         "passwords" => pages::passwords(s),
+        "extensions" => pages::extensions(s),
         "history" => pages::history(s, "history"),
         "downloads" => pages::history(s, "downloads"),
         "bookmarks" => pages::bookmarks(s),
@@ -922,11 +927,15 @@ struct BrowserApp {
     extension_buttons: String,
     /// What each extension's button opens, and whether it is a popup (by extension id)
     extension_popups: HashMap<String, (String, bool)>,
+    /// Extensions the puzzle menu lists, in order: (id, name)
+    extension_menu: Vec<(String, String)>,
     /// The extension popup that last closed by losing focus, and when (a click on its own
     /// button closes it first; that click must not open it again)
     popup_blurred: Option<(String, Instant)>,
     /// When store extensions were last checked for updates
     extensions_checked: Option<Instant>,
+    catalog_checked: Option<Instant>,
+    extensions_offered: std::collections::HashSet<String>,
     /// The toolbar has asked the engine for the installed extensions
     extensions_asked: std::cell::Cell<bool>,
     favourites: shoji_core::userdata::Favourites,
@@ -1135,11 +1144,14 @@ impl BrowserApp {
             windows: HashMap::new(),
             proxy,
             shield,
-            extension_buttons: "[]".into(),
+            extension_buttons: r#"{"buttons":[],"any":false}"#.into(),
             extension_popups: HashMap::new(),
+            extension_menu: Vec::new(),
             popup_blurred: None,
             extensions_asked: std::cell::Cell::new(false),
             extensions_checked: None,
+            catalog_checked: None,
+            extensions_offered: Default::default(),
             settings,
             settings_path,
             data_dir: data_dir.clone(),
@@ -2356,6 +2368,7 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 history,
                 favicon,
             } => {
+                let reported = url.clone();
                 let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) else {
                     return;
                 };
@@ -2445,6 +2458,12 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                     }
                 }
                 win.ui_dirty |= changed;
+                // A tab that opens straight at a store page never "moves" there, so every report
+                // of the front tab's address is looked at.
+                let front = win.tabs.active_tab_id() == Some(tab_id);
+                if let Some(address) = reported.filter(|_| front) {
+                    self.offer_store_extension(&address);
+                }
                 // A different site: use its remembered zoom (or the default).
                 if let Some((old, new)) = moved {
                     if extract_host(&old) != extract_host(&new) && extract_host(&new).is_some() {
@@ -2774,10 +2793,12 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                     self.eval_welcome_and_settings(id, &js);
                 }
             }
+            BrowserEvent::CatalogUpdated => self.push_extension_catalog(),
             BrowserEvent::ExtensionPopupSize(win_id, w, h) => {
                 self.size_extension_popup(win_id, w, h)
             }
             BrowserEvent::ExtensionPopupClosed(win_id) => self.blur_extension_popup(win_id),
+            BrowserEvent::ExtensionPopupBlurred(win_id) => self.extension_popup_blurred(win_id),
             BrowserEvent::ExtensionsUpdated(result) => {
                 if let Ok(ids) = result {
                     if !ids.is_empty() {

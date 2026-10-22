@@ -489,6 +489,9 @@
     <button class="btn" id="btnPanel" onclick="post('RunAction', { value: 'bookmarks-panel' })" title="Bookmarks panel" aria-label="Bookmarks panel" hidden>
       <svg class="i" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M9.5 5v14"/></svg>
     </button>
+    <button class="btn" id="btnExt" hidden onclick="extMenu(this)" title="Extensions" aria-label="Extensions">
+      <svg class="i" viewBox="0 0 24 24"><path d="M10 4.5a1.8 1.8 0 0 1 3.6 0V6h3.4c.6 0 1 .4 1 1v3.4h1.5a1.8 1.8 0 0 1 0 3.6H18V17.5c0 .6-.4 1-1 1h-3.4v-1.5a1.8 1.8 0 0 0-3.6 0v1.5H6.5c-.6 0-1-.4-1-1V14h1.5a1.8 1.8 0 0 0 0-3.6H5.5V7c0-.6.4-1 1-1H10z"/></svg>
+    </button>
     <div class="ext-btns" id="extBtns" role="group" aria-label="Extensions"></div>
     <button class="btn" id="btnNotes" onclick="post('ToggleNotes')" title="Quick note" aria-label="Quick note">
       <svg class="i" viewBox="0 0 24 24"><path d="M7 3.5h8.5L19 7v13.5H7z"/><path d="M15.5 3.5V7H19M10 11h6M10 14.5h6M10 18h3.5"/><path d="M4.5 6v15"/></svg>
@@ -1707,10 +1710,15 @@
     addEventListener('resize', () => { if (prefs.bookmarksBar) fitBar(); });
 
     /* Extensions: one button each, opening its popup under it. */
-    window.__extButtons = list => {
+    function extMenu(b) {
+      const r = b.getBoundingClientRect();
+      post('ExtensionsMenu', { x: Math.round(r.left + r.width / 2), y: Math.round(r.bottom + 4) });
+    }
+    window.__extButtons = d => {
       const box = $('extBtns');
       box.textContent = '';
-      list.forEach(x => {
+      $('btnExt').hidden = !d.any;
+      d.buttons.forEach(x => {
         const b = document.createElement('button');
         b.className = 'btn';
         b.title = x.name;
@@ -1744,7 +1752,7 @@
           if (activeBar && key === 'shield') { const d = activeBar.querySelector('.shield'); return d && !d.hidden ? d : activeBar.querySelector('.more'); }
           return $(id);
         };
-        for (const [key, id] of [['menu', 'btnMenu'], ['panel', $('btnPanel').hidden ? 'btnMenu' : 'btnPanel'], ['fav', 'btnFav'], ['downloads', 'btnDownloads'], ['dark', 'btnDark'], ['shield', 'btnShield'], ['lock', 'btnLock']]) {
+        for (const [key, id] of [['menu', 'btnMenu'], ['panel', $('btnPanel').hidden ? 'btnMenu' : 'btnPanel'], ['fav', 'btnFav'], ['downloads', 'btnDownloads'], ['dark', 'btnDark'], ['shield', 'btnShield'], ['lock', 'btnLock'], ['ext', 'btnExt']]) {
           const b = pick(key, id).getBoundingClientRect();
           if (b.width > 0) items[key] = Math.round((b.left + b.width / 2) * 10) / 10;
         }
@@ -1755,7 +1763,7 @@
 
 
     /* ---------- Split view toolbars ---------- */
-    const toolIds = ['splitCtl', 'btnPanel', 'extBtns', 'btnNotes', 'btnDownloads', 'btnMenu'];
+    const toolIds = ['splitCtl', 'btnPanel', 'btnExt', 'extBtns', 'btnNotes', 'btnDownloads', 'btnMenu'];
     const toolMarks = toolIds.map(id => { const n = $(id); const m = document.createComment(id); n.before(m); return [n, m]; });
     let splitBarsOn = false, barsKey = '', curOmni = null;
     const PB = {

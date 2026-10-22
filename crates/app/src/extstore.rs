@@ -20,6 +20,19 @@ pub fn parse_id(input: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// The extension id of a Chrome Web Store detail page address, `None` for any other address.
+pub fn store_page_id(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("https://")?;
+    let (host, path) = rest.split_once('/')?;
+    let path = path.split(['?', '#']).next()?;
+    let detail = match host {
+        "chromewebstore.google.com" => path.starts_with("detail/"),
+        "chrome.google.com" => path.starts_with("webstore/detail/"),
+        _ => false,
+    };
+    detail.then(|| parse_id(path)).flatten()
+}
+
 /// The zip archive inside a CRX package (versions 2 and 3).
 pub fn crx_payload(bytes: &[u8]) -> Option<&[u8]> {
     if bytes.get(..4)? != b"Cr24" {
@@ -36,26 +49,251 @@ pub fn crx_payload(bytes: &[u8]) -> Option<&[u8]> {
     bytes.get(start..)
 }
 
+/// The store id an extension public key (DER) belongs to: the first 16 bytes of its SHA-256,
+/// each nibble written as a letter from `a` to `p`.
+fn id_of_key(der: &[u8]) -> String {
+    ring::digest::digest(&ring::digest::SHA256, der).as_ref()[..16]
+        .iter()
+        .flat_map(|b| [b >> 4, b & 15])
+        .map(|n| char::from(b'a' + n))
+        .collect()
+}
+
+/// The bytes of every length-delimited field `number` in a protobuf message.
+fn proto_fields(mut msg: &[u8], number: u64) -> Vec<&[u8]> {
+    let varint = |m: &mut &[u8]| -> Option<u64> {
+        let mut v = 0u64;
+        for shift in (0..64).step_by(7) {
+            let (&b, rest) = m.split_first()?;
+            *m = rest;
+            v |= u64::from(b & 0x7f) << shift;
+            if b & 0x80 == 0 {
+                return Some(v);
+            }
+        }
+        None
+    };
+    let mut out = Vec::new();
+    while !msg.is_empty() {
+        let Some(tag) = varint(&mut msg) else { break };
+        match tag & 7 {
+            0 => {
+                if varint(&mut msg).is_none() {
+                    break;
+                }
+            }
+            1 => msg = msg.get(8..).unwrap_or_default(),
+            5 => msg = msg.get(4..).unwrap_or_default(),
+            2 => {
+                let Some(len) = varint(&mut msg).and_then(|l| usize::try_from(l).ok()) else {
+                    break;
+                };
+                let Some(field) = msg.get(..len) else { break };
+                if tag >> 3 == number {
+                    out.push(field);
+                }
+                msg = &msg[len..];
+            }
+            _ => break,
+        }
+    }
+    out
+}
+
+/// The public key (DER) the package is signed with that gives the extension its store id.
+fn crx_public_key(bytes: &[u8], id: &str) -> Option<Vec<u8>> {
+    let word = |at: usize| -> Option<usize> {
+        Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?) as usize)
+    };
+    let keys: Vec<&[u8]> = match word(4)? {
+        2 => vec![bytes.get(16..16usize.checked_add(word(8)?)?)?],
+        3 => {
+            let header = bytes.get(12..12usize.checked_add(word(8)?)?)?;
+            // AsymmetricKeyProof { public_key = 1 }, as sha256_with_rsa = 2 or sha256_with_ecdsa = 3.
+            [2, 3]
+                .into_iter()
+                .flat_map(|n| proto_fields(header, n))
+                .filter_map(|proof| proto_fields(proof, 1).into_iter().next())
+                .collect()
+        }
+        _ => return None,
+    };
+    keys.into_iter()
+        .find(|k| id_of_key(k) == id)
+        .map(<[u8]>::to_vec)
+}
+
+/// Put the store key into the unpacked manifest, so the engine gives the extension its store id
+/// instead of one made up from the folder (extensions and their desktop apps know each other by
+/// that id).
+fn pin_store_id(dir: &Path, key_der: &[u8]) -> Result<(), String> {
+    use base64::Engine as _;
+    let file = dir.join("manifest.json");
+    let text = std::fs::read_to_string(&file).map_err(|e| e.to_string())?;
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|e| e.to_string())?;
+    let Some(map) = manifest.as_object_mut() else {
+        return Ok(());
+    };
+    if !map.contains_key("key") {
+        map.insert(
+            "key".into(),
+            base64::engine::general_purpose::STANDARD
+                .encode(key_der)
+                .into(),
+        );
+        std::fs::write(
+            &file,
+            serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Used when the engine's version can't be read: the store withholds extensions that need a
+/// newer Chrome than the one claimed (1Password asks for 140).
+const FALLBACK_VERSION: &str = "140.0.0.0";
+
+/// The engine version as the store wants it: four dotted numbers.
+fn clean_version(raw: &str) -> Option<String> {
+    let v = raw.split_whitespace().next()?;
+    let parts: Vec<&str> = v.split('.').collect();
+    (parts.len() == 4
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())))
+    .then(|| v.to_string())
+}
+
+/// The installed WebView2 runtime's version, which is the Chrome the store should assume.
+fn product_version() -> &'static str {
+    static VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    VERSION.get_or_init(|| {
+        use webview2_com::Microsoft::Web::WebView2::Win32::GetAvailableCoreWebView2BrowserVersionString;
+        let mut out = windows::core::PWSTR::null();
+        // SAFETY: the loader fills `out` with a CoTaskMem string, copied and freed here.
+        let raw = unsafe {
+            GetAvailableCoreWebView2BrowserVersionString(windows::core::PCWSTR::null(), &mut out)
+                .ok()
+                .and_then(|()| out.to_string().ok())
+                .inspect(|_| windows::Win32::System::Com::CoTaskMemFree(Some(out.0 as _)))
+        };
+        raw.and_then(|r| clean_version(&r))
+            .unwrap_or_else(|| FALLBACK_VERSION.to_string())
+    })
+}
+
+/// Most requests one download may take: Google's download host drops long transfers after a few
+/// seconds on some networks, so the file is fetched in as many resumed pieces as it takes.
+const DOWNLOAD_TRIES: u32 = 80;
+/// Pieces in a row that add nothing before the download is given up.
+const DOWNLOAD_STALLS: u32 = 5;
+
+/// The total size in a `Content-Range: bytes 100-199/5000` header.
+fn content_range_total(value: &str) -> Option<u64> {
+    value.rsplit('/').next()?.trim().parse().ok()
+}
+
 fn download(id: &str) -> Result<Vec<u8>, String> {
     let url = format!(
-        "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=130.0.0.0&acceptformat=crx2,crx3&x=id%3D{id}%26installsource%3Dondemand%26uc"
+        "https://clients2.google.com/service/update2/crx?response=redirect&prodversion={}&acceptformat=crx2,crx3&x=id%3D{id}%26installsource%3Dondemand%26uc",
+        product_version()
     );
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(120)))
         .http_status_as_error(false)
         .build()
         .into();
-    let mut resp = agent.get(&url).call().map_err(|e| e.to_string())?;
-    match resp.status().as_u16() {
-        200 => {}
-        204 | 404 => return Err("The Chrome Web Store has no extension with that id.".into()),
-        code => return Err(format!("The Chrome Web Store answered {code}.")),
+    let started = std::time::Instant::now();
+    let mut bytes: Vec<u8> = Vec::new();
+    let mut total: Option<u64> = None;
+    let mut stalls = 0;
+    for attempt in 0..DOWNLOAD_TRIES {
+        if attempt > 0 {
+            // Each piece asks the store for a fresh download address (a signed address works
+            // once), so go gently.
+            std::thread::sleep(Duration::from_millis(500 * u64::from(stalls + 1).min(8)));
+        }
+        if started.elapsed() > Duration::from_secs(600) {
+            break;
+        }
+        let mut request = agent.get(&url);
+        if !bytes.is_empty() {
+            request = request.header("Range", format!("bytes={}-", bytes.len()));
+        }
+        let mut resp = match request.call() {
+            Ok(r) => r,
+            Err(_) => {
+                stalls += 1;
+                if stalls >= DOWNLOAD_STALLS {
+                    break;
+                }
+                continue;
+            }
+        };
+        match resp.status().as_u16() {
+            200 => {
+                // The whole file again (the Range was not honoured).
+                bytes.clear();
+                total = resp.body().content_length();
+            }
+            206 => {
+                total = resp
+                    .headers()
+                    .get("content-range")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(content_range_total)
+                    .or(total);
+            }
+            204 | 404 => return Err("The Chrome Web Store has no extension with that id.".into()),
+            429 | 500..=599 => {
+                stalls += 1;
+                if stalls >= DOWNLOAD_STALLS {
+                    break;
+                }
+                continue;
+            }
+            code => return Err(format!("The Chrome Web Store answered {code}.")),
+        }
+        if total.is_some_and(|t| t > MAX_CRX_BYTES) {
+            return Err("That extension is too large.".into());
+        }
+        let before = bytes.len();
+        let mut reader = resp.body_mut().with_config().limit(MAX_CRX_BYTES).reader();
+        let mut buf = [0u8; 64 * 1024];
+        let clean_end = loop {
+            match std::io::Read::read(&mut reader, &mut buf) {
+                Ok(0) => break true,
+                Ok(n) => {
+                    bytes.extend_from_slice(&buf[..n]);
+                    if bytes.len() as u64 > MAX_CRX_BYTES {
+                        return Err("That extension is too large.".into());
+                    }
+                }
+                Err(_) => break false,
+            }
+        };
+        match total {
+            Some(t) if bytes.len() as u64 >= t => return Ok(bytes),
+            None if clean_end || is_complete_package(&bytes) => return Ok(bytes),
+            _ => {}
+        }
+        if bytes.len() > before {
+            stalls = 0;
+        } else {
+            stalls += 1;
+            if stalls >= DOWNLOAD_STALLS {
+                break;
+            }
+        }
     }
-    resp.body_mut()
-        .with_config()
-        .limit(MAX_CRX_BYTES)
-        .read_to_vec()
-        .map_err(|e| e.to_string())
+    Err("The download kept breaking off. Check your connection and try again.".into())
+}
+
+/// `bytes` is a whole CRX package: a header and a zip that opens.
+fn is_complete_package(bytes: &[u8]) -> bool {
+    crx_payload(bytes).is_some_and(|zip| zip::ZipArchive::new(std::io::Cursor::new(zip)).is_ok())
 }
 
 /// Unpack `zip_bytes` into `dest`, replacing what is there. Entries that would land outside
@@ -118,9 +356,32 @@ pub fn fetch(id: &str, extensions_dir: &Path) -> Result<PathBuf, String> {
     let bytes = download(id)?;
     let zip = crx_payload(&bytes).ok_or("The download wasn't an extension package.")?;
     let dest = extensions_dir.join(id);
+    let existed = dest.exists();
     std::fs::create_dir_all(extensions_dir).map_err(|e| e.to_string())?;
     unpack(zip, &dest)?;
+    if let Some(key) = crx_public_key(&bytes, id) {
+        pin_store_id(&dest, &key)?;
+    }
+    if let Some(why) = unsupported(&dest) {
+        if !existed {
+            let _ = std::fs::remove_dir_all(&dest);
+        }
+        return Err(why);
+    }
     Ok(dest)
+}
+
+/// Why the engine can't run the unpacked extension in `dir`, if it can't: it only runs
+/// Manifest V3, and the store still lists older ones.
+fn unsupported(dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join("manifest.json")).ok()?;
+    let manifest: serde_json::Value =
+        serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()?;
+    let version = manifest.get("manifest_version")?.as_u64()?;
+    (version < 3).then(|| {
+        "This extension is built for an older Chrome standard (Manifest V2), which browsers no longer run. Look for its newer version in the store."
+            .to_string()
+    })
 }
 
 /// What a manifest calls the extension: its name, looked up in `_locales` when it is a
@@ -178,7 +439,8 @@ pub fn update_check_url(installed: &[(String, String)]) -> String {
         x.push_str(&format!("id%3D{id}%26v%3D{version}%26uc"));
     }
     format!(
-        "https://clients2.google.com/service/update2/crx?response=updatecheck&prodversion=130.0.0.0&acceptformat=crx2,crx3&x={x}"
+        "https://clients2.google.com/service/update2/crx?response=updatecheck&prodversion={}&acceptformat=crx2,crx3&x={x}",
+        product_version()
     )
 }
 
@@ -380,9 +642,214 @@ pub fn find<'a>(pages: &'a [ExtensionPages], id: &str, name: &str) -> Option<&'a
         .or_else(|| pages.iter().find(|p| p.name == name))
 }
 
+/// The catalog the store page browses, built weekly into the Byobu data release.
+const CATALOG_URL: &str =
+    "https://github.com/KJX469/Shoji/releases/download/byobu-data/extension-catalog.json";
+const CATALOG_MAX_BYTES: u64 = 16 * 1024 * 1024;
+const CATALOG_MAX_AGE: Duration = Duration::from_secs(3 * 24 * 60 * 60);
+
+fn catalog_file(data_dir: &Path) -> PathBuf {
+    data_dir.join("extension-catalog.json")
+}
+
+/// The catalog's entries that are well formed, as JSON. Icons must be embedded images so the
+/// store page never makes a request of its own.
+fn clean_catalog(json: &str) -> Option<String> {
+    let mut list: Vec<serde_json::Value> = serde_json::from_str(json).ok()?;
+    list.retain_mut(|e| {
+        let ok = e["id"].as_str().is_some_and(|id| parse_id(id).is_some())
+            && e["name"].as_str().is_some_and(|n| !n.is_empty());
+        if ok
+            && !e["icon"]
+                .as_str()
+                .is_some_and(|i| i.starts_with("data:image/"))
+        {
+            e["icon"] = serde_json::Value::String(String::new());
+        }
+        ok
+    });
+    (!list.is_empty())
+        .then(|| serde_json::to_string(&list).ok())
+        .flatten()
+}
+
+/// The downloaded catalog, if there is one.
+pub fn read_catalog(data_dir: &Path) -> Option<String> {
+    clean_catalog(&std::fs::read_to_string(catalog_file(data_dir)).ok()?)
+}
+
+/// Download the catalog unless the one on disk is recent. `Ok(true)` when it was replaced.
+/// Blocking.
+pub fn refresh_catalog(data_dir: &Path) -> Result<bool, String> {
+    let file = catalog_file(data_dir);
+    let fresh = std::fs::metadata(&file)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age < CATALOG_MAX_AGE);
+    if fresh {
+        return Ok(false);
+    }
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(60)))
+        .http_status_as_error(false)
+        .build()
+        .into();
+    let mut resp = agent.get(CATALOG_URL).call().map_err(|e| e.to_string())?;
+    if resp.status().as_u16() != 200 {
+        return Err(format!("The catalog download answered {}.", resp.status()));
+    }
+    let body = resp
+        .body_mut()
+        .with_config()
+        .limit(CATALOG_MAX_BYTES)
+        .read_to_string()
+        .map_err(|e| e.to_string())?;
+    let clean = clean_catalog(&body).ok_or("The catalog download was empty.")?;
+    let tmp = file.with_extension("tmp");
+    std::fs::write(&tmp, clean).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &file).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn catalog_entries_are_checked_and_icons_kept_local() {
+        let id = "nngceckbapebfimnlniiiahkandclblb";
+        let json = format!(
+            r#"[{{"id":"{id}","name":"A","icon":"https://lh3.example/x"}},{{"id":"short","name":"B"}},{{"id":"{id}","name":"","icon":""}},{{"id":"{id}","name":"C","icon":"data:image/webp;base64,AAAA"}}]"#
+        );
+        let out: Vec<serde_json::Value> =
+            serde_json::from_str(&clean_catalog(&json).unwrap()).unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0]["icon"], "");
+        assert_eq!(out[1]["icon"], "data:image/webp;base64,AAAA");
+        assert_eq!(clean_catalog("[]"), None);
+        assert_eq!(clean_catalog("not json"), None);
+    }
+
+    #[test]
+    fn manifest_v2_extensions_are_refused() {
+        let dir = std::env::temp_dir().join(format!("shoji-mv-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("manifest.json"), r#"{"manifest_version":2}"#).unwrap();
+        assert!(unsupported(&dir).is_some());
+        std::fs::write(dir.join("manifest.json"), r#"{"manifest_version":3}"#).unwrap();
+        assert!(unsupported(&dir).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn store_detail_pages_are_recognised() {
+        let id = "nngceckbapebfimnlniiiahkandclblb";
+        for url in [
+            format!("https://chromewebstore.google.com/detail/bitwarden/{id}"),
+            format!("https://chromewebstore.google.com/detail/{id}?hl=en"),
+            format!("https://chrome.google.com/webstore/detail/bitwarden/{id}"),
+        ] {
+            assert_eq!(store_page_id(&url).as_deref(), Some(id), "{url}");
+        }
+        for url in [
+            "https://chromewebstore.google.com/".to_string(),
+            format!("https://chromewebstore.google.com/search/{id}"),
+            format!("https://evil.example/detail/x/{id}"),
+            format!("http://chromewebstore.google.com/detail/x/{id}"),
+        ] {
+            assert_eq!(store_page_id(&url), None, "{url}");
+        }
+    }
+
+    #[test]
+    fn a_cut_package_is_not_complete() {
+        use std::io::Write;
+        let mut zip = Vec::new();
+        {
+            let mut w = zip::ZipWriter::new(std::io::Cursor::new(&mut zip));
+            w.start_file("manifest.json", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            w.write_all(b"{}").unwrap();
+            w.finish().unwrap();
+        }
+        let mut crx = b"Cr24".to_vec();
+        crx.extend_from_slice(&3u32.to_le_bytes());
+        crx.extend_from_slice(&0u32.to_le_bytes());
+        crx.extend_from_slice(&zip);
+        assert!(is_complete_package(&crx));
+        assert!(!is_complete_package(&crx[..crx.len() - 10]));
+        assert!(!is_complete_package(b""));
+    }
+
+    #[test]
+    fn content_range_gives_the_whole_size() {
+        assert_eq!(
+            content_range_total("bytes 2300000-24900000/24900001"),
+            Some(24900001)
+        );
+        assert_eq!(content_range_total("bytes 0-9/*"), None);
+        assert_eq!(content_range_total(""), None);
+    }
+
+    #[test]
+    fn the_store_key_comes_out_of_the_package_header() {
+        let key = b"not a real key, only bytes".to_vec();
+        let id = id_of_key(&key);
+        assert_eq!(id.len(), 32);
+        assert!(id.bytes().all(|b| (b'a'..=b'p').contains(&b)));
+        // CrxFileHeader { sha256_with_rsa(2) = { public_key(1) = key, signature(2) = .. } }
+        let mut proof = vec![0x0a, key.len() as u8];
+        proof.extend_from_slice(&key);
+        proof.extend_from_slice(&[0x12, 2, 9, 9]);
+        let mut header = vec![0x12, proof.len() as u8];
+        header.extend_from_slice(&proof);
+        // an unrelated key first, and a varint field the parser has to step over
+        let mut other = vec![0x1a, 4, 0x0a, 2, 1, 2, 0x50, 7];
+        other.extend_from_slice(&header);
+        let mut crx = b"Cr24".to_vec();
+        crx.extend_from_slice(&3u32.to_le_bytes());
+        crx.extend_from_slice(&(other.len() as u32).to_le_bytes());
+        crx.extend_from_slice(&other);
+        crx.extend_from_slice(b"zip");
+        assert_eq!(crx_public_key(&crx, &id), Some(key.clone()));
+        assert_eq!(crx_public_key(&crx, "a".repeat(32).as_str()), None);
+        // version 2: the key sits right after the two lengths
+        let mut old = b"Cr24".to_vec();
+        old.extend_from_slice(&2u32.to_le_bytes());
+        old.extend_from_slice(&(key.len() as u32).to_le_bytes());
+        old.extend_from_slice(&0u32.to_le_bytes());
+        old.extend_from_slice(&key);
+        assert_eq!(crx_public_key(&old, &id), Some(key));
+    }
+
+    #[test]
+    fn the_key_is_added_to_a_manifest_once() {
+        let dir = std::env::temp_dir().join(format!("shoji-key-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("manifest.json"), "\u{feff}{\"name\":\"x\"}").unwrap();
+        pin_store_id(&dir, b"abc").unwrap();
+        let m: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap())
+                .unwrap();
+        assert_eq!(m["key"], "YWJj");
+        pin_store_id(&dir, b"zzz").unwrap();
+        let m: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("manifest.json")).unwrap())
+                .unwrap();
+        assert_eq!(m["key"], "YWJj");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn engine_versions_are_four_numbers() {
+        assert_eq!(
+            clean_version("130.0.2849.80\n").as_deref(),
+            Some("130.0.2849.80")
+        );
+        assert_eq!(clean_version("130.0.2849"), None);
+        assert_eq!(clean_version("130.0.x.1"), None);
+    }
 
     #[test]
     fn id_comes_out_of_links_and_bare_ids() {

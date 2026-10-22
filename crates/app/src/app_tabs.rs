@@ -623,6 +623,7 @@ impl BrowserApp {
         for page in [
             "settings",
             "passwords",
+            "extensions",
             "history",
             "bookmarks",
             "downloads",

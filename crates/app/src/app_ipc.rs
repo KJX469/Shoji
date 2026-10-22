@@ -73,6 +73,7 @@ impl BrowserApp {
                     "bookmarks",
                     "downloads",
                     "passwords",
+                    "extensions",
                     "byobu",
                     "settings",
                     "wish",
@@ -1631,7 +1632,26 @@ impl BrowserApp {
                 }
             }
             M::ExtensionsQuery => self.request_extension_list(),
+            M::ExtensionsCatalog => {
+                self.push_extension_catalog();
+                self.refresh_extension_catalog();
+            }
             M::AddExtension => self.add_extension_from_folder(),
+            M::SetExtensionPinned { id, pinned } => {
+                self.update_settings(|s| {
+                    s.extensions.unpinned.retain(|i| *i != id);
+                    if !pinned {
+                        s.extensions.unpinned.push(id);
+                    }
+                });
+                self.request_extension_list();
+            }
+            M::SetExtensionEnabled { id, enabled } => {
+                if let Some(view) = self.persistent_view() {
+                    webview::set_extension_enabled(view, id, enabled, self.proxy.clone());
+                }
+            }
+            M::ExtensionsMenu { x, y } => self.show_extensions_menu(win_id, x, y),
             M::ToggleExtensionPopup { id, right } => {
                 self.toggle_extension_popup(win_id, &id, right)
             }
