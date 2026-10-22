@@ -279,3 +279,140 @@ fn fingerprinting_noise_is_stable_per_site_and_differs_between_sites() {
     assert_eq!(a1, sub, "subdomains share their site's noise");
     assert_ne!(a1, b, "other sites get other noise");
 }
+
+#[test]
+fn other_sites_get_the_origin_as_referrer_and_click_pings_are_blocked() {
+    if !can_run() {
+        return;
+    }
+    let server = site(vec![(
+        "/story",
+        "<meta name=referrer content=unsafe-url>\
+         <img src=\"http://cdn.paper.test:{P}/same.gif\">\
+         <img src=\"http://other-site.test:{P}/cross.gif\">\
+         <a id=l href=\"#read\" ping=\"http://paper.test:{P}/ping\">read</a>"
+            .into(),
+    )]);
+    let url = server.url("paper.test", "/story?id=9");
+    let shoji = Shoji::start("referrer", &url, Options::default());
+    let mut page = shoji.page("paper.test");
+    page.goto(&url);
+    let wait = |host: &str, path: &str| {
+        server
+            .wait_for(host, path, Duration::from_secs(10))
+            .unwrap_or_else(|| panic!("{host}{path} never loaded"))
+    };
+    let port = server.port;
+    assert_eq!(
+        wait("other-site.test", "/cross.gif").header("referer"),
+        Some(format!("http://paper.test:{port}/").as_str())
+    );
+    assert_eq!(
+        wait("cdn.paper.test", "/same.gif").header("referer"),
+        Some(url.as_str()),
+        "a same-site request keeps the page's own referrer policy"
+    );
+    page.click_on("#l");
+    page.eval("navigator.sendBeacon('/beacon', 'b')");
+    wait("paper.test", "/beacon");
+    std::thread::sleep(Duration::from_secs(1));
+    assert!(
+        !server.saw("paper.test", "/ping"),
+        "the click ping was sent"
+    );
+}
+
+#[test]
+fn popup_rules_stop_ad_windows_and_popunders() {
+    if !can_run() {
+        return;
+    }
+    let server = site(vec![
+        (
+            "/",
+            "<a id=ad href=\"http://popads.test:{P}/direct\" target=_blank>ad</a>\
+             <button id=under onclick=\"var w=window.open('');setTimeout(function(){w.location='http://popads.test:{P}/late'},300)\">under</button>\
+             <a id=ok href=\"http://fine.test:{P}/page\" target=_blank>ok</a>"
+                .into(),
+        ),
+        ("/page", "<p>fine</p>".into()),
+    ]);
+    let url = server.url("opener.test", "/");
+    let shoji = Shoji::start(
+        "popups",
+        &url,
+        Options {
+            settings: shield_settings(&["||popads.test^$popup"]),
+            ..Default::default()
+        },
+    );
+    let mut page = shoji.page("opener.test");
+    wait_for_shield(&server, &mut page, &url, ("probe.test", "/p.gif"));
+    page.goto(&url);
+    // As if clicked: the tab that opens may hide this one.
+    for id in ["ad", "under", "ok"] {
+        page.call(
+            "Runtime.evaluate",
+            json!({ "expression": format!("document.getElementById('{id}').click()"), "userGesture": true }),
+        );
+    }
+    assert!(
+        server
+            .wait_for("fine.test", "/page", Duration::from_secs(10))
+            .is_some(),
+        "an ordinary popup didn't open"
+    );
+    std::thread::sleep(Duration::from_secs(2));
+    assert!(
+        !server.saw("popads.test", "/direct"),
+        "the ad window opened"
+    );
+    assert!(!server.saw("popads.test", "/late"), "the popunder opened");
+}
+
+#[test]
+fn downloads_from_dangerous_sites_are_stopped() {
+    if !can_run() {
+        return;
+    }
+    let port = Arc::new(std::sync::OnceLock::<u16>::new());
+    let p2 = port.clone();
+    let server = Arc::new(Server::start(move |hit| {
+        let port = *p2.get().unwrap_or(&0);
+        match hit.path() {
+            "/" => Reply::html(format!(
+                "<p>files</p>{PROBE}<a id=get download href=\"/setup.exe\">get</a>"
+            )),
+            "/probe-img" => Reply::new(302, "text/plain", "")
+                .header("Location", &format!("http://probe.test:{port}/p.gif")),
+            "/setup.exe" => Reply::new(200, "application/octet-stream", "MZ")
+                .header("Content-Disposition", "attachment; filename=setup.exe"),
+            _ => Reply::empty(),
+        }
+    }));
+    let _ = port.set(server.port);
+    let url = server.url("files.test", "/");
+    let shoji = Shoji::start(
+        "downloads",
+        &url,
+        Options {
+            settings: shield_settings(&["||files.test/setup.exe$document"]),
+            ..Default::default()
+        },
+    );
+    let mut page = shoji.page("files.test");
+    wait_for_shield(&server, &mut page, &url, ("probe.test", "/p.gif"));
+    page.goto(&url);
+    page.call(
+        "Runtime.evaluate",
+        json!({ "expression": "document.getElementById('get').click()", "userGesture": true }),
+    );
+    let mut chrome = shoji.chrome();
+    assert!(
+        chrome.wait_for(
+            "document.getElementById('toastTitle').textContent==='Download blocked'",
+            Duration::from_secs(10)
+        ),
+        "no blocked-download notice"
+    );
+}

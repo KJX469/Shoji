@@ -1,6 +1,7 @@
 //! The matcher: network decisions and per-site cosmetic payloads.
 
 use crate::cname::{self, Uncloaker};
+use crate::popups::Popups;
 use crate::sources::ListSource;
 use crate::updater::Updater;
 use adblock::lists::{FilterSet, ParseOptions};
@@ -42,6 +43,10 @@ pub enum RequestKind {
     Xhr,
     Ping,
     Websocket,
+    /// A new window (`window.open`, `target="_blank"`), matched with `$popup` rules
+    Popup,
+    /// A file download, matched with page (`$document`) rules
+    Download,
     Other,
 }
 
@@ -58,6 +63,8 @@ impl RequestKind {
             RequestKind::Xhr => "xhr",
             RequestKind::Ping => "ping",
             RequestKind::Websocket => "websocket",
+            RequestKind::Popup => "popup",
+            RequestKind::Download => "other",
             RequestKind::Other => "other",
         }
     }
@@ -99,6 +106,8 @@ pub struct Shield {
     generation: Arc<AtomicU64>,
     /// Cosmetic payloads (and their exceptions) by host and mode, for the current engine
     cosmetics: Arc<Mutex<CosmeticCache>>,
+    /// The lists' `$popup` rules, which the engine itself drops
+    popups: Arc<RwLock<Option<Arc<Popups>>>>,
     /// Canonical names of first-party subdomains, once lookups are switched on
     cname: Arc<OnceLock<Uncloaker>>,
     /// The page-level rules (`$document`, `$doc`, `$all`) with their text, for warnings
@@ -207,6 +216,7 @@ impl Shield {
             allowed_pages: Arc::new(RwLock::new(HashSet::new())),
             generation: Arc::new(AtomicU64::new(0)),
             cosmetics: Arc::default(),
+            popups: Arc::default(),
             cname: Arc::default(),
             documents: Arc::default(),
             named: Arc::default(),
@@ -270,6 +280,7 @@ impl Shield {
         }
         let key = engine_key(&lists);
         let documents = compile(page_rules(&lists), true);
+        let popups = Popups::compile(&lists).map(Arc::new);
         let saved = dir.and_then(|d| {
             let same = std::fs::read_to_string(d.join(SAVED_KEY)).ok()? == key;
             let data = std::fs::read(d.join(SAVED_ENGINE)).ok().filter(|_| same)?;
@@ -308,6 +319,9 @@ impl Shield {
         }
         if let Ok(mut slot) = self.documents.write() {
             *slot = Some(Arc::new(documents));
+        }
+        if let Ok(mut slot) = self.popups.write() {
+            *slot = popups;
         }
         self.generation.fetch_add(1, Ordering::AcqRel);
         if let Ok(mut n) = self.named.lock() {
@@ -548,6 +562,16 @@ impl Shield {
         if let Ok(mut n) = self.named.lock() {
             n.engine = None;
         }
+    }
+
+    /// The rule that stops the page at `opener` opening `url` in a new window (a `$popup` rule:
+    /// popunders, ad windows), if one does.
+    pub fn check_popup(&self, url: &str, opener: &str, mode: Mode) -> Option<String> {
+        if mode == Mode::Off || !(url.starts_with("https://") || url.starts_with("http://")) {
+            return None;
+        }
+        let popups = self.popups.read().ok()?.clone()?;
+        popups.blocks(url, opener)
     }
 
     /// Open `host` despite the warning, for the rest of this session.
@@ -918,6 +942,31 @@ news.test##.banner
         assert!(s
             .check_document("https://bad.example/", Mode::Standard)
             .is_none());
+    }
+
+    #[test]
+    fn popup_rules_are_kept_for_new_windows() {
+        let s = shield("||popads.test^$popup\n||ads.test^\n");
+        let page = "https://news.test/";
+        assert!(s
+            .check_popup("https://popads.test/x", page, Mode::Standard)
+            .is_some());
+        assert!(s
+            .check_popup("https://popads.test/x", page, Mode::Off)
+            .is_none());
+        assert!(s
+            .check_popup("https://ads.test/x", page, Mode::Standard)
+            .is_none());
+        // The engine never sees a popup, so the rule blocks nothing else.
+        assert_eq!(
+            s.check(
+                "https://popads.test/x.js",
+                page,
+                RequestKind::Script,
+                Mode::Standard
+            ),
+            Decision::Allow
+        );
     }
 
     #[test]

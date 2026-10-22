@@ -240,6 +240,11 @@ pub(crate) enum BrowserEvent {
         version: String,
         result: Result<PathBuf, String>,
     },
+    /// The earlier version's installer is ready to go back to, or why not
+    RollbackReady {
+        version: String,
+        result: Result<PathBuf, String>,
+    },
     /// From the chrome strip or side panel of a window
     WindowIpc(WindowId, UiToHostMessage),
     /// From a page (already filtered: web content may only send harmless messages)
@@ -340,6 +345,13 @@ pub(crate) enum BrowserEvent {
         tab_id: TabId,
         url: String,
     },
+    /// Byobu stopped a download from a dangerous site; `id` lets the user keep it anyway
+    ShieldBlockedDownload {
+        id: u64,
+        url: String,
+    },
+    /// Byobu stopped a popup tab on its way to a `$popup` address: close it
+    ShieldBlockedPopup(TabId),
     /// The element picker produced a rule for `host`
     ShieldRule {
         host: String,
@@ -961,6 +973,13 @@ struct BrowserApp {
     update_started: bool,
     /// The version whose files were already put in place beside this running copy
     update_staged: Option<String>,
+    launches_path: PathBuf,
+    /// When this run will have lasted long enough not to count as an early close
+    launch_settles: Option<Instant>,
+    /// This version keeps closing just after it starts: the version to offer going back to
+    rollback_offer: Option<String>,
+    /// Going back to that version has started
+    rolling_back: bool,
     /// Tabs from the previous run, waiting for the user's answer (or restored at startup)
     pending_session: Option<shoji_core::userdata::Session>,
     restore_on_start: bool,
@@ -1031,6 +1050,10 @@ impl BrowserApp {
         let restore_on_start = offer && (mode == "always" || after_update);
         let update_memo_path = data_dir.join("update-letter.json");
         let update_memo = update::Memo::load(&update_memo_path);
+        let launches_path = data_dir.join("launches.json");
+        let launches =
+            shoji_core::launches::Launches::start(&launches_path, env!("CARGO_PKG_VERSION"));
+        let rollback_offer = launches.rollback_to().map(str::to_owned);
         let restore_tabs = if offer && !restore_on_start {
             previous.tab_count()
         } else {
@@ -1123,6 +1146,12 @@ impl BrowserApp {
             update_unfold_pending: false,
             update_started: false,
             update_staged: None,
+            launches_path,
+            launch_settles: Some(
+                Instant::now() + Duration::from_secs(shoji_core::launches::SETTLE_SECS),
+            ),
+            rollback_offer,
+            rolling_back: false,
             pending_session,
             restore_on_start,
             session_json: String::new(),
@@ -1319,7 +1348,10 @@ impl BrowserApp {
                 && !self.settings.privacy.ephemeral_default;
             match (&self.tray, keep) {
                 (Some(tray), true) => tray.show(),
-                _ => event_loop.exit(),
+                _ => {
+                    self.settle_launch();
+                    event_loop.exit()
+                }
             }
         }
     }
@@ -1415,6 +1447,7 @@ impl BrowserApp {
 
     /// Save the session and leave the event loop (tray menu, or the installer's `--quit`).
     fn quit(&mut self, event_loop: &ActiveEventLoop) {
+        self.settle_launch();
         self.history.flush();
         if !self.windows.is_empty() {
             self.write_session(true);
@@ -2186,6 +2219,9 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                     self.push_update();
                 }
             }
+            BrowserEvent::RollbackReady { version, result } => {
+                self.rollback_ready(&version, result)
+            }
             BrowserEvent::WindowIpc(win_id, msg) => self.handle_ipc(win_id, None, msg, event_loop),
             BrowserEvent::TabIpc(tab_id, msg) => {
                 if let Some(win_id) = self.owner(tab_id) {
@@ -2778,6 +2814,24 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                         .load_url(&format!("{INTERNAL_ORIGIN}notice-{}/", tab_id.0));
                 }
             }
+            BrowserEvent::ShieldBlockedDownload { id, url } => {
+                let host = extract_host(&url).unwrap_or_default();
+                let toast = serde_json::json!({
+                    "title": "Download blocked",
+                    "text": format!("{host} is on a list of dangerous sites (malware, phishing or scams)"),
+                    "pose": "tilt",
+                    "ms": 12000,
+                    "actions": [
+                        {"label": "Download anyway", "action": "DownloadAnyway", "payload": {"id": id}},
+                    ],
+                });
+                self.toast(&toast);
+            }
+            BrowserEvent::ShieldBlockedPopup(tab_id) => {
+                if let Some(win_id) = self.owner(tab_id) {
+                    self.close_tab(win_id, tab_id, event_loop);
+                }
+            }
             BrowserEvent::ShieldRule { host, selector } => {
                 let line = format!("{host}##{selector}");
                 self.update_settings(|s| {
@@ -2958,6 +3012,9 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let _doing = crash::doing("about_to_wait");
         self.note_ui_window();
+        if self.launch_settles.is_some_and(|t| Instant::now() >= t) {
+            self.settle_launch();
+        }
         if Instant::now() >= self.next_bounce_clean {
             self.next_bounce_clean = Instant::now() + Duration::from_secs(6 * 3600);
             self.clean_bounce_trackers();
@@ -2998,6 +3055,7 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
             .chain(pop_due)
             .chain(hover_due)
             .chain(warm_due)
+            .chain(self.launch_settles)
             .chain(
                 self.spare
                     .is_none()
