@@ -178,6 +178,16 @@ impl BrowserApp {
                     .unwrap_or(shield::Fp::Standard)
             });
             request_hook = shield::attach(&view, self.shield.clone(), mode_for, fp_for, tab_id);
+            let pages_consent = self.pages.clone();
+            consent::attach(
+                &view,
+                tab_id,
+                Arc::new(move |page: &str| {
+                    pages_consent
+                        .read()
+                        .is_ok_and(|c| c.settings.shield_on(page, "cookie_notices"))
+                }),
+            );
             let pages = self.pages.clone();
             emulated = darkfixes::attach(
                 &view,
@@ -319,7 +329,11 @@ impl BrowserApp {
                 _ => return req.refuse(),
             }
         };
-        let mode = shield::parse_mode(self.settings.shield_mode_for(&req.opener));
+        let mode = if self.settings.shield_on(&req.opener, "popups") {
+            shield::parse_mode(self.settings.shield_mode_for(&req.opener))
+        } else {
+            shoji_byobu::Mode::Off
+        };
         if let Some(rule) = self.shield.check_popup(&url, &req.opener, mode) {
             shield::popup_blocked(req.tab_id, &req.opener, &url, rule);
             return req.refuse();
@@ -419,6 +433,7 @@ impl BrowserApp {
     /// newly created tabs, hide & suspend tabs in inactive workspaces, and show the active tab(s).
     pub(super) fn sync_window_views(&mut self, win_id: WindowId) {
         let mut closing_temp: Vec<Tab> = Vec::new();
+        let mut closing: Vec<Tab> = Vec::new();
         let (window, rect, to_build, removed, inactive_ids, shown) = {
             let Some(win) = self.windows.get_mut(&win_id) else {
                 return;
@@ -442,6 +457,8 @@ impl BrowserApp {
                 if let Some(tab) = win.views.remove(id) {
                     if tab.container.as_deref().is_some_and(is_temp_container) {
                         closing_temp.push(tab);
+                    } else {
+                        closing.push(tab);
                     }
                 }
                 shield::hub().forget_tab(id.0);
@@ -495,6 +512,7 @@ impl BrowserApp {
                 webview::delete_profile(&tab.view);
             }
         }
+        self.forget_closed_tabs(closing);
         for (id, url, container) in to_build {
             let now = shown.contains(&id);
             if let Some(mut tab) = self.build_view(&window, id, &url, rect, now, container) {
@@ -605,6 +623,7 @@ impl BrowserApp {
         for page in [
             "settings",
             "passwords",
+            "extensions",
             "history",
             "bookmarks",
             "downloads",

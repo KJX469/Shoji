@@ -74,6 +74,8 @@ pub enum UiToHostMessage {
     ToggleWorkspacesSidebar,
     /// Start the "hide an element" picker in the active tab
     ShieldPickElement,
+    /// Open a prefilled "Broken site" issue for the active tab
+    ReportBrokenSite,
     /// A Byobu surface asks for fresh state (lists, counters, optionally the request log);
     /// `refresh` also re-checks every filter list now
     ShieldState {
@@ -274,6 +276,23 @@ pub enum UiToHostMessage {
     PermissionResponse {
         permission_id: u64,
         allow: bool,
+    },
+    /// Turn one shield category (`settings::SHIELD_CATEGORIES`) on or off for the active site
+    SetShieldCategory {
+        category: String,
+        on: bool,
+    },
+    /// Pause the shield on the active site, which is `host` (the "Lower shields?" offer)
+    LowerShields {
+        host: String,
+    },
+    /// Delete the active site's cookies and data whenever its last tab closes (or stop)
+    SetForgetOnClose {
+        on: bool,
+    },
+    /// Allow notifications from a site whose request was quietly refused, and reload it
+    AllowQuietPermission {
+        host: String,
     },
     /// Settings & appearance
     OpenSettings,
@@ -653,10 +672,18 @@ pub enum UiToHostMessage {
     ClearSiteData,
     /// How many cookies the page in view is sent; answered with `__siteCookies`
     SiteCookies,
+    /// Whether the site in view may play sound on its own; answered with `__siteAutoplay`
+    SiteAutoplay,
+    /// Let the site in view play sound on its own, or not
+    SetSiteAutoplay {
+        allow: bool,
+    },
     /// Delete the cookies and stored data of the page in view, then reload it
     ClearSiteCookies,
     /// Settings asks for the installed extensions
     ExtensionsQuery,
+    /// The store page wants the downloaded catalog (and a refresh of it)
+    ExtensionsCatalog,
     /// Choose an unpacked extension folder and install it
     AddExtension,
     /// Install an extension from the Chrome Web Store, given its link or id
@@ -665,6 +692,21 @@ pub enum UiToHostMessage {
     },
     RemoveExtension {
         id: String,
+    },
+    /// Put an extension on the toolbar or take it off
+    SetExtensionPinned {
+        id: String,
+        pinned: bool,
+    },
+    /// Turn an installed extension on or off
+    SetExtensionEnabled {
+        id: String,
+        enabled: bool,
+    },
+    /// The puzzle button: the list of extensions, to open one or manage them
+    ExtensionsMenu {
+        x: f64,
+        y: f64,
     },
     /// An extension's toolbar button was clicked; `right` is the button's right edge (logical px)
     ToggleExtensionPopup {
@@ -765,6 +807,12 @@ pub struct SecurityInfo {
     pub is_internal: bool,
     /// Whether this site keeps cookies across sessions (persistent whitelist)
     pub is_persistent: bool,
+    /// The site's cookies and data are deleted when its last tab closes
+    #[serde(default)]
+    pub forget_on_close: bool,
+    /// ... or when Shoji closes
+    #[serde(default)]
+    pub clear_on_exit: bool,
     /// True once live certificate details have been fetched
     pub has_certificate: bool,
     pub subject: String,

@@ -73,6 +73,7 @@ impl BrowserApp {
                     "bookmarks",
                     "downloads",
                     "passwords",
+                    "extensions",
                     "byobu",
                     "settings",
                     "wish",
@@ -351,6 +352,10 @@ impl BrowserApp {
                 }
                 self.close_sidebar(win_id, false);
             }
+            M::ReportBrokenSite => {
+                self.report_broken_site(win_id);
+                self.close_sidebar(win_id, false);
+            }
             M::ShieldState { refresh, log } => {
                 if refresh {
                     shield::hub().refresh(true);
@@ -402,6 +407,40 @@ impl BrowserApp {
             }
             // Dropdowns always float; there is no pinned side panel any more.
             M::PinSidebar { .. } => {}
+            M::SiteAutoplay | M::SetSiteAutoplay { .. } => {
+                let url = self
+                    .windows
+                    .get(&win_id)
+                    .and_then(|w| w.tabs.active_tab())
+                    .map(|t| t.url.clone())
+                    .unwrap_or_default();
+                let Some(host) = extract_host(&url).filter(|_| !url.starts_with("http://shoji."))
+                else {
+                    return;
+                };
+                let host = host.strip_prefix("www.").unwrap_or(&host).to_string();
+                if let M::SetSiteAutoplay { allow } = msg {
+                    self.update_settings(|s| {
+                        s.privacy.autoplay_sites.retain(|h| h != &host);
+                        if allow {
+                            s.privacy.autoplay_sites.push(host.clone());
+                        }
+                    });
+                    // The page picks it up when it loads again.
+                    if let Some(tab) = self.windows.get(&win_id).and_then(|w| w.active()) {
+                        let _ = tab.view.evaluate_script("location.reload()");
+                    }
+                }
+                let json = serde_json::json!({
+                    "blocking": self.settings.privacy.block_autoplay,
+                    "allowed": !self.settings.autoplay_blocked_on(&host),
+                });
+                if let Some(win) = self.windows.get(&win_id) {
+                    win.eval_sidebar(&format!(
+                        "window.__siteAutoplay && window.__siteAutoplay({json})"
+                    ));
+                }
+            }
             M::SiteCookies | M::ClearSiteCookies => {
                 let clear = matches!(msg, M::ClearSiteCookies);
                 let Some(tab) = self.windows.get(&win_id).and_then(|w| w.active()) else {
@@ -573,6 +612,54 @@ impl BrowserApp {
                     self.push_data();
                 }
                 webview::resolve_permission(permission_id, allow)
+            }
+            M::SetShieldCategory { category, on } => {
+                let url = self
+                    .windows
+                    .get(&win_id)
+                    .and_then(|w| w.tabs.active_tab())
+                    .map(|t| t.url.clone())
+                    .unwrap_or_default();
+                if let Some(host) = extract_host(&url).filter(|_| !is_internal(&url)) {
+                    self.update_settings(|s| s.set_site_category(&host, &category, on));
+                    // Like pausing, a change applies from the next load.
+                    self.reload(win_id, false);
+                }
+            }
+            M::LowerShields { host } => {
+                let tab = self.windows.get(&win_id).and_then(|w| w.tabs.active_tab());
+                if tab.and_then(|t| extract_host(&t.url)).as_deref() == Some(host.as_str()) {
+                    let bare = host.strip_prefix("www.").unwrap_or(&host).to_string();
+                    self.update_settings(|s| {
+                        if !s.shield_paused(&bare) {
+                            s.shield.paused_sites.push(bare);
+                        }
+                    });
+                    self.reload(win_id, false);
+                }
+            }
+            M::SetForgetOnClose { on } => {
+                let url = self
+                    .windows
+                    .get(&win_id)
+                    .and_then(|w| w.tabs.active_tab())
+                    .map(|t| t.url.clone())
+                    .unwrap_or_default();
+                if let Some((site, _)) = webview::site_of(&url) {
+                    self.update_settings(|s| s.set_forget_on_close(&site, on));
+                    if let Some(win) = self.windows.get_mut(&win_id) {
+                        win.sidebar_dirty = true;
+                    }
+                }
+            }
+            M::AllowQuietPermission { host } => {
+                // Only for the page that is showing, so a page can't allow itself elsewhere.
+                let tab = self.windows.get(&win_id).and_then(|w| w.tabs.active_tab());
+                if tab.and_then(|t| extract_host(&t.url)).as_deref() == Some(host.as_str()) {
+                    self.site_data.set_permission(&host, "Notifications", true);
+                    self.push_data();
+                    self.reload(win_id, false);
+                }
             }
             M::OpenSettings => self.open_internal(win_id, "settings"),
             M::SaveSettings { patch } => {
@@ -1545,7 +1632,26 @@ impl BrowserApp {
                 }
             }
             M::ExtensionsQuery => self.request_extension_list(),
+            M::ExtensionsCatalog => {
+                self.push_extension_catalog();
+                self.refresh_extension_catalog();
+            }
             M::AddExtension => self.add_extension_from_folder(),
+            M::SetExtensionPinned { id, pinned } => {
+                self.update_settings(|s| {
+                    s.extensions.unpinned.retain(|i| *i != id);
+                    if !pinned {
+                        s.extensions.unpinned.push(id);
+                    }
+                });
+                self.request_extension_list();
+            }
+            M::SetExtensionEnabled { id, enabled } => {
+                if let Some(view) = self.persistent_view() {
+                    webview::set_extension_enabled(view, id, enabled, self.proxy.clone());
+                }
+            }
+            M::ExtensionsMenu { x, y } => self.show_extensions_menu(win_id, x, y),
             M::ToggleExtensionPopup { id, right } => {
                 self.toggle_extension_popup(win_id, &id, right)
             }

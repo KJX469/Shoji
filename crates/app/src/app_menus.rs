@@ -272,6 +272,7 @@ impl BrowserApp {
             ("darkpanel", "Dark website settings…", ""),
             ("settings", "Settings", ""),
             ("passwords", "Passwords", ""),
+            ("extensions", "Extensions", ""),
             ("view-source", "View page source", "Ctrl+U"),
             ("save-page", "Save page as…", "Ctrl+S"),
             ("fullscreen", "Full screen", "F11"),
@@ -626,6 +627,14 @@ impl BrowserApp {
         if let Some(rest) = value.strip_prefix("split-open:") {
             return self.add_new_pane(win_id, Some(rest.to_string()));
         }
+        if let Some(id) = value.strip_prefix("ext-open:") {
+            let right = self
+                .windows
+                .get(&win_id)
+                .and_then(|w| w.anchors.get("ext").copied())
+                .map_or(0.0, |x| x + 16.0);
+            return self.toggle_extension_popup(win_id, id, right);
+        }
         if let Some(rest) = value.strip_prefix("bm:") {
             return self.bookmark_action(win_id, rest, event_loop);
         }
@@ -653,6 +662,7 @@ impl BrowserApp {
             "favourite" => self.handle_ipc(win_id, None, M::ToggleFavourite, event_loop),
             "settings" => self.open_internal(win_id, "settings"),
             "passwords" => self.open_internal(win_id, "passwords"),
+            "extensions" => self.open_internal(win_id, "extensions"),
             "history" => self.handle_command(win_id, Command::History, event_loop),
             "clear-data" => self.handle_command(win_id, Command::ClearData, event_loop),
             "darkpanel" => self.toggle_sidebar(win_id, "dark"),

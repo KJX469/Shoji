@@ -302,6 +302,75 @@ pub fn detect_webview2_runtime() -> Option<String> {
     candidates.pop()
 }
 
+/// The Windows release, as "Windows 11 24H2 (26100.4061)", for bug reports.
+#[cfg(windows)]
+pub fn windows_version() -> String {
+    use windows::core::HSTRING;
+    use windows::Win32::System::Registry::{
+        RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ,
+    };
+    const KEY: &str = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion";
+    let text = |name: &str| -> Option<String> {
+        let mut buf = vec![0u16; 256];
+        let mut len = (buf.len() * 2) as u32;
+        unsafe {
+            RegGetValueW(
+                HKEY_LOCAL_MACHINE,
+                &HSTRING::from(KEY),
+                &HSTRING::from(name),
+                RRF_RT_REG_SZ,
+                None,
+                Some(buf.as_mut_ptr().cast()),
+                Some(&mut len),
+            )
+            .ok()
+            .ok()?;
+        }
+        let chars = (len as usize / 2).saturating_sub(1);
+        Some(String::from_utf16_lossy(&buf[..chars]))
+    };
+    let ubr = {
+        let mut v = 0u32;
+        let mut len = 4u32;
+        unsafe {
+            RegGetValueW(
+                HKEY_LOCAL_MACHINE,
+                &HSTRING::from(KEY),
+                &HSTRING::from("UBR"),
+                RRF_RT_REG_DWORD,
+                None,
+                Some((&mut v as *mut u32).cast()),
+                Some(&mut len),
+            )
+        }
+        .is_ok()
+        .then_some(v)
+    };
+    let build = text("CurrentBuild").unwrap_or_default();
+    describe_windows(&build, text("DisplayVersion").as_deref(), ubr)
+}
+
+#[cfg(not(windows))]
+pub fn windows_version() -> String {
+    "not Windows".into()
+}
+
+/// "Windows 11 24H2 (26100.4061)" from the registry's build, display version and revision.
+/// Windows 11 still calls itself Windows 10 in `ProductName`; its builds start at 22000.
+pub fn describe_windows(build: &str, display: Option<&str>, ubr: Option<u32>) -> String {
+    let Ok(number) = build.parse::<u32>() else {
+        return "Windows (unknown version)".into();
+    };
+    let name = if number >= 22000 {
+        "Windows 11"
+    } else {
+        "Windows 10"
+    };
+    let display = display.map(|d| format!(" {d}")).unwrap_or_default();
+    let ubr = ubr.map(|u| format!(".{u}")).unwrap_or_default();
+    format!("{name}{display} ({build}{ubr})")
+}
+
 /// Verify process elevation status to enforce non-elevated running invariant.
 #[cfg(windows)]
 pub fn is_process_elevated() -> bool {
@@ -370,6 +439,22 @@ mod tests {
             assert!(!is_newer_release(bad, "0.1.0"), "{bad}");
             assert!(!is_newer_release("9.9.9", bad), "{bad}");
         }
+    }
+
+    #[test]
+    fn windows_is_named_from_its_build() {
+        assert_eq!(
+            describe_windows("26100", Some("24H2"), Some(4061)),
+            "Windows 11 24H2 (26100.4061)"
+        );
+        assert_eq!(
+            describe_windows("19045", Some("22H2"), None),
+            "Windows 10 22H2 (19045)"
+        );
+        assert_eq!(
+            describe_windows("", None, None),
+            "Windows (unknown version)"
+        );
     }
 
     #[test]

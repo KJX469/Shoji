@@ -31,6 +31,11 @@ pub const RESOURCES_URL: &str =
 pub const UBO_RESOURCES_URL: &str =
     "https://github.com/KJX469/Shoji/releases/download/byobu-data/ubo-resources.json";
 
+/// Consent-O-Matic's cookie-notice rules (MIT), merged into one file by the `byobu-resources`
+/// workflow from a reviewed, pinned commit. Used to answer notices with "Reject all".
+pub const CONSENT_RULES_URL: &str =
+    "https://github.com/KJX469/Shoji/releases/download/byobu-data/consent-rules.json";
+
 /// Shoji's own fixes (`filters/shoji-fixes.txt` in the repository), published with the Byōbu
 /// data so a broken site or a new ad trick can be fixed for everyone without a release.
 pub const SHOJI_FIXES_URL: &str =

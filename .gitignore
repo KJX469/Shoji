@@ -54,6 +54,7 @@ Crashpad/
 *.local.json
 /scripts/*
 !/scripts/byobu-assemble.mjs
+!/scripts/extension-catalog.mjs
 /docs/*.md
 /crates/byobu/UPSTREAM.json
 /crates/*/examples/

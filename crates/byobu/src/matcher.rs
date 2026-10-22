@@ -243,7 +243,15 @@ fn decide_inner(shared: &Shared, q: &Query) -> Answer {
     let (decision, rule) = shared
         .shield
         .check_request(&q.url, &q.source, q.kind, q.mode, &q.method);
-    let rule = rule.filter(|_| now_ms() < shared.rules_until.load(Ordering::Relaxed));
+    // Rule text comes from an engine kept only while the logger is open.
+    let wanted = now_ms() < shared.rules_until.load(Ordering::Relaxed);
+    if !wanted {
+        shared.shield.forget_rule_names();
+    }
+    let rule = match (wanted, &decision) {
+        (false, _) | (_, Decision::Allow) => None,
+        _ => rule.or_else(|| shared.shield.rule_for(&q.url, &q.source, q.kind, &q.method)),
+    };
     let answer = Answer { decision, rule };
     if answer.decision != Decision::Allow {
         if let Some(rec) = &shared.recorder {
@@ -381,9 +389,13 @@ mod tests {
         let m = Matcher::spawn(shield(), None, None);
         assert_eq!(m.check(q("https://ads.example/x.js")).rule, None);
         m.want_rules(60_000);
-        assert_eq!(
-            m.check(q("https://ads.example/x.js")).rule.as_deref(),
-            Some("||ads.example^")
-        );
+        // The engine with rule text is built on the first ask.
+        let end = Instant::now() + Duration::from_secs(10);
+        let mut rule = None;
+        while rule.is_none() && Instant::now() < end {
+            rule = m.check(q("https://ads.example/x.js")).rule;
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(rule.as_deref(), Some("||ads.example^"));
     }
 }

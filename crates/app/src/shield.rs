@@ -62,10 +62,36 @@ struct Config {
     languages: Vec<String>,
 }
 
+#[derive(Default)]
 struct TabStats {
     blocked: u32,
     replaced: u32,
+    /// Fingerprinting surfaces the page read and got protected values from
+    fingerprinting: Vec<&'static str>,
+    /// Cookie notices answered with "Reject all"
+    notices: u32,
+    /// Popups and popunders stopped
+    popups: u32,
+    /// The address this load is for
+    page: String,
+    /// Reloads of a page on which something was blocked, the last minute's (see
+    /// [`Hub::reset_tab`])
+    reloads: Vec<Instant>,
 }
+
+/// The fingerprinting surfaces pages report reading (see `ui/fingerprint.js`).
+const FP_SURFACES: [&str; 10] = [
+    "canvas",
+    "webgl",
+    "gpu",
+    "audio",
+    "hardware",
+    "devices",
+    "voices",
+    "screen",
+    "fonts",
+    "client-hints",
+];
 
 struct LogEntry {
     t: u64,
@@ -102,6 +128,8 @@ struct Inner {
     dirty: bool,
     /// One-time tokens that authorise the element picker's reply, per tab
     tokens: HashMap<u64, String>,
+    /// Hosts already offered "Lower shields for this site?"
+    offered: std::collections::HashSet<String>,
     /// Last state pushed to each surface, so identical updates are skipped
     synced: HashMap<String, String>,
     updating: bool,
@@ -260,10 +288,7 @@ impl Hub {
         };
         let day = now_ms() / 86_400_000;
         if let Ok(mut h) = self.inner.lock() {
-            let stats = h.tabs.entry(tab).or_insert(TabStats {
-                blocked: 0,
-                replaced: 0,
-            });
+            let stats = h.tabs.entry(tab).or_default();
             match decision {
                 Decision::Block => stats.blocked += 1,
                 _ => stats.replaced += 1,
@@ -359,16 +384,77 @@ impl Hub {
             .store(false, std::sync::atomic::Ordering::Release);
     }
 
-    fn reset_tab(&self, tab: u64) {
+    /// A new page load starts in `tab`. Reloading a page twice within a minute after Byōbu
+    /// blocked something on it often means the page is broken: the host offers to lower the
+    /// shield for the site (once per site and run).
+    fn reset_tab(&self, tab: u64, url: &str) {
+        let mut offer = false;
         if let Ok(mut h) = self.inner.lock() {
+            let mut reloads = Vec::new();
+            if let Some(prev) = h.tabs.get(&tab) {
+                if prev.page == url {
+                    reloads = prev.reloads.clone();
+                    if prev.blocked > 0 {
+                        reloads.push(Instant::now());
+                    }
+                    reloads.retain(|t| t.elapsed() < Duration::from_secs(60));
+                }
+            }
+            if reloads.len() >= 2 {
+                let host = crate::extract_host(url).unwrap_or_default();
+                offer = !host.is_empty() && h.offered.insert(host);
+                reloads.clear();
+            }
             h.tabs.insert(
                 tab,
                 TabStats {
-                    blocked: 0,
-                    replaced: 0,
+                    page: url.to_string(),
+                    reloads,
+                    ..TabStats::default()
                 },
             );
             h.tokens.remove(&tab);
+        }
+        if offer {
+            if let Ok(p) = self.proxy.lock() {
+                if let Some(p) = p.as_ref() {
+                    let _ = p.send_event(BrowserEvent::OfferLowerShields(TabId(tab)));
+                }
+            }
+        }
+        self.touch(tab);
+    }
+
+    /// The page in `tab` read a fingerprinting surface and got protected values.
+    fn note_fingerprinting(&self, tab: u64, what: &str) {
+        let Some(what) = FP_SURFACES.iter().find(|s| **s == what) else {
+            return;
+        };
+        let added = self.inner.lock().is_ok_and(|mut h| {
+            let stats = h.tabs.entry(tab).or_default();
+            let new = !stats.fingerprinting.contains(what);
+            if new {
+                stats.fingerprinting.push(what);
+            }
+            new
+        });
+        if added {
+            self.touch(tab);
+        }
+    }
+
+    /// A cookie notice on the page in `tab` was answered with "Reject all".
+    pub fn note_notice(&self, tab: u64) {
+        if let Ok(mut h) = self.inner.lock() {
+            h.tabs.entry(tab).or_default().notices += 1;
+        }
+        self.touch(tab);
+    }
+
+    /// A popup or popunder from the page in `tab` was stopped.
+    pub fn note_popup(&self, tab: u64) {
+        if let Ok(mut h) = self.inner.lock() {
+            h.tabs.entry(tab).or_default().popups += 1;
         }
         self.touch(tab);
     }
@@ -457,22 +543,29 @@ impl Hub {
             "lists": lists, "log": log, "total": h.total, "week": Self::week(&h),
             "updating": h.updating, "ready": h.ready,
             "stale_days": (h.oldest_age >= STALE_SECS).then_some(h.oldest_age / 86_400),
+            "runtime": RUNTIME_VERSION.get(),
+            "old_runtime": OLD_RUNTIME.load(Ordering::Relaxed),
             "timing": check_times().map(|(p50, p99)| serde_json::json!({"p50": p50, "p99": p99})),
+            "engine_bytes": ENGINE_BYTES.load(Ordering::Relaxed),
         })
         .to_string()
     }
 
-    /// Per-tab summary for the panel and the toolbar button.
-    pub fn tab_json(&self, tab: u64, host: &str, state: &str) -> String {
-        let (blocked, replaced) = self.counts(tab);
-        let (week, total, ready) = self
-            .inner
-            .lock()
-            .map(|h| (Self::week(&h), h.total, h.ready))
-            .unwrap_or((0, 0, false));
+    /// Per-tab summary for the panel and the toolbar button. `on` says which categories protect
+    /// the page (see `shoji_core::settings::SHIELD_CATEGORIES`).
+    pub fn tab_json(&self, tab: u64, host: &str, state: &str, on: serde_json::Value) -> String {
+        let Ok(h) = self.inner.lock() else {
+            return "{}".into();
+        };
+        let empty = TabStats::default();
+        let s = h.tabs.get(&tab).unwrap_or(&empty);
         serde_json::json!({
-            "host": host, "state": state, "blocked": blocked, "replaced": replaced,
-            "week": week, "total": total, "ready": ready,
+            "host": host, "state": state, "blocked": s.blocked, "replaced": s.replaced,
+            "week": Self::week(&h), "total": h.total, "ready": h.ready, "on": on,
+            "counts": {
+                "trackers": s.blocked, "fingerprinting": s.fingerprinting.len(),
+                "cookie_notices": s.notices, "popups": s.popups,
+            },
         })
         .to_string()
     }
@@ -527,6 +620,7 @@ pub fn popup_blocked(opener_tab: TabId, opener: &str, url: &str, rule: String) {
         &Decision::Block,
         Some(rule),
     );
+    hub().note_popup(opener_tab.0);
 }
 
 /// Check where the popup `tab`, opened by the page at `opener`, goes first.
@@ -564,7 +658,28 @@ pub fn init(proxy: EventLoopProxy<BrowserEvent>) {
 
 static CLEAN_LINKS: AtomicBool = AtomicBool::new(true);
 static SEND_GPC: AtomicBool = AtomicBool::new(true);
+
+/// Whether media with sound waits for a click on a page URL (reads the live settings).
+pub type AutoplayFor = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
+/// How autoplay is decided; set once by the host.
+static AUTOPLAY_FOR: OnceLock<AutoplayFor> = OnceLock::new();
+
+pub fn set_autoplay_for(f: AutoplayFor) {
+    let _ = AUTOPLAY_FOR.set(f);
+}
+
+/// Holds back media with sound until the person interacts (see `ui/autoplay.js`).
+const AUTOPLAY_SCRIPT: &str = include_str!("../ui/autoplay.js");
 static HOOK_REQUESTS: AtomicBool = AtomicBool::new(true);
+/// The WebView2 runtime lacks `ICoreWebView2_22`, so frames and workers go unfiltered
+static OLD_RUNTIME: AtomicBool = AtomicBool::new(false);
+static RUNTIME_VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Note the WebView2 runtime version at start, for the Byōbu page.
+pub fn set_runtime_version(version: &str) {
+    let _ = RUNTIME_VERSION.set(version.to_string());
+}
 
 /// Whether tabs need to see their network requests at all: to filter them, or to add the GPC
 /// header. Every hooked request waits on the UI thread, so tabs drop the hook when neither is on.
@@ -601,10 +716,10 @@ pub fn set_request_hook(webview: &WebView, on: bool) {
         };
         return;
     }
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        eprintln!("byobu: this WebView2 runtime can't filter cross-origin iframes and workers")
-    });
+    if !OLD_RUNTIME.swap(true, Ordering::Relaxed) {
+        eprintln!("byobu: this WebView2 runtime can't filter cross-origin iframes and workers");
+        hub().touch(0);
+    }
     let _ = unsafe {
         if on {
             core.AddWebResourceRequestedFilter(
@@ -629,10 +744,15 @@ pub fn apply_settings(s: &ShieldSettings) {
     if !s.hide_cookie_notices {
         disabled.extend(shoji_byobu::sources::COOKIE_LISTS.map(String::from));
     }
+    let social = shoji_byobu::social::rules(shoji_byobu::social::Social {
+        facebook: s.block_facebook_embeds,
+        x: s.block_x_embeds,
+        linkedin: s.block_linkedin_embeds,
+    });
     let new = Config {
         custom: s.custom_lists.clone(),
         disabled,
-        rules: s.custom_rules.clone(),
+        rules: format!("{}\n{social}", s.custom_rules),
         languages: if s.regional_lists {
             display_languages()
         } else {
@@ -757,6 +877,9 @@ const UPDATE_RETRY_SECS: u64 = 600;
 /// Keep the engine fresh: serve the cache at once, check every list at launch and then hourly,
 /// and rebuild whenever a list, a setting or the user's own rules change.
 /// Runs on its own thread; a rebuilt engine is swapped in atomically.
+/// Size of the current Byōbu engine, for the Byōbu page.
+static ENGINE_BYTES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub fn spawn_updater(shield: Shield, dir: PathBuf) {
     start_matcher(&shield);
     let (tx, rx) = mpsc::channel::<bool>();
@@ -822,6 +945,7 @@ pub fn spawn_updater(shield: Shield, dir: PathBuf) {
                             }
                         })
                         .collect();
+                    ENGINE_BYTES.store(shield.engine_bytes(), Ordering::Relaxed);
                     let enabled: Vec<&str> = infos
                         .iter()
                         .filter(|l| l.enabled)
@@ -1026,8 +1150,10 @@ pub fn attach(
                     }
                     return net.respond(&args, &request, &answer);
                 }
-                if handoff() == Handoff::Defer {
-                    // Held until the matcher answers; the answer is applied from the event loop.
+                // Held until the matcher answers; the answer is applied from the event loop.
+                // Measured on 24 sites, this costs the UI thread less than matching here: the
+                // match itself takes 30-75 µs on varied traffic (cold caches on any thread).
+                {
                     let deferral = unsafe { args.GetDeferral()? };
                     let ticket = NEXT_TICKET.with(|t| {
                         let n = t.get() + 1;
@@ -1050,16 +1176,7 @@ pub fn attach(
                     });
                     m.submit(query(key.0), ticket);
                     phases.mark("defer");
-                    return Ok(());
                 }
-                let answer = m.check(query(key.0.clone()));
-                phases.mark("match");
-                top_target
-                    .borrow_mut()
-                    .decisions
-                    .put(key, generation, answer.clone());
-                net.respond(&args, &request, &answer)?;
-                phases.mark("answer");
                 Ok(())
             })();
             note_check_time(started.elapsed());
@@ -1091,6 +1208,10 @@ pub fn attach(
             let msg = take(msg);
             if let Some(body) = msg.strip_prefix("byobu:rule:") {
                 accept_rule(&core_msg, tab, body);
+                return Ok(());
+            }
+            if let Some(what) = msg.strip_prefix("byobu:fp:") {
+                hub().note_fingerprinting(tab, what);
                 return Ok(());
             }
             let Some(body) = msg.strip_prefix("byobu:") else {
@@ -1177,6 +1298,7 @@ pub fn attach(
         top_target: top_target.clone(),
         hosts: RefCell::default(),
         slot: Arc::default(),
+        tab: tab_id.0,
     });
     if let Ok(core4) = core.cast::<ICoreWebView2_4>() {
         let frames = frames.clone();
@@ -1244,7 +1366,7 @@ pub fn attach(
             }
             top_target.borrow_mut().set(url.clone(), mode_for(&url));
             if url.starts_with("http://") || url.starts_with("https://") {
-                hub().reset_tab(tab_id.0);
+                hub().reset_tab(tab_id.0, &url);
             }
             let mut script = cosmetic_script(&shield, &mode_for, &url);
             if let Some(fp) = fingerprint_script(&url, fp_for(&url)) {
@@ -1264,6 +1386,12 @@ pub fn attach(
             if web && CLEAN_LINKS.load(Ordering::Relaxed) && mode_for(&url) != Mode::Off {
                 script = Some(format!(
                     "{DE_AMP_SCRIPT}\n{}",
+                    script.as_deref().unwrap_or("")
+                ));
+            }
+            if web && AUTOPLAY_FOR.get().is_some_and(|f| f(&url)) {
+                script = Some(format!(
+                    "{AUTOPLAY_SCRIPT}\n{}",
                     script.as_deref().unwrap_or("")
                 ));
             }
@@ -1484,6 +1612,7 @@ struct Frames {
     /// Hosts seen in iframes, oldest first
     hosts: RefCell<VecDeque<String>>,
     slot: Arc<Mutex<DocScript>>,
+    tab: u64,
 }
 
 impl Frames {
@@ -1592,6 +1721,10 @@ fn hook_frame(frame: ICoreWebView2Frame, frames: &Rc<Frames>) {
                 return Ok(());
             }
             let msg = take(msg);
+            if let Some(what) = msg.strip_prefix("byobu:fp:") {
+                hub().note_fingerprinting(frames.tab, what);
+                return Ok(());
+            }
             let Some(body) = msg.strip_prefix("byobu:").filter(|b| b.starts_with('{')) else {
                 return Ok(());
             };
@@ -1976,23 +2109,6 @@ fn start_matcher(shield: &Shield) {
     });
 }
 
-/// How a request waits for the matcher.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Handoff {
-    /// The UI thread waits for the answer
-    Wait,
-    /// The request is held and answered from the event loop
-    Defer,
-}
-
-fn handoff() -> Handoff {
-    static H: OnceLock<Handoff> = OnceLock::new();
-    *H.get_or_init(|| match std::env::var("SHOJI_BYOBU_HANDOFF").as_deref() {
-        Ok("defer") => Handoff::Defer,
-        _ => Handoff::Wait,
-    })
-}
-
 /// What a tab's request handler knows about its page, kept on the UI thread: the page's
 /// address (requests from every frame and worker are matched against it), the shield mode
 /// that applies there, and the decisions made for it.
@@ -2151,13 +2267,16 @@ pub fn apply_answers() {
         let Some(p) = PENDING.with(|q| q.borrow_mut().remove(&ticket)) else {
             continue;
         };
+        phases.mark("apply-find");
         let _ = p.net.respond(&p.args, &p.request, &answer);
+        phases.mark("apply-respond");
         let _ = unsafe { p.deferral.Complete() };
+        phases.mark("apply-complete");
         p.page
             .borrow_mut()
             .decisions
             .put(p.key, p.generation, answer);
-        phases.mark("apply");
+        phases.mark("apply-cache");
         note_check_time(started.elapsed());
         phases.finish();
     }
