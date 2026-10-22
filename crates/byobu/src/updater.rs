@@ -87,6 +87,9 @@ fn check_body(ext: &str, body: &str, old: Option<&str>) -> Result<(), String> {
     Ok(())
 }
 
+/// Cache id of the cookie-notice rules.
+const CONSENT_RULES: &str = "consent-rules";
+
 /// Disk cache of upstream lists and resources, laid out as `<dir>/<id>.<ext>` + `<id>.meta.json`.
 pub struct Updater {
     dir: PathBuf,
@@ -324,6 +327,15 @@ impl Updater {
         for s in &all {
             tally(self.fetch(&s.id, "txt", &s.url, s.refresh_secs, force));
         }
+        // Not part of the engine: a new copy doesn't call for a rebuild, and a failed fetch is
+        // simply tried again on the next pass.
+        let _ = self.fetch(
+            CONSENT_RULES,
+            "json",
+            sources::CONSENT_RULES_URL,
+            12 * 3600,
+            force,
+        );
         (all, r)
     }
 
@@ -348,6 +360,11 @@ impl Updater {
     /// Cached list text for a source, if it has ever been fetched.
     pub fn list_text(&self, id: &str) -> Option<String> {
         fs::read_to_string(self.file(id, "txt")).ok()
+    }
+
+    /// Where the cookie-notice rules are kept once fetched (see [`sources::CONSENT_RULES_URL`]).
+    pub fn consent_rules_path(&self) -> PathBuf {
+        self.file(CONSENT_RULES, "json")
     }
 
     pub fn resources_json(&self) -> Option<String> {

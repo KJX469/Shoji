@@ -62,10 +62,36 @@ struct Config {
     languages: Vec<String>,
 }
 
+#[derive(Default)]
 struct TabStats {
     blocked: u32,
     replaced: u32,
+    /// Fingerprinting surfaces the page read and got protected values from
+    fingerprinting: Vec<&'static str>,
+    /// Cookie notices answered with "Reject all"
+    notices: u32,
+    /// Popups and popunders stopped
+    popups: u32,
+    /// The address this load is for
+    page: String,
+    /// Reloads of a page on which something was blocked, the last minute's (see
+    /// [`Hub::reset_tab`])
+    reloads: Vec<Instant>,
 }
+
+/// The fingerprinting surfaces pages report reading (see `ui/fingerprint.js`).
+const FP_SURFACES: [&str; 10] = [
+    "canvas",
+    "webgl",
+    "gpu",
+    "audio",
+    "hardware",
+    "devices",
+    "voices",
+    "screen",
+    "fonts",
+    "client-hints",
+];
 
 struct LogEntry {
     t: u64,
@@ -102,6 +128,8 @@ struct Inner {
     dirty: bool,
     /// One-time tokens that authorise the element picker's reply, per tab
     tokens: HashMap<u64, String>,
+    /// Hosts already offered "Lower shields for this site?"
+    offered: std::collections::HashSet<String>,
     /// Last state pushed to each surface, so identical updates are skipped
     synced: HashMap<String, String>,
     updating: bool,
@@ -260,10 +288,7 @@ impl Hub {
         };
         let day = now_ms() / 86_400_000;
         if let Ok(mut h) = self.inner.lock() {
-            let stats = h.tabs.entry(tab).or_insert(TabStats {
-                blocked: 0,
-                replaced: 0,
-            });
+            let stats = h.tabs.entry(tab).or_default();
             match decision {
                 Decision::Block => stats.blocked += 1,
                 _ => stats.replaced += 1,
@@ -359,16 +384,77 @@ impl Hub {
             .store(false, std::sync::atomic::Ordering::Release);
     }
 
-    fn reset_tab(&self, tab: u64) {
+    /// A new page load starts in `tab`. Reloading a page twice within a minute after Byōbu
+    /// blocked something on it often means the page is broken: the host offers to lower the
+    /// shield for the site (once per site and run).
+    fn reset_tab(&self, tab: u64, url: &str) {
+        let mut offer = false;
         if let Ok(mut h) = self.inner.lock() {
+            let mut reloads = Vec::new();
+            if let Some(prev) = h.tabs.get(&tab) {
+                if prev.page == url {
+                    reloads = prev.reloads.clone();
+                    if prev.blocked > 0 {
+                        reloads.push(Instant::now());
+                    }
+                    reloads.retain(|t| t.elapsed() < Duration::from_secs(60));
+                }
+            }
+            if reloads.len() >= 2 {
+                let host = crate::extract_host(url).unwrap_or_default();
+                offer = !host.is_empty() && h.offered.insert(host);
+                reloads.clear();
+            }
             h.tabs.insert(
                 tab,
                 TabStats {
-                    blocked: 0,
-                    replaced: 0,
+                    page: url.to_string(),
+                    reloads,
+                    ..TabStats::default()
                 },
             );
             h.tokens.remove(&tab);
+        }
+        if offer {
+            if let Ok(p) = self.proxy.lock() {
+                if let Some(p) = p.as_ref() {
+                    let _ = p.send_event(BrowserEvent::OfferLowerShields(TabId(tab)));
+                }
+            }
+        }
+        self.touch(tab);
+    }
+
+    /// The page in `tab` read a fingerprinting surface and got protected values.
+    fn note_fingerprinting(&self, tab: u64, what: &str) {
+        let Some(what) = FP_SURFACES.iter().find(|s| **s == what) else {
+            return;
+        };
+        let added = self.inner.lock().is_ok_and(|mut h| {
+            let stats = h.tabs.entry(tab).or_default();
+            let new = !stats.fingerprinting.contains(what);
+            if new {
+                stats.fingerprinting.push(what);
+            }
+            new
+        });
+        if added {
+            self.touch(tab);
+        }
+    }
+
+    /// A cookie notice on the page in `tab` was answered with "Reject all".
+    pub fn note_notice(&self, tab: u64) {
+        if let Ok(mut h) = self.inner.lock() {
+            h.tabs.entry(tab).or_default().notices += 1;
+        }
+        self.touch(tab);
+    }
+
+    /// A popup or popunder from the page in `tab` was stopped.
+    pub fn note_popup(&self, tab: u64) {
+        if let Ok(mut h) = self.inner.lock() {
+            h.tabs.entry(tab).or_default().popups += 1;
         }
         self.touch(tab);
     }
@@ -464,17 +550,21 @@ impl Hub {
         .to_string()
     }
 
-    /// Per-tab summary for the panel and the toolbar button.
-    pub fn tab_json(&self, tab: u64, host: &str, state: &str) -> String {
-        let (blocked, replaced) = self.counts(tab);
-        let (week, total, ready) = self
-            .inner
-            .lock()
-            .map(|h| (Self::week(&h), h.total, h.ready))
-            .unwrap_or((0, 0, false));
+    /// Per-tab summary for the panel and the toolbar button. `on` says which categories protect
+    /// the page (see `shoji_core::settings::SHIELD_CATEGORIES`).
+    pub fn tab_json(&self, tab: u64, host: &str, state: &str, on: serde_json::Value) -> String {
+        let Ok(h) = self.inner.lock() else {
+            return "{}".into();
+        };
+        let empty = TabStats::default();
+        let s = h.tabs.get(&tab).unwrap_or(&empty);
         serde_json::json!({
-            "host": host, "state": state, "blocked": blocked, "replaced": replaced,
-            "week": week, "total": total, "ready": ready,
+            "host": host, "state": state, "blocked": s.blocked, "replaced": s.replaced,
+            "week": Self::week(&h), "total": h.total, "ready": h.ready, "on": on,
+            "counts": {
+                "trackers": s.blocked, "fingerprinting": s.fingerprinting.len(),
+                "cookie_notices": s.notices, "popups": s.popups,
+            },
         })
         .to_string()
     }
@@ -529,6 +619,7 @@ pub fn popup_blocked(opener_tab: TabId, opener: &str, url: &str, rule: String) {
         &Decision::Block,
         Some(rule),
     );
+    hub().note_popup(opener_tab.0);
 }
 
 /// Check where the popup `tab`, opened by the page at `opener`, goes first.
@@ -652,10 +743,15 @@ pub fn apply_settings(s: &ShieldSettings) {
     if !s.hide_cookie_notices {
         disabled.extend(shoji_byobu::sources::COOKIE_LISTS.map(String::from));
     }
+    let social = shoji_byobu::social::rules(shoji_byobu::social::Social {
+        facebook: s.block_facebook_embeds,
+        x: s.block_x_embeds,
+        linkedin: s.block_linkedin_embeds,
+    });
     let new = Config {
         custom: s.custom_lists.clone(),
         disabled,
-        rules: s.custom_rules.clone(),
+        rules: format!("{}\n{social}", s.custom_rules),
         languages: if s.regional_lists {
             display_languages()
         } else {
@@ -1109,6 +1205,10 @@ pub fn attach(
                 accept_rule(&core_msg, tab, body);
                 return Ok(());
             }
+            if let Some(what) = msg.strip_prefix("byobu:fp:") {
+                hub().note_fingerprinting(tab, what);
+                return Ok(());
+            }
             let Some(body) = msg.strip_prefix("byobu:") else {
                 return Ok(());
             };
@@ -1193,6 +1293,7 @@ pub fn attach(
         top_target: top_target.clone(),
         hosts: RefCell::default(),
         slot: Arc::default(),
+        tab: tab_id.0,
     });
     if let Ok(core4) = core.cast::<ICoreWebView2_4>() {
         let frames = frames.clone();
@@ -1260,7 +1361,7 @@ pub fn attach(
             }
             top_target.borrow_mut().set(url.clone(), mode_for(&url));
             if url.starts_with("http://") || url.starts_with("https://") {
-                hub().reset_tab(tab_id.0);
+                hub().reset_tab(tab_id.0, &url);
             }
             let mut script = cosmetic_script(&shield, &mode_for, &url);
             if let Some(fp) = fingerprint_script(&url, fp_for(&url)) {
@@ -1506,6 +1607,7 @@ struct Frames {
     /// Hosts seen in iframes, oldest first
     hosts: RefCell<VecDeque<String>>,
     slot: Arc<Mutex<DocScript>>,
+    tab: u64,
 }
 
 impl Frames {
@@ -1614,6 +1716,10 @@ fn hook_frame(frame: ICoreWebView2Frame, frames: &Rc<Frames>) {
                 return Ok(());
             }
             let msg = take(msg);
+            if let Some(what) = msg.strip_prefix("byobu:fp:") {
+                hub().note_fingerprinting(frames.tab, what);
+                return Ok(());
+            }
             let Some(body) = msg.strip_prefix("byobu:").filter(|b| b.starts_with('{')) else {
                 return Ok(());
             };

@@ -277,6 +277,23 @@ pub enum UiToHostMessage {
         permission_id: u64,
         allow: bool,
     },
+    /// Turn one shield category (`settings::SHIELD_CATEGORIES`) on or off for the active site
+    SetShieldCategory {
+        category: String,
+        on: bool,
+    },
+    /// Pause the shield on the active site, which is `host` (the "Lower shields?" offer)
+    LowerShields {
+        host: String,
+    },
+    /// Delete the active site's cookies and data whenever its last tab closes (or stop)
+    SetForgetOnClose {
+        on: bool,
+    },
+    /// Allow notifications from a site whose request was quietly refused, and reload it
+    AllowQuietPermission {
+        host: String,
+    },
     /// Settings & appearance
     OpenSettings,
     /// Partial settings object, merged into the current settings (see `Settings::apply_patch`)
@@ -773,6 +790,12 @@ pub struct SecurityInfo {
     pub is_internal: bool,
     /// Whether this site keeps cookies across sessions (persistent whitelist)
     pub is_persistent: bool,
+    /// The site's cookies and data are deleted when its last tab closes
+    #[serde(default)]
+    pub forget_on_close: bool,
+    /// ... or when Shoji closes
+    #[serde(default)]
+    pub clear_on_exit: bool,
     /// True once live certificate details have been fetched
     pub has_certificate: bool,
     pub subject: String,

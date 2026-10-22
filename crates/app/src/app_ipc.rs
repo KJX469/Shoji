@@ -612,6 +612,54 @@ impl BrowserApp {
                 }
                 webview::resolve_permission(permission_id, allow)
             }
+            M::SetShieldCategory { category, on } => {
+                let url = self
+                    .windows
+                    .get(&win_id)
+                    .and_then(|w| w.tabs.active_tab())
+                    .map(|t| t.url.clone())
+                    .unwrap_or_default();
+                if let Some(host) = extract_host(&url).filter(|_| !is_internal(&url)) {
+                    self.update_settings(|s| s.set_site_category(&host, &category, on));
+                    // Like pausing, a change applies from the next load.
+                    self.reload(win_id, false);
+                }
+            }
+            M::LowerShields { host } => {
+                let tab = self.windows.get(&win_id).and_then(|w| w.tabs.active_tab());
+                if tab.and_then(|t| extract_host(&t.url)).as_deref() == Some(host.as_str()) {
+                    let bare = host.strip_prefix("www.").unwrap_or(&host).to_string();
+                    self.update_settings(|s| {
+                        if !s.shield_paused(&bare) {
+                            s.shield.paused_sites.push(bare);
+                        }
+                    });
+                    self.reload(win_id, false);
+                }
+            }
+            M::SetForgetOnClose { on } => {
+                let url = self
+                    .windows
+                    .get(&win_id)
+                    .and_then(|w| w.tabs.active_tab())
+                    .map(|t| t.url.clone())
+                    .unwrap_or_default();
+                if let Some((site, _)) = webview::site_of(&url) {
+                    self.update_settings(|s| s.set_forget_on_close(&site, on));
+                    if let Some(win) = self.windows.get_mut(&win_id) {
+                        win.sidebar_dirty = true;
+                    }
+                }
+            }
+            M::AllowQuietPermission { host } => {
+                // Only for the page that is showing, so a page can't allow itself elsewhere.
+                let tab = self.windows.get(&win_id).and_then(|w| w.tabs.active_tab());
+                if tab.and_then(|t| extract_host(&t.url)).as_deref() == Some(host.as_str()) {
+                    self.site_data.set_permission(&host, "Notifications", true);
+                    self.push_data();
+                    self.reload(win_id, false);
+                }
+            }
             M::OpenSettings => self.open_internal(win_id, "settings"),
             M::SaveSettings { patch } => {
                 let bar = self.settings.appearance.bookmarks_bar;

@@ -11,6 +11,7 @@ pub mod matcher;
 pub mod navigation;
 pub mod popups;
 pub mod shield;
+pub mod social;
 pub mod sources;
 pub mod updater;
 

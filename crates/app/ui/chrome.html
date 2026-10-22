@@ -102,7 +102,12 @@
     #omnibox::placeholder { color: var(--ink-3); }
     #omnibox:hover { border-color: var(--line); }
     #omnibox:focus { background: var(--surface); border-color: var(--accent); box-shadow: 0 0 0 3px var(--tint-soft); }
-    .zoom { position: absolute; right: 32px; display: flex; align-items: center; height: 22px; border-radius: 11px; background: var(--hover); font-size: 11px; color: var(--ink-2); overflow: hidden; }
+    .marks { position: absolute; right: 32px; display: flex; align-items: center; gap: 4px; }
+    .quiet { display: grid; place-items: center; width: 24px; height: 22px; border-radius: 11px; color: var(--ink-2); }
+    .quiet[hidden] { display: none; }
+    .quiet:hover { background: var(--hover); color: var(--ink); }
+    .quiet svg.i { width: 14px; height: 14px; }
+    .zoom { display: flex; align-items: center; height: 22px; border-radius: 11px; background: var(--hover); font-size: 11px; color: var(--ink-2); overflow: hidden; }
     .zoom[hidden] { display: none; }
     .zoom button { height: 100%; padding: 0 7px; font-variant-numeric: tabular-nums; }
     .zoom button:hover { background: var(--press); color: var(--ink); }
@@ -443,10 +448,15 @@
       <input id="omnibox" type="text" spellcheck="false" autocomplete="off" aria-label="Address and search"
              placeholder="Search {{SEARCH_ENGINE_NAME}} or type a URL" onkeydown="omniKey(event)"
              oninput="curOmni = this; omniInput()" onfocus="omniFocus(this)" onblur="omniBlur(this)">
+      <div class="marks">
+      <button class="quiet" id="quietMark" hidden onclick="allowQuiet()" aria-label="Notifications blocked">
+        <svg class="i" viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20a2 2 0 0 0 4 0"/><path d="M4 4l16 16"/></svg>
+      </button>
       <div class="zoom" id="zoom" hidden onmouseenter="this.classList.add('expanded')" onmouseleave="this.classList.remove('expanded')">
         <button class="step" onclick="post('ZoomOut')" title="Zoom out (Ctrl+-)">−</button>
         <button onclick="post('ZoomReset')" id="zoomReset" title="Reset zoom (Ctrl+0)">100%</button>
         <button class="step" onclick="post('ZoomIn')" title="Zoom in (Ctrl++)">+</button>
+      </div>
       </div>
     </div>
 
@@ -1103,6 +1113,7 @@
       const container = $('tabs');
       const switched = activeTabId !== state_.active_tab_id;
       activeTabId = state_.active_tab_id;
+      syncQuiet();
       const groupById = new Map(state.groups.map(g => [g.id, g]));
       const ctrById = new Map((state.containers || []).map(c => [c.id, c]));
       // Rebuild the strip order: group chips, lone tabs, and one pill per split group.
@@ -1553,6 +1564,30 @@
     }
     window.__toggleFindBar = toggleFindBar;
     window.__syncFindResult = d => setText($('findCount'), d.total > 0 ? `${d.current} of ${d.total}` : '0/0');
+
+    /* Notification requests refused without a prompt: a mark in the address bar, per tab, until
+       the tab leaves the site. Clicking it allows them and reloads the page. */
+    const quiet = new Map();
+    window.__quietPermission = d => { quiet.set(d.tab, d.host); syncQuiet(); };
+    function syncQuiet() {
+      const tab = state.tabs.find(t => t.id === activeTabId);
+      const host = tab ? hostOf(tab.url) : '';
+      for (const [id, h] of quiet) {
+        const t = state.tabs.find(x => x.id === id);
+        if (!t || hostOf(t.url) !== h.replace(/^www\./, '')) quiet.delete(id);
+      }
+      const mark = $('quietMark');
+      const h = quiet.get(activeTabId);
+      mark.hidden = !h || !host;
+      if (h) mark.title = `Notifications from ${h} were blocked because the page asked without being clicked. Click to allow them`;
+    }
+    function allowQuiet() {
+      const h = quiet.get(activeTabId);
+      if (!h) return;
+      quiet.delete(activeTabId);
+      syncQuiet();
+      post('AllowQuietPermission', { host: h });
+    }
 
     /* Permission tray */
     let pendingPermission = null;
