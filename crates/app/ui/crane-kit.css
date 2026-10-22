@@ -96,6 +96,8 @@
 
 /* A page left alone rests (Pet.rest): everything that loops holds still until it is touched. */
 body.resting .pet, body.resting .pet path, body.resting .zzz { animation-play-state: paused !important; }
+/* Battery saver: no crane animation at all. */
+.low-power .pet, .low-power .pet path, .low-power .zzz { animation: none !important; }
 
 @media (prefers-reduced-motion: reduce) {
   .pet, .pet path, .zzz { animation: none !important; }

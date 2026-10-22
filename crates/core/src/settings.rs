@@ -174,6 +174,10 @@ pub struct ShieldSettings {
     pub clean_links: bool,
     /// Tell sites not to sell or share your data (Global Privacy Control)
     pub send_gpc: bool,
+    /// Hide cookie notices (EasyList Cookie and uBlock's cookie-notice lists)
+    pub hide_cookie_notices: bool,
+    /// Follow the regional lists for Windows' display language
+    pub regional_lists: bool,
 }
 
 impl Default for ShieldSettings {
@@ -186,6 +190,8 @@ impl Default for ShieldSettings {
             custom_rules: String::new(),
             clean_links: true,
             send_gpc: true,
+            hide_cookie_notices: true,
+            regional_lists: true,
         }
     }
 }
@@ -523,7 +529,7 @@ impl Default for PrivacySettings {
 impl Default for PerformanceSettings {
     fn default() -> Self {
         Self {
-            sleep_after_secs: 300,
+            sleep_after_secs: 30,
             run_in_background: true,
             auto_update: true,
             beta_updates: false,
