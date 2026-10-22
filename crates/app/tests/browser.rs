@@ -396,7 +396,7 @@ fn downloads_from_dangerous_sites_are_stopped() {
         "downloads",
         &url,
         Options {
-            settings: shield_settings(&["||files.test/setup.exe$document"]),
+            settings: shield_settings(&["||files.test^*/setup.exe$document"]),
             ..Default::default()
         },
     );
@@ -410,7 +410,7 @@ fn downloads_from_dangerous_sites_are_stopped() {
     let mut chrome = shoji.chrome();
     assert!(
         chrome.wait_for(
-            "document.getElementById('toastTitle').textContent==='Download blocked'",
+            "document.getElementById('toastTitle')?.textContent==='Download blocked'",
             Duration::from_secs(10)
         ),
         "no blocked-download notice"
