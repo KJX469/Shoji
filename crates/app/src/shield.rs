@@ -566,6 +566,19 @@ pub fn init(proxy: EventLoopProxy<BrowserEvent>) {
 
 static CLEAN_LINKS: AtomicBool = AtomicBool::new(true);
 static SEND_GPC: AtomicBool = AtomicBool::new(true);
+
+/// Whether media with sound waits for a click on a page URL (reads the live settings).
+pub type AutoplayFor = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
+/// How autoplay is decided; set once by the host.
+static AUTOPLAY_FOR: OnceLock<AutoplayFor> = OnceLock::new();
+
+pub fn set_autoplay_for(f: AutoplayFor) {
+    let _ = AUTOPLAY_FOR.set(f);
+}
+
+/// Holds back media with sound until the person interacts (see `ui/autoplay.js`).
+const AUTOPLAY_SCRIPT: &str = include_str!("../ui/autoplay.js");
 static HOOK_REQUESTS: AtomicBool = AtomicBool::new(true);
 /// The WebView2 runtime lacks `ICoreWebView2_22`, so frames and workers go unfiltered
 static OLD_RUNTIME: AtomicBool = AtomicBool::new(false);
@@ -1267,6 +1280,12 @@ pub fn attach(
             if web && CLEAN_LINKS.load(Ordering::Relaxed) && mode_for(&url) != Mode::Off {
                 script = Some(format!(
                     "{DE_AMP_SCRIPT}\n{}",
+                    script.as_deref().unwrap_or("")
+                ));
+            }
+            if web && AUTOPLAY_FOR.get().is_some_and(|f| f(&url)) {
+                script = Some(format!(
+                    "{AUTOPLAY_SCRIPT}\n{}",
                     script.as_deref().unwrap_or("")
                 ));
             }

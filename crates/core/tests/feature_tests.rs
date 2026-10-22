@@ -505,3 +505,29 @@ fn one_bad_setting_keeps_the_rest_and_the_bad_file_is_kept() {
     assert!(!cut.first_run_complete);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn dns_over_https_choices_map_to_engine_modes() {
+    use shoji_core::settings::Settings;
+    let mut s = Settings::default();
+    assert_eq!(s.privacy.doh(), ("automatic", String::new()));
+    assert!(s.apply_patch(&serde_json::json!({"privacy": {"dns_over_https": "quad9"}})));
+    assert_eq!(
+        s.privacy.doh(),
+        ("secure", "https://dns.quad9.net/dns-query".into())
+    );
+    // A custom resolver must be an https address; anything else falls back to automatic.
+    assert!(s.apply_patch(&serde_json::json!({"privacy": {
+        "dns_over_https": "custom", "dns_over_https_url": "http://plain.example/dns-query"}})));
+    assert_eq!(s.privacy.doh().0, "automatic");
+    assert!(s.apply_patch(&serde_json::json!({"privacy": {
+        "dns_over_https_url": " https://doh.example/dns-query "}})));
+    assert_eq!(
+        s.privacy.doh(),
+        ("secure", "https://doh.example/dns-query".into())
+    );
+    assert!(s.apply_patch(&serde_json::json!({"privacy": {"dns_over_https": "bogus"}})));
+    assert_eq!(s.privacy.dns_over_https, "automatic");
+    assert!(s.apply_patch(&serde_json::json!({"privacy": {"dns_over_https": "off"}})));
+    assert_eq!(s.privacy.doh().0, "off");
+}

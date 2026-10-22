@@ -1101,6 +1101,15 @@ impl BrowserApp {
         shield.uncloak_with(shoji_byobu::Uncloaker::spawn(Box::new(dns_win::resolve)));
         shield::init(proxy.clone());
         shield::apply_settings(&settings.shield);
+        {
+            let pages = pages.clone();
+            shield::set_autoplay_for(Arc::new(move |page: &str| {
+                pages
+                    .read()
+                    .map(|c| c.settings.autoplay_blocked_on(page))
+                    .unwrap_or(true)
+            }));
+        }
         darkfixes::set_enabled(settings.dark_needed());
         shield::spawn_updater(shield.clone(), data_dir.join("byobu"));
         Self {
@@ -3292,6 +3301,28 @@ pub(crate) fn startup_mark(label: &'static str) {
     eprintln!("startup {ms:>6} ms  {label}");
 }
 
+/// Put the DNS-over-HTTPS choice into the engine's `Local State` (`dns_over_https.mode` and
+/// `.templates`), keeping everything else the engine stored there.
+fn set_engine_doh(engine_dir: &std::path::Path, settings: &Settings) {
+    let path = engine_dir.join("Local State");
+    let mut state = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .filter(|v| v.is_object())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let (mode, template) = settings.privacy.doh();
+    let want = serde_json::json!({ "mode": mode, "templates": template });
+    if state.get("dns_over_https") == Some(&want) {
+        return;
+    }
+    state["dns_over_https"] = want;
+    let _ = std::fs::create_dir_all(engine_dir);
+    let tmp = path.with_extension("shoji-tmp");
+    if std::fs::write(&tmp, state.to_string()).is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     STARTED.get_or_init(Instant::now);
     // Test runners (CI's are elevated) may run a debug build anyway; release builds never do.
@@ -3386,6 +3417,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         startup_settings.extensions.enabled,
         std::sync::atomic::Ordering::Relaxed,
     );
+    // DNS over HTTPS is an engine preference (no switch for it works in WebView2): set it in the
+    // profile's `Local State` before the engine reads it.
+    set_engine_doh(&webview_data.join("EBWebView"), &startup_settings);
     // Engine switches go through the engine's creation options: some machines (elevated ones,
     // CI's among them) ignore WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS. Switches given there are
     // passed on the same way.
