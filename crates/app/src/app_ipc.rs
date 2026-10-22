@@ -31,7 +31,9 @@ impl BrowserApp {
                 self.push_extension_buttons(win_id);
                 if self.settings.first_run_complete {
                     self.greet_after_update();
-                    self.mention_crash();
+                    if !self.offer_rollback() {
+                        self.mention_crash();
+                    }
                 }
             }
             M::MinimizeWindow | M::ToggleMaximize | M::StartWindowResize => {
