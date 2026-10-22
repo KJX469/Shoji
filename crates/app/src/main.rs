@@ -1733,7 +1733,9 @@ impl BrowserApp {
         private: bool,
     ) -> Option<WindowId> {
         let id = self.create_window(event_loop, private)?;
+        startup_mark("window and toolbar built");
         self.create_tab(id, url);
+        startup_mark("first tab built");
         if let Some(win) = self.windows.get(&id) {
             win.window.set_visible(true);
         }
@@ -2069,6 +2071,7 @@ impl BrowserApp {
 
 impl ApplicationHandler<BrowserEvent> for BrowserApp {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        startup_mark("event loop running");
         if !self.windows.is_empty() {
             return;
         }
@@ -2631,6 +2634,9 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 }
             }
             BrowserEvent::TabLoading { tab_id, loading } => {
+                if !loading {
+                    startup_mark("first page loaded");
+                }
                 if let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) {
                     if !loading {
                         if let Some(tab) = win.views.get_mut(&tab_id) {
@@ -3266,7 +3272,27 @@ fn forget_remembered(engine_dir: &std::path::Path) {
     }
 }
 
+/// When the process started, for `SHOJI_STARTUP_TIMING`.
+static STARTED: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+
+/// With `SHOJI_STARTUP_TIMING` set, print how long after launch `label` was reached (once).
+pub(crate) fn startup_mark(label: &'static str) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    static SEEN: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+    if !*ON.get_or_init(|| std::env::var_os("SHOJI_STARTUP_TIMING").is_some()) {
+        return;
+    }
+    let Ok(mut seen) = SEEN.lock() else { return };
+    if seen.contains(&label) {
+        return;
+    }
+    seen.push(label);
+    let ms = STARTED.get().map_or(0, |t| t.elapsed().as_millis());
+    eprintln!("startup {ms:>6} ms  {label}");
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    STARTED.get_or_init(Instant::now);
     // Test runners (CI's are elevated) may run a debug build anyway; release builds never do.
     let elevated_ok = cfg!(debug_assertions) && std::env::var_os("SHOJI_ALLOW_ELEVATED").is_some();
     if is_process_elevated() && !elevated_ok {
@@ -3391,6 +3417,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     };
 
+    startup_mark("profile ready");
     let event_loop = EventLoop::<BrowserEvent>::with_user_event().build()?;
     let update_dir = data_dir.clone();
     let mut app = BrowserApp::new(event_loop.create_proxy(), data_dir, engine_version);
@@ -3404,6 +3431,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // An update or reinstall rewrites the shortcuts with the plain white icon; put the chosen
     // colour back (does nothing when they already have it).
     icons::retint_shortcuts(app.data_dir.clone(), app.settings.accent());
+    startup_mark("app state loaded");
     app.update_tx = Some(update::spawn_checker(event_loop.create_proxy(), update_dir));
     update::sweep_old_files();
     event_loop.run_app(&mut app)?;
