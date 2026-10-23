@@ -7,7 +7,9 @@
   if (host !== 'chromewebstore.google.com' && host !== 'chrome.google.com') return;
   addEventListener('click', e => {
     if (!e.isTrusted || !/\/detail\//.test(location.pathname)) return;
-    const b = e.target && e.target.closest && e.target.closest('button, [role="button"]');
+    // The store redraws the button between press and release, so the click can land on its wrapper.
+    const t = e.target;
+    const b = t && t.closest && (t.closest('button, [role="button"]') || t.querySelector('button, [role="button"]'));
     if (!b || !/chrome/i.test(b.textContent || '') || /remove/i.test(b.textContent || '')) return;
     e.preventDefault();
     e.stopImmediatePropagation();
