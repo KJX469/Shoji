@@ -45,7 +45,7 @@ jobs:
           }
           exit 0
       - name: Browser tests and blocking score
-        run: cargo test -p shoji --test browser --test score --test recovery --test flags --locked -- --nocapture
+        run: cargo test -p shoji --test browser --test score --test recovery --test flags --test a11y --locked -- --nocapture
 
   portable:
     runs-on: ubuntu-latest

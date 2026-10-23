@@ -573,6 +573,18 @@
       toast('Saved');
     }
 
+    // A row's switch or menu is named by the row's title, so screen readers say what it is for.
+    function nameControls(root) {
+      for (const c of root.querySelectorAll('.row input, .row select, .row textarea')) {
+        if (c.labels && c.labels.length && [...c.labels].some(l => l.textContent.trim())) continue;
+        if (c.getAttribute('aria-label') || c.getAttribute('aria-labelledby')) continue;
+        const row = c.closest('.row');
+        const title = row && row.querySelector('.what b');
+        if (title && title.textContent.trim()) c.setAttribute('aria-label', title.textContent.trim());
+      }
+    }
+    nameControls(document);
+    new MutationObserver(() => nameControls(document)).observe(document.body, { childList: true, subtree: true });
     for (const el of document.querySelectorAll('[data-path]')) {
       const value = get(S, el.dataset.path);
       if (el.type === 'checkbox') {
