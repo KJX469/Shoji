@@ -342,6 +342,8 @@ pub struct Shoji {
     pub cdp: u16,
     pub dir: PathBuf,
     real_lists: bool,
+    /// Starts shoji.exe again on the same profile
+    launch: Box<dyn Fn() -> Child + Send + Sync>,
     _turn: MutexGuard<'static, ()>,
 }
 
@@ -407,33 +409,67 @@ impl Shoji {
             args.push(' ');
             args.push_str(&opts.engine_args);
         }
-        let mut cmd = Command::new(&exe);
-        cmd.arg(url)
-            .env("APPDATA", dir.join("appdata"))
-            .env("LOCALAPPDATA", dir.join("local"))
-            .env("SHOJI_UPDATE_API", "http://127.0.0.1:9/none")
-            .env("SHOJI_ALLOW_ELEVATED", "1")
-            .env("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", args)
-            .env_remove("WEBVIEW2_USER_DATA_FOLDER")
-            .stdout(std::fs::File::create(dir.join("out.log")).unwrap())
-            .stderr(std::fs::File::create(dir.join("err.log")).unwrap());
-        for (k, v) in &opts.env {
-            cmd.env(k, v);
-        }
-        if !opts.real_lists {
-            // The updater honours the proxy variables; a dead proxy keeps it to the test's rules.
-            cmd.env("HTTPS_PROXY", "http://127.0.0.1:9")
-                .env("HTTP_PROXY", "http://127.0.0.1:9")
-                .env("ALL_PROXY", "http://127.0.0.1:9");
-        }
-        let child = cmd.spawn().expect("start shoji.exe");
+        let url = url.to_string();
+        let env = opts.env.clone();
+        let real_lists = opts.real_lists;
+        let run_dir = dir.clone();
+        let launch = move || {
+            let dir = &run_dir;
+            let mut cmd = Command::new(&exe);
+            cmd.arg(&url)
+                .env("APPDATA", dir.join("appdata"))
+                .env("LOCALAPPDATA", dir.join("local"))
+                .env("SHOJI_UPDATE_API", "http://127.0.0.1:9/none")
+                .env("SHOJI_ALLOW_ELEVATED", "1")
+                .env("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", &args)
+                .env_remove("WEBVIEW2_USER_DATA_FOLDER")
+                .stdout(std::fs::File::create(dir.join("out.log")).unwrap())
+                .stderr(std::fs::File::create(dir.join("err.log")).unwrap());
+            for (k, v) in &env {
+                cmd.env(k, v);
+            }
+            if !real_lists {
+                // The updater honours the proxy variables; a dead proxy keeps it to the test's rules.
+                cmd.env("HTTPS_PROXY", "http://127.0.0.1:9")
+                    .env("HTTP_PROXY", "http://127.0.0.1:9")
+                    .env("ALL_PROXY", "http://127.0.0.1:9");
+            }
+            cmd.spawn().expect("start shoji.exe")
+        };
+        let child = launch();
         Self {
             child: Mutex::new(child),
+            launch: Box::new(launch),
             cdp,
             dir,
             real_lists: opts.real_lists,
             _turn: turn,
         }
+    }
+
+    /// Quit the way a person does and start again on the same profile.
+    pub fn restart(&self) {
+        let mut child = self.child.lock().unwrap();
+        let _ = Command::new(self.dir.join("shoji.exe"))
+            .arg("--quit")
+            .env("APPDATA", self.dir.join("appdata"))
+            .env("LOCALAPPDATA", self.dir.join("local"))
+            .output();
+        let end = Instant::now() + Duration::from_secs(20);
+        while matches!(child.try_wait(), Ok(None)) && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .output();
+        let _ = child.wait();
+        // The engine's own processes finish writing the profile after the window goes.
+        std::thread::sleep(Duration::from_secs(3));
+        let _ = std::fs::remove_file(
+            self.dir
+                .join("local/Shoji/User Data/EBWebView/DevToolsActivePort"),
+        );
+        *child = (self.launch)();
     }
 
     pub fn data_dir(&self) -> PathBuf {
@@ -632,6 +668,11 @@ pub struct Page {
 }
 
 impl Page {
+    /// Connect to any DevTools target by its WebSocket address.
+    pub fn connect_to(ws_url: &str) -> Option<Self> {
+        Self::connect(ws_url)
+    }
+
     fn connect(ws_url: &str) -> Option<Self> {
         let addr = ws_url.strip_prefix("ws://")?.split('/').next()?.to_string();
         let stream = TcpStream::connect(addr).ok()?;
