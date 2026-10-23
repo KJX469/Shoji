@@ -122,12 +122,25 @@
     }
     return matchMedia('(prefers-color-scheme: dark)').matches;
   };
-  // Under the store's own header, with the page pushed down by the banner's height.
+  // A band across the top, in the page's own colour so nothing scrolls by behind the card, with
+  // the page (and the store's header, which sits in the page) pushed down by its height.
+  const pageColour = () => {
+    for (const e of [document.body, document.documentElement]) {
+      const c = e && getComputedStyle(e).backgroundColor;
+      if (c && !/rgba\(.*,\s*0\)$/.test(c) && c !== 'transparent') return c;
+    }
+    return dark() ? '#202124' : '#fff';
+  };
+  const bandStyle = el('style');
+  shadow.prepend(bandStyle, el('div', { className: 'band' }));
   const place = show => {
-    let top = 0;
-    const h = document.querySelector('header, [role="banner"]');
-    if (h) { const r = h.getBoundingClientRect(); if (r.height > 0 && r.top <= 1) top = Math.round(r.bottom); }
-    root.style.top = (top + 4) + 'px';
+    root.style.top = '0';
+    root.style.height = (BAR + GAP) + 'px';
+    root.style.boxSizing = 'border-box';
+    root.style.paddingTop = '4px';
+    // In the card's own styles: page darkening rewrites colours set on elements of the page.
+    const band = `.band { position: absolute; inset: 0; background: ${pageColour()} } .bar { position: relative; }`;
+    if (bandStyle.textContent !== band) bandStyle.textContent = band;
     document.body && (document.body.style.paddingTop = show ? (BAR + GAP) + 'px' : '');
   };
 
