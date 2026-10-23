@@ -447,6 +447,20 @@ impl Shoji {
         }
     }
 
+    /// Kill the browser outright (a crash, or Task Manager) and start it again on the same profile.
+    pub fn kill_and_start(&self) {
+        let mut child = self.child.lock().unwrap();
+        let _ = Command::new("taskkill")
+            .args(["/T", "/F", "/PID", &child.id().to_string()])
+            .output();
+        let _ = child.wait();
+        let _ = std::fs::remove_file(
+            self.dir
+                .join("local/Shoji/User Data/EBWebView/DevToolsActivePort"),
+        );
+        *child = (self.launch)();
+    }
+
     /// Quit the way a person does and start again on the same profile.
     pub fn restart(&self) {
         let mut child = self.child.lock().unwrap();

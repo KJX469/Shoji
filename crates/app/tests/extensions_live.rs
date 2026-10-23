@@ -446,6 +446,50 @@ fn store_button_logos_and_pins() {
         failures.push("pin lost on restart".to_string());
     }
 
+    // Killed outright, the engine forgets its extensions; Shoji adds them back when it starts.
+    shoji.kill_and_start();
+    let mut strip = chrome(&shoji);
+    let running = wait("the service worker after a kill", 60, || {
+        shoji.targets().into_iter().find(|t| {
+            t["type"] == "service_worker"
+                && t["url"]
+                    .as_str()
+                    .unwrap_or("")
+                    .starts_with(&format!("chrome-extension://{id}/"))
+        })
+    });
+    let button = wait("its toolbar button after a kill", 30, || {
+        on_toolbar(&mut strip, name).then_some(())
+    });
+    eprintln!(
+        "{name}: after a kill, running {} on the toolbar {}",
+        running.is_some(),
+        button.is_some()
+    );
+    if running.is_none() || button.is_none() {
+        failures.push("not back after a kill".to_string());
+    }
+    if wait("the puzzle button after a kill", 30, || {
+        (strip.eval("document.getElementById('btnExt').hidden") == false).then_some(())
+    })
+    .is_some()
+    {
+        strip.click_on("#btnExt");
+        match puzzle_menu(&shoji) {
+            Some(mut menu) => {
+                let row = menu_row(&mut menu, name);
+                eprintln!("{name}: menu row after a kill {row}");
+                if row["logo"] != true {
+                    failures.push("no logo in the menu after a kill".to_string());
+                }
+                menu.call("Input.dispatchKeyEvent", serde_json::json!({ "type": "keyDown", "key": "Escape", "code": "Escape", "windowsVirtualKeyCode": 27 }));
+            }
+            None => failures.push("puzzle menu empty after a kill".to_string()),
+        }
+    } else {
+        failures.push("puzzle button hidden after a kill".to_string());
+    }
+
     // Settings > Extensions: logo and Pin/Unpin.
     strip.eval("window.ipc.postMessage(JSON.stringify({action:'CreateTab',payload:{url:'shoji://settings#extensions'}}))");
     let mut settings = shoji
