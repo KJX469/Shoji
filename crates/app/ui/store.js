@@ -67,7 +67,7 @@
       b.textContent = 'Try again';
     } else {
       $('t').textContent = 'Add to Shoji';
-      $('s').textContent = 'For now, use this button to add extensions from the Chrome Web Store.';
+      $('s').textContent = 'Install extensions in Shoji with this button for now.';
       b.textContent = 'Add to Shoji';
     }
   };

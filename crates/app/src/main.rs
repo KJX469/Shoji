@@ -937,6 +937,8 @@ struct BrowserApp {
     extensions_restored: bool,
     /// Store extensions being added because a Web Store page's button was pressed
     store_installs: HashMap<String, TabId>,
+    /// An install from the store is running (any way of starting one)
+    install_running: std::cell::Cell<bool>,
     /// Where the puzzle menu was opened, to show it again after a pin or unpin
     extension_menu_at: (f64, f64),
     /// The extension popup that last closed by losing focus, and when (a click on its own
@@ -1158,6 +1160,7 @@ impl BrowserApp {
             extension_menu: Vec::new(),
             extension_menu_at: (0.0, 0.0),
             store_installs: HashMap::new(),
+            install_running: std::cell::Cell::new(false),
             pending_removals: Vec::new(),
             extensions_restored: false,
             popup_blurred: None,
