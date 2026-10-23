@@ -1494,3 +1494,11 @@ fn forget_on_close_and_keep_list() {
     assert!(!s.privacy.clear_on_exit);
     assert!(s.permissions.quiet_notifications);
 }
+
+#[test]
+fn a_web_page_may_press_the_stores_add_button_but_not_install_by_id() {
+    use shoji_core::ipc::UiToHostMessage as M;
+    assert!(M::StoreInstall.allowed_from_web_content());
+    assert!(!M::InstallExtension { source: "x".into() }.allowed_from_web_content());
+    assert!(!M::RemoveExtension { id: "x".into() }.allowed_from_web_content());
+}

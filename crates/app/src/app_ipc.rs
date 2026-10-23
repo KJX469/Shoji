@@ -1078,6 +1078,7 @@ impl BrowserApp {
                         },
                         sub: format!("Fill with Shoji · {}", l.host()),
                         color: None,
+                        ..Default::default()
                     })
                     .collect();
                 if items.is_empty() {
@@ -1347,6 +1348,7 @@ impl BrowserApp {
                     label: format!("{}{name}", if *id == current { "● " } else { "" }),
                     sub: String::new(),
                     color: None,
+                    ..Default::default()
                 })
                 .collect();
                 let Some(win) = self.windows.get(&win_id) else {
@@ -1656,6 +1658,16 @@ impl BrowserApp {
                 self.toggle_extension_popup(win_id, &id, right)
             }
             M::InstallExtension { source } => self.install_extension_from_store(&source),
+            M::StoreInstall => {
+                // The extension is the one whose store page the tab is on, never what the
+                // page says.
+                let id = from_tab
+                    .and_then(|t| self.windows.get(&win_id)?.tabs.get_tab_by_id(t))
+                    .and_then(|t| extstore::store_page_id(&t.url));
+                if let Some(id) = id {
+                    self.install_from_store_page(&id);
+                }
+            }
             M::RemoveExtension { id } => {
                 if let Some(view) = self.persistent_view() {
                     webview::remove_extension(view, id, self.proxy.clone());

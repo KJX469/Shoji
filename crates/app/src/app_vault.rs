@@ -227,6 +227,7 @@ impl BrowserApp {
             label,
             sub,
             color: None,
+            ..Default::default()
         };
         let items = vec![
             item("login-save", value, label, host.clone()),

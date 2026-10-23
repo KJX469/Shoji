@@ -12,6 +12,7 @@ fn item(kind: &str, value: String, label: &str, sub: &str, color: Option<String>
         label: label.to_string(),
         sub: sub.to_string(),
         color,
+        ..Default::default()
     }
 }
 

@@ -927,8 +927,12 @@ struct BrowserApp {
     extension_buttons: String,
     /// What each extension's button opens, and whether it is a popup (by extension id)
     extension_popups: HashMap<String, (String, bool)>,
-    /// Extensions the puzzle menu lists, in order: (id, name)
-    extension_menu: Vec<(String, String)>,
+    /// Extensions the puzzle menu lists, in order
+    extension_menu: Vec<app_extensions::ExtensionEntry>,
+    /// Store extensions being added because a Web Store page's button was pressed
+    store_installs: HashSet<String>,
+    /// Where the puzzle menu was opened, to show it again after a pin or unpin
+    extension_menu_at: (f64, f64),
     /// The extension popup that last closed by losing focus, and when (a click on its own
     /// button closes it first; that click must not open it again)
     popup_blurred: Option<(String, Instant)>,
@@ -1147,6 +1151,8 @@ impl BrowserApp {
             extension_buttons: r#"{"buttons":[],"any":false}"#.into(),
             extension_popups: HashMap::new(),
             extension_menu: Vec::new(),
+            extension_menu_at: (0.0, 0.0),
+            store_installs: HashSet::new(),
             popup_blurred: None,
             extensions_asked: std::cell::Cell::new(false),
             extensions_checked: None,
@@ -2843,11 +2849,10 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
             BrowserEvent::ExtensionFetched(result) => match result {
                 Ok(dir) => match self.persistent_view() {
                     Some(view) => webview::add_extension(view, &dir, self.proxy.clone()),
-                    None => self.toast(&serde_json::json!({
-                        "title": "Open a website first.",
-                        "text": "Extensions are added to the browsing profile.",
-                        "pose": "unfold",
-                    })),
+                    None => self.extensions_changed(Some(
+                        "Open a website first: extensions are added to the browsing profile."
+                            .into(),
+                    )),
                 },
                 Err(error) => {
                     let _ = self
@@ -2856,14 +2861,7 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 }
             },
             BrowserEvent::ExtensionsChanged(error) => {
-                if let Some(error) = error {
-                    self.toast(&serde_json::json!({
-                        "title": "That didn't work.",
-                        "text": error,
-                        "pose": "unfold",
-                    }));
-                }
-                self.request_extension_list();
+                self.extensions_changed(error);
             }
             BrowserEvent::TabFocused(tab_id) => {
                 if let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) {

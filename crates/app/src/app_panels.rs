@@ -33,6 +33,7 @@ impl BrowserApp {
                 },
                 sub: t.url.clone(),
                 color: None,
+                ..Default::default()
             })
             .collect();
         items.push(OverlayItem {
@@ -41,6 +42,7 @@ impl BrowserApp {
             label: "A new tab beside this one".to_string(),
             sub: String::new(),
             color: None,
+            ..Default::default()
         });
         let w = (win.width - 40.0).clamp(300.0, 560.0);
         let top = win.chrome_height() + 12.0;

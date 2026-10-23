@@ -53,6 +53,46 @@ impl BrowserApp {
             });
     }
 
+    /// The Web Store page's own button was pressed: add the extension, tell the user how it goes.
+    pub(super) fn install_from_store_page(&mut self, id: &str) {
+        // Switched off: the install says so itself and nothing is left waiting.
+        if EXTENSIONS_ON.load(std::sync::atomic::Ordering::Relaxed)
+            && !self.store_installs.insert(id.to_string())
+        {
+            return;
+        }
+        self.install_extension_from_store(id);
+    }
+
+    /// An add, update or removal finished. Say how an install from a store page ended; a failure
+    /// of any kind is reported, with a way to try again.
+    pub(super) fn extensions_changed(&mut self, error: Option<String>) {
+        let pending: Vec<String> = self.store_installs.drain().collect();
+        match error {
+            Some(error) => {
+                let mut toast = serde_json::json!({
+                    "title": "That didn't work.",
+                    "text": error,
+                    "pose": "unfold",
+                });
+                if let Some(id) = pending.first() {
+                    toast["actions"] = serde_json::json!([{
+                        "label": "Try again", "primary": true,
+                        "action": "InstallExtension", "payload": { "source": id },
+                    }]);
+                }
+                self.toast(&toast);
+            }
+            None if !pending.is_empty() => self.toast(&serde_json::json!({
+                "title": "Added to Shoji.",
+                "text": "Find it under the puzzle piece in the toolbar.",
+                "pose": "unfold",
+            })),
+            None => {}
+        }
+        self.request_extension_list();
+    }
+
     /// Pick an unpacked extension, copy it into the data folder (so moving the original can't
     /// break it) and hand it to the engine.
     pub(super) fn add_extension_from_folder(&self) {
@@ -135,6 +175,18 @@ impl BrowserApp {
     }
 }
 
+/// One installed extension as the puzzle menu lists it.
+pub(super) struct ExtensionEntry {
+    pub id: String,
+    pub name: String,
+    /// Its logo as a `data:` URL
+    pub icon: Option<String>,
+    pub enabled: bool,
+    pub pinned: bool,
+    /// It has a popup or options page to open
+    pub openable: bool,
+}
+
 /// An extension's popup, open under its toolbar button.
 pub(super) struct ExtensionPopup {
     id: String,
@@ -206,7 +258,16 @@ impl BrowserApp {
             let id = item["id"].as_str().unwrap_or("").to_string();
             let name = item["name"].as_str().unwrap_or("").to_string();
             let enabled = item["enabled"].as_bool().unwrap_or(true);
+            let pinned = !self.settings.extensions.unpinned.contains(&id);
             let Some(p) = extstore::find(&pages, &id, &name) else {
+                self.extension_menu.push(ExtensionEntry {
+                    id,
+                    name,
+                    icon: None,
+                    enabled,
+                    pinned,
+                    openable: false,
+                });
                 continue;
             };
             let url =
@@ -214,27 +275,31 @@ impl BrowserApp {
             let (popup, options) = (url(&p.popup), url(&p.options));
             item["popup"] = serde_json::json!(popup);
             item["options"] = serde_json::json!(options);
-            let pinned = !self.settings.extensions.unpinned.contains(&id);
             item["pinned"] = serde_json::json!(pinned);
             item["icon"] = serde_json::json!(p.icon);
-            if !enabled {
-                continue;
-            }
             // Every enabled extension can open: its popup, else its options page. Pinned ones
             // also get a toolbar button.
-            if let Some(target) = popup.clone().or(options) {
+            let target = popup.clone().or(options).filter(|_| enabled);
+            self.extension_menu.push(ExtensionEntry {
+                id: id.clone(),
+                name: name.clone(),
+                icon: p.icon.clone(),
+                enabled,
+                pinned,
+                openable: target.is_some(),
+            });
+            if let Some(target) = target {
                 if pinned {
                     buttons.push(serde_json::json!({
                         "id": id, "name": name, "icon": p.icon, "popup": popup.is_some(),
                     }));
                 }
-                self.extension_menu.push((id.clone(), name.clone()));
                 self.extension_popups.insert(id, (target, popup.is_some()));
             }
         }
         self.extension_buttons = serde_json::json!({
             "buttons": buttons,
-            "any": !self.extension_popups.is_empty(),
+            "any": !self.extension_menu.is_empty(),
         })
         .to_string();
         let ids: Vec<WindowId> = self.windows.keys().copied().collect();
@@ -503,35 +568,122 @@ impl BrowserApp {
 }
 
 impl BrowserApp {
-    /// The puzzle button's menu: every extension that can open, then the manager.
+    /// The puzzle button's menu: every installed extension with its logo, a pin switch and a
+    /// remove button, then the manager. Opens under the button at `x`, `y`.
     pub(super) fn show_extensions_menu(&mut self, win_id: WindowId, x: f64, y: f64) {
-        use shoji_core::ipc::OverlayItem;
-        let item = |value: String, label: String, sub: &str| OverlayItem {
-            kind: "action".into(),
-            value,
-            label,
-            sub: sub.into(),
-            color: None,
-        };
-        let mut items: Vec<OverlayItem> = self
-            .extension_menu
-            .iter()
-            .map(|(id, name)| {
-                let pinned = !self.settings.extensions.unpinned.contains(id);
-                item(
-                    format!("ext-open:{id}"),
-                    name.clone(),
-                    if pinned { "On the toolbar" } else { "" },
-                )
-            })
-            .collect();
-        items.push(item("extensions".into(), "Manage extensions".into(), ""));
+        self.extension_menu_at = (x, y);
+        let items = menu_items(&self.extension_menu);
         let Some(win) = self.windows.get(&win_id) else {
             return;
         };
-        let w = 280.0f64.min(win.width - 8.0);
+        let w = 320.0f64.min(win.width - 8.0);
         let x = (x - w / 2.0).clamp(4.0, (win.width - w - 4.0).max(4.0));
-        let h = items.len() as f64 * 46.0 + 10.0;
-        self.show_overlay(win_id, "menu", items, [x, y.max(30.0), w, h], "", "", "");
+        let y = y.max(30.0);
+        let h = (items.len() as f64 * 46.0 + 10.0).min((win.height - y - 8.0).max(120.0));
+        self.show_overlay(win_id, "menu", items, [x, y, w, h], "", "", "");
+    }
+
+    /// Pin or unpin an extension's toolbar button, from its menu row, and show the menu again.
+    pub(super) fn pin_extension_from_menu(&mut self, win_id: WindowId, id: &str, pinned: bool) {
+        self.update_settings(|s| {
+            s.extensions.unpinned.retain(|i| i != id);
+            if !pinned {
+                s.extensions.unpinned.push(id.to_string());
+            }
+        });
+        if let Some(e) = self.extension_menu.iter_mut().find(|e| e.id == id) {
+            e.pinned = pinned;
+        }
+        self.request_extension_list();
+        let (x, y) = self.extension_menu_at;
+        self.show_extensions_menu(win_id, x, y);
+    }
+}
+
+/// The puzzle menu's rows: each installed extension with its logo, a pin switch and a remove
+/// button, then the manager.
+fn menu_items(entries: &[ExtensionEntry]) -> Vec<shoji_core::ipc::OverlayItem> {
+    use shoji_core::ipc::{OverlayItem, OverlayTool};
+    let tool = |title: &str, value: String, glyph: &str| OverlayTool {
+        title: title.into(),
+        value,
+        glyph: glyph.into(),
+    };
+    let mut items: Vec<OverlayItem> = entries
+        .iter()
+        .map(|e| OverlayItem {
+            kind: "action".into(),
+            value: if e.openable {
+                format!("ext-open:{}", e.id)
+            } else {
+                "extensions".into()
+            },
+            label: e.name.clone(),
+            sub: match (e.enabled, e.pinned) {
+                (false, _) => "Off",
+                (true, true) => "On the toolbar",
+                (true, false) => "",
+            }
+            .into(),
+            // An empty logo still asks for the row's picture slot: the page draws a letter.
+            icon: Some(e.icon.clone().unwrap_or_default()),
+            tools: vec![
+                if e.pinned {
+                    tool(
+                        "Unpin from the toolbar",
+                        format!("ext-pin:0:{}", e.id),
+                        "pinned",
+                    )
+                } else {
+                    tool("Pin to the toolbar", format!("ext-pin:1:{}", e.id), "pin")
+                },
+                tool("Remove", format!("ext-remove:{}", e.id), "remove"),
+            ],
+            ..Default::default()
+        })
+        .collect();
+    items.push(OverlayItem {
+        kind: "action".into(),
+        value: "extensions".into(),
+        label: "Manage extensions".into(),
+        ..Default::default()
+    });
+    items
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(id: &str, pinned: bool, enabled: bool, icon: Option<&str>) -> ExtensionEntry {
+        ExtensionEntry {
+            id: id.into(),
+            name: format!("Ext {id}"),
+            icon: icon.map(String::from),
+            enabled,
+            pinned,
+            openable: enabled,
+        }
+    }
+
+    #[test]
+    fn the_menu_lists_every_extension_with_its_logo_pin_and_remove() {
+        let items = menu_items(&[
+            entry("a", true, true, Some("data:image/png;base64,AA")),
+            entry("b", false, true, None),
+            entry("c", true, false, None),
+        ]);
+        assert_eq!(items.len(), 4);
+        assert_eq!(items[0].icon.as_deref(), Some("data:image/png;base64,AA"));
+        assert_eq!(items[1].icon.as_deref(), Some(""));
+        assert_eq!(items[0].value, "ext-open:a");
+        assert_eq!(items[0].tools[0].value, "ext-pin:0:a");
+        assert_eq!(items[0].tools[0].glyph, "pinned");
+        assert_eq!(items[1].tools[0].value, "ext-pin:1:b");
+        assert_eq!(items[1].tools[0].glyph, "pin");
+        assert_eq!(items[0].tools[1].value, "ext-remove:a");
+        assert_eq!(items[2].sub, "Off");
+        assert_eq!(items[2].value, "extensions");
+        assert_eq!(items[3].label, "Manage extensions");
     }
 }

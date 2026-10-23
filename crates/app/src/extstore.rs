@@ -215,7 +215,7 @@ fn download(id: &str) -> Result<Vec<u8>, String> {
             // once), so go gently.
             std::thread::sleep(Duration::from_millis(500 * u64::from(stalls + 1).min(8)));
         }
-        if started.elapsed() > Duration::from_secs(600) {
+        if started.elapsed() > Duration::from_secs(180) {
             break;
         }
         let mut request = agent.get(&url);
