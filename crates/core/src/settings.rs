@@ -698,6 +698,37 @@ impl Settings {
     }
 
     /// Whether media with sound must wait for a click on `host` (or a page URL).
+    /// What every page's base script needs to apply the user's choices by itself, before the
+    /// page's own scripts run: the switches, and the sites where each protection is off (the same
+    /// sites [`Settings::fingerprint_mode_for`], [`Settings::shield_mode_for`] and
+    /// [`Settings::autoplay_blocked_on`] name). `key` seeds the fingerprinting noise.
+    pub fn page_basics(&self, key: &str) -> serde_json::Value {
+        let off = |category: &str| -> Vec<String> {
+            self.shield
+                .paused_sites
+                .iter()
+                .cloned()
+                .chain(
+                    self.shield
+                        .site_off
+                        .iter()
+                        .filter(|(_, c)| c.iter().any(|c| c == category))
+                        .map(|(site, _)| site.clone()),
+                )
+                .collect()
+        };
+        serde_json::json!({
+            "key": key,
+            "fp": self.privacy.fingerprinting,
+            "fpOff": off("fingerprinting"),
+            "gpc": self.shield.send_gpc,
+            "deamp": self.shield.clean_links && self.shield.mode != "off",
+            "shieldOff": off("trackers"),
+            "autoplay": self.privacy.block_autoplay,
+            "autoplaySites": self.privacy.autoplay_sites,
+        })
+    }
+
     pub fn autoplay_blocked_on(&self, host: &str) -> bool {
         let host = extract_domain(host);
         self.privacy.block_autoplay

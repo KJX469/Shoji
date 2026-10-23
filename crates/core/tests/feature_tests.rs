@@ -531,3 +531,40 @@ fn dns_over_https_choices_map_to_engine_modes() {
     assert!(s.apply_patch(&serde_json::json!({"privacy": {"dns_over_https": "off"}})));
     assert_eq!(s.privacy.doh().0, "off");
 }
+
+#[test]
+fn page_basics_name_the_sites_where_each_protection_is_off() {
+    use shoji_core::settings::Settings;
+    let mut s = Settings::default();
+    s.shield.paused_sites.push("paused.example".into());
+    s.set_site_category("https://www.nofp.example/", "fingerprinting", false);
+    s.set_site_category("https://ads-ok.example/", "trackers", false);
+    s.privacy.autoplay_sites.push("video.example".into());
+    let b = s.page_basics("k");
+    let list = |k: &str| -> Vec<String> {
+        b[k].as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(b["key"], "k");
+    assert_eq!(b["fp"], s.privacy.fingerprinting.as_str());
+    // Every site the native checks treat as off is in the matching list, and no other.
+    for host in [
+        "paused.example",
+        "nofp.example",
+        "ads-ok.example",
+        "other.example",
+    ] {
+        let fp_off = s.fingerprint_mode_for(host) == "off";
+        assert_eq!(list("fpOff").iter().any(|h| h == host), fp_off, "{host}");
+        let shield_off = s.shield_mode_for(host) == "off";
+        assert_eq!(
+            list("shieldOff").iter().any(|h| h == host),
+            shield_off,
+            "{host}"
+        );
+    }
+    assert_eq!(list("autoplaySites"), vec!["video.example".to_string()]);
+}
