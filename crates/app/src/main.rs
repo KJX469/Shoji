@@ -334,6 +334,8 @@ pub(crate) enum BrowserEvent {
     ExtensionPopupSize(WindowId, f64, f64),
     /// A window's extension popup lost focus or closed itself
     ExtensionPopupClosed(WindowId),
+    /// An extension's popup asked for a tab at this address
+    ExtensionOpenTab(WindowId, String),
     /// A window's extension popup lost focus
     ExtensionPopupBlurred(WindowId),
     /// The search engine's suggestions for what was typed in a window's address bar
@@ -927,15 +929,24 @@ struct BrowserApp {
     extension_buttons: String,
     /// What each extension's button opens, and whether it is a popup (by extension id)
     extension_popups: HashMap<String, (String, bool)>,
-    /// Extensions the puzzle menu lists, in order: (id, name)
-    extension_menu: Vec<(String, String)>,
+    /// Extensions the puzzle menu lists, in order
+    extension_menu: Vec<app_extensions::ExtensionEntry>,
+    /// Folders of extensions being removed, deleted once the engine has let go of them
+    pending_removals: Vec<PathBuf>,
+    /// Installed extensions the engine had forgotten were put back, once, at startup
+    extensions_restored: bool,
+    /// Store extensions being added because a Web Store page's button was pressed
+    store_installs: HashMap<String, TabId>,
+    /// An install from the store is running (any way of starting one)
+    install_running: std::cell::Cell<bool>,
+    /// Where the puzzle menu was opened, to show it again after a pin or unpin
+    extension_menu_at: (f64, f64),
     /// The extension popup that last closed by losing focus, and when (a click on its own
     /// button closes it first; that click must not open it again)
     popup_blurred: Option<(String, Instant)>,
     /// When store extensions were last checked for updates
     extensions_checked: Option<Instant>,
     catalog_checked: Option<Instant>,
-    extensions_offered: std::collections::HashSet<String>,
     /// The toolbar has asked the engine for the installed extensions
     extensions_asked: std::cell::Cell<bool>,
     favourites: shoji_core::userdata::Favourites,
@@ -1147,11 +1158,15 @@ impl BrowserApp {
             extension_buttons: r#"{"buttons":[],"any":false}"#.into(),
             extension_popups: HashMap::new(),
             extension_menu: Vec::new(),
+            extension_menu_at: (0.0, 0.0),
+            store_installs: HashMap::new(),
+            install_running: std::cell::Cell::new(false),
+            pending_removals: Vec::new(),
+            extensions_restored: false,
             popup_blurred: None,
             extensions_asked: std::cell::Cell::new(false),
             extensions_checked: None,
             catalog_checked: None,
-            extensions_offered: Default::default(),
             settings,
             settings_path,
             data_dir: data_dir.clone(),
@@ -2368,7 +2383,6 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 history,
                 favicon,
             } => {
-                let reported = url.clone();
                 let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) else {
                     return;
                 };
@@ -2460,10 +2474,6 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 win.ui_dirty |= changed;
                 // A tab that opens straight at a store page never "moves" there, so every report
                 // of the front tab's address is looked at.
-                let front = win.tabs.active_tab_id() == Some(tab_id);
-                if let Some(address) = reported.filter(|_| front) {
-                    self.offer_store_extension(&address);
-                }
                 // A different site: use its remembered zoom (or the default).
                 if let Some((old, new)) = moved {
                     if extract_host(&old) != extract_host(&new) && extract_host(&new).is_some() {
@@ -2783,6 +2793,7 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
             BrowserEvent::ExtensionsListed(json) => {
                 let on = EXTENSIONS_ON.load(std::sync::atomic::Ordering::Relaxed);
                 // Popups open from the toolbar; options pages open as ordinary tabs.
+                self.restore_extensions(&json);
                 let json = self.extensions_listed(&json);
                 self.check_extension_updates();
                 let js = format!(
@@ -2797,6 +2808,7 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
             BrowserEvent::ExtensionPopupSize(win_id, w, h) => {
                 self.size_extension_popup(win_id, w, h)
             }
+            BrowserEvent::ExtensionOpenTab(win_id, url) => self.open_extension_tab(win_id, &url),
             BrowserEvent::ExtensionPopupClosed(win_id) => self.blur_extension_popup(win_id),
             BrowserEvent::ExtensionPopupBlurred(win_id) => self.extension_popup_blurred(win_id),
             BrowserEvent::ExtensionsUpdated(result) => {
@@ -2843,11 +2855,10 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
             BrowserEvent::ExtensionFetched(result) => match result {
                 Ok(dir) => match self.persistent_view() {
                     Some(view) => webview::add_extension(view, &dir, self.proxy.clone()),
-                    None => self.toast(&serde_json::json!({
-                        "title": "Open a website first.",
-                        "text": "Extensions are added to the browsing profile.",
-                        "pose": "unfold",
-                    })),
+                    None => self.extensions_changed(Some(
+                        "Open a website first: extensions are added to the browsing profile."
+                            .into(),
+                    )),
                 },
                 Err(error) => {
                     let _ = self
@@ -2856,14 +2867,7 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 }
             },
             BrowserEvent::ExtensionsChanged(error) => {
-                if let Some(error) = error {
-                    self.toast(&serde_json::json!({
-                        "title": "That didn't work.",
-                        "text": error,
-                        "pose": "unfold",
-                    }));
-                }
-                self.request_extension_list();
+                self.extensions_changed(error);
             }
             BrowserEvent::TabFocused(tab_id) => {
                 if let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) {

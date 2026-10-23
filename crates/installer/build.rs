@@ -1,4 +1,5 @@
-//! Embeds the crane icon (rendered from vector data at build time) as the executable icon.
+//! Embeds the installer's icon (the shoji-screen tile, rendered from vector data at build
+//! time) as the executable icon.
 
 #[cfg(windows)]
 fn main() {
@@ -6,7 +7,7 @@ fn main() {
     let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("shoji.ico");
     std::fs::write(
         &out,
-        shoji_brand::ico(shoji_brand::Accent::default(), &shoji_brand::ICO_SIZES),
+        shoji_brand::setup_ico(shoji_brand::Accent::default(), &shoji_brand::ICO_SIZES),
     )
     .expect("write icon");
 

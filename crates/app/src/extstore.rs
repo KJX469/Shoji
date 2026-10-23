@@ -215,7 +215,7 @@ fn download(id: &str) -> Result<Vec<u8>, String> {
             // once), so go gently.
             std::thread::sleep(Duration::from_millis(500 * u64::from(stalls + 1).min(8)));
         }
-        if started.elapsed() > Duration::from_secs(600) {
+        if started.elapsed() > Duration::from_secs(180) {
             break;
         }
         let mut request = agent.get(&url);
@@ -642,6 +642,21 @@ pub fn find<'a>(pages: &'a [ExtensionPages], id: &str, name: &str) -> Option<&'a
         .or_else(|| pages.iter().find(|p| p.name == name))
 }
 
+/// Folders of installed extensions the engine doesn't list. After a crash or a kill the engine
+/// can forget what it had loaded; the files are all still here. `listed` is (id, name) as the
+/// engine reports them.
+pub fn unlisted_folders(listed: &[(String, String)], pages: &[ExtensionPages]) -> Vec<String> {
+    pages
+        .iter()
+        .filter(|p| {
+            !listed
+                .iter()
+                .any(|(id, name)| *id == p.folder || *name == p.name)
+        })
+        .map(|p| p.folder.clone())
+        .collect()
+}
+
 /// The catalog the store page browses, built weekly into the Byobu data release.
 const CATALOG_URL: &str =
     "https://github.com/KJX469/Shoji/releases/download/byobu-data/extension-catalog.json";
@@ -715,6 +730,26 @@ pub fn refresh_catalog(data_dir: &Path) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extensions_the_engine_forgot_are_found_by_folder_or_name() {
+        let page = |folder: &str, name: &str| ExtensionPages {
+            folder: folder.into(),
+            name: name.into(),
+            ..Default::default()
+        };
+        let pages = [
+            page("aaaa", "One"),
+            page("dist-1a2b", "Two"),
+            page("bbbb", "Three"),
+        ];
+        let listed = [
+            ("aaaa".to_string(), "One".to_string()),
+            ("zzzz".to_string(), "Two".to_string()),
+        ];
+        assert_eq!(unlisted_folders(&listed, &pages), vec!["bbbb".to_string()]);
+        assert!(unlisted_folders(&[], &[]).is_empty());
+    }
 
     #[test]
     fn catalog_entries_are_checked_and_icons_kept_local() {

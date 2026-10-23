@@ -34,6 +34,13 @@
     li .kd { font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); flex-shrink: 0; }
     li.on { background: var(--tint); }
     li:hover:not(.on) { background: var(--hover); }
+    li .ico { width: 24px; height: 24px; flex-shrink: 0; border-radius: 5px; object-fit: contain; }
+    li .ico.none { display: grid; place-items: center; background: var(--tint); color: var(--ink-2); font-weight: 600; font-size: 13px; }
+    li .tool { flex-shrink: 0; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; color: var(--ink-3); }
+    li .tool:hover { background: var(--line); color: var(--ink); }
+    li .tool.on { color: var(--accent); }
+    li .tool.remove:hover { color: var(--danger, #c0392b); }
+    li .tool svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
     .empty { padding: 14px; color: var(--ink-3); text-align: center; }
     body[data-mode-kind="suggest"] li, body[data-mode-kind="menu"] li, body[data-mode-kind="paneadd"] li, body[data-mode-kind="savebm"] li { min-height: 30px; }
     body[data-mode-kind="savebm"] li .kd { text-transform: none; letter-spacing: 0; font-size: 11px; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -49,6 +56,11 @@
       if (window.ipc) window.ipc.postMessage(JSON.stringify({ action, payload }));
     }
     const $ = id => document.getElementById(id);
+    const TOOL_GLYPH = {
+      pin: '<svg viewBox="0 0 24 24"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6zM12 14v7"/></svg>',
+      pinned: '<svg viewBox="0 0 24 24" style="fill:currentColor"><path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6zM12 14v7"/></svg>',
+      remove: '<svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></svg>',
+    };
     const KIND_LABEL = { tab: 'Tab', url: '', search: 'Search', action: 'Action' };
     let mode = 'suggest', all = [], shown = [], sel = -1;
 
@@ -82,7 +94,24 @@
         label.textContent = it.label;
         main.appendChild(label);
         if (it.sub && !saving) { const sub = document.createElement('span'); sub.className = 'sb'; sub.textContent = it.sub; main.appendChild(sub); }
+        if (typeof it.icon === 'string') {
+          // An extension's logo, or its first letter when it has none
+          let ico;
+          if (it.icon) { ico = document.createElement('img'); ico.src = it.icon; ico.alt = ''; ico.className = 'ico'; }
+          else { ico = document.createElement('span'); ico.className = 'ico none'; ico.textContent = (it.label || '?').trim().charAt(0).toUpperCase(); }
+          li.appendChild(ico);
+        }
         li.append(chip, main);
+        for (const t of it.tools || []) {
+          const b = document.createElement('span');
+          b.className = 'tool ' + t.glyph + (t.glyph === 'pinned' ? ' on' : '');
+          b.title = t.title;
+          b.setAttribute('role', 'button');
+          b.setAttribute('aria-label', t.title);
+          b.innerHTML = TOOL_GLYPH[t.glyph] || '';
+          b.onmousedown = e => { e.preventDefault(); e.stopPropagation(); post('OverlayChoose', { kind: 'action', value: t.value }); };
+          li.appendChild(b);
+        }
         if (saving) {
           // "Save to": the folder's parent on the right, a tick on the one it is in now.
           if (it.sub) { const k = document.createElement('span'); k.className = 'kd'; k.textContent = it.sub; li.appendChild(k); }

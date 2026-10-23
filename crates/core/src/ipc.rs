@@ -686,6 +686,17 @@ pub enum UiToHostMessage {
     ExtensionsCatalog,
     /// Choose an unpacked extension folder and install it
     AddExtension,
+    /// The "Add to Chrome" button on a Chrome Web Store page was pressed (the page it came from
+    /// says which extension)
+    StoreInstall,
+    /// A Chrome Web Store page asks where its extension stands (installed or not)
+    StoreState,
+    /// The Remove button on a Chrome Web Store page's card
+    StoreRemove,
+    /// An extension page asked for a tab at `url` (chrome.tabs.create and the like)
+    ExtensionOpen {
+        url: String,
+    },
     /// Install an extension from the Chrome Web Store, given its link or id
     InstallExtension {
         source: String,
@@ -781,12 +792,16 @@ impl UiToHostMessage {
                 | UiToHostMessage::LoginSubmitted { .. }
                 | UiToHostMessage::LoginFieldFocused { .. }
                 | UiToHostMessage::LinkDropped { .. }
+                | UiToHostMessage::StoreInstall
+                | UiToHostMessage::StoreState
+                | UiToHostMessage::StoreRemove
+                | UiToHostMessage::ExtensionOpen { .. }
         )
     }
 }
 
 /// One row of the floating overlay (suggestions, command palette, menus).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct OverlayItem {
     /// What picking it does: "url", "tab", "search", "action"
     pub kind: String,
@@ -797,6 +812,23 @@ pub struct OverlayItem {
     /// Optional colour chip (a crane tone hex)
     #[serde(default)]
     pub color: Option<String>,
+    /// Optional picture shown before the label (a `data:` URL)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// Small buttons at the row's end, each running its own action
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<OverlayTool>,
+}
+
+/// A button at the end of an overlay row.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct OverlayTool {
+    /// Tooltip and accessible name
+    pub title: String,
+    /// The action it runs when pressed
+    pub value: String,
+    /// "pin", "pinned" or "remove": which glyph it shows
+    pub glyph: String,
 }
 
 /// Security and certificate status for the active origin.
