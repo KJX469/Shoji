@@ -931,6 +931,8 @@ struct BrowserApp {
     extension_popups: HashMap<String, (String, bool)>,
     /// Extensions the puzzle menu lists, in order
     extension_menu: Vec<app_extensions::ExtensionEntry>,
+    /// Installed extensions the engine had forgotten were put back, once, at startup
+    extensions_restored: bool,
     /// Store extensions being added because a Web Store page's button was pressed
     store_installs: HashSet<String>,
     /// Where the puzzle menu was opened, to show it again after a pin or unpin
@@ -1155,6 +1157,7 @@ impl BrowserApp {
             extension_menu: Vec::new(),
             extension_menu_at: (0.0, 0.0),
             store_installs: HashSet::new(),
+            extensions_restored: false,
             popup_blurred: None,
             extensions_asked: std::cell::Cell::new(false),
             extensions_checked: None,
@@ -2791,6 +2794,7 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
             BrowserEvent::ExtensionsListed(json) => {
                 let on = EXTENSIONS_ON.load(std::sync::atomic::Ordering::Relaxed);
                 // Popups open from the toolbar; options pages open as ordinary tabs.
+                self.restore_extensions(&json);
                 let json = self.extensions_listed(&json);
                 self.check_extension_updates();
                 let js = format!(

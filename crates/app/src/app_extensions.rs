@@ -334,6 +334,36 @@ impl BrowserApp {
         serde_json::Value::Array(items).to_string()
     }
 
+    /// At startup, load again any extension in the Extensions folder that the engine doesn't
+    /// list (it forgets them after a crash or a kill, and the toolbar button stays hidden).
+    pub(super) fn restore_extensions(&mut self, listed_json: &str) {
+        if !EXTENSIONS_ON.load(std::sync::atomic::Ordering::Relaxed)
+            || std::mem::replace(&mut self.extensions_restored, true)
+        {
+            return;
+        }
+        let Some(view) = self.persistent_view() else {
+            self.extensions_restored = false;
+            return;
+        };
+        let listed: Vec<(String, String)> =
+            serde_json::from_str::<Vec<serde_json::Value>>(listed_json)
+                .unwrap_or_default()
+                .iter()
+                .map(|e| {
+                    (
+                        e["id"].as_str().unwrap_or("").to_string(),
+                        e["name"].as_str().unwrap_or("").to_string(),
+                    )
+                })
+                .collect();
+        let dir = self.data_dir.join("Extensions");
+        for folder in extstore::unlisted_folders(&listed, &extstore::pages(&dir)) {
+            eprintln!("extensions: loading {folder} again, the engine had forgotten it");
+            webview::add_extension(view, &dir.join(folder), self.proxy.clone());
+        }
+    }
+
     /// Check the store for newer versions of installed extensions, at most every six hours.
     pub(super) fn check_extension_updates(&mut self) {
         const EVERY: Duration = Duration::from_secs(6 * 60 * 60);
