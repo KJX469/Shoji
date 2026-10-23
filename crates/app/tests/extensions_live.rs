@@ -128,8 +128,21 @@ fn real_extensions_install_and_open() {
         if worker.is_none() {
             failures.push(format!("{name}: no service worker"));
         }
-        // A welcome page some extensions open after an install takes the front; let it.
-        std::thread::sleep(Duration::from_secs(6));
+        // A welcome page some extensions open after an install takes the front; wait until no
+        // new tab has opened for a few seconds.
+        let settle = Instant::now() + Duration::from_secs(30);
+        let (mut pages, mut still) = (0, Instant::now());
+        while Instant::now() < settle && still.elapsed() < Duration::from_secs(4) {
+            let n = shoji
+                .targets()
+                .iter()
+                .filter(|t| t["type"] == "page")
+                .count();
+            if n != pages {
+                (pages, still) = (n, Instant::now());
+            }
+            std::thread::sleep(Duration::from_millis(300));
+        }
         // Its toolbar button (new extensions start pinned) and the puzzle menu button.
         let mut strip = chrome(&shoji);
         let buttons = wait("its toolbar button", 20, || {
@@ -508,5 +521,156 @@ fn store_button_logos_and_pins() {
         Some(r) if r["logo"] == true && r["buttons"].to_string().contains("Unpin") => {}
         r => failures.push(format!("settings: {r:?}")),
     }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// The card's state once it has settled: shown, title, button.
+fn card_settled(store: &mut Page, want_shown: bool) -> Option<(bool, String, String)> {
+    wait("the card", 15, || {
+        card(store).filter(|c| c.0 == want_shown && (!want_shown || !c.1.is_empty()))
+    })
+    .or_else(|| card(store))
+}
+
+#[test]
+#[ignore = "live Chrome Web Store"]
+fn the_store_card_is_on_every_extension_page() {
+    if !can_run() {
+        return;
+    }
+    let page_of = |n: &str| {
+        let (_, id, slug) = EXTENSIONS.iter().find(|e| e.0 == n).unwrap();
+        format!("https://chromewebstore.google.com/detail/{slug}/{id}")
+    };
+    let shoji = Shoji::start(
+        "ext-card",
+        &page_of("1Password"),
+        Options {
+            local_hosts: false,
+            real_lists: true,
+            ..Default::default()
+        },
+    );
+    let mut failures = Vec::new();
+    let mut store = shoji.page("chromewebstore.google.com");
+    let mut expect = |what: &str,
+                      store: &mut Page,
+                      shown: bool,
+                      title: Option<&str>,
+                      failures: &mut Vec<String>| {
+        let c = card_settled(store, shown);
+        eprintln!("{what}: {c:?}");
+        let ok = match &c {
+            Some((s, t, _)) => *s == shown && title.is_none_or(|w| t == w),
+            None => !shown,
+        };
+        if !ok {
+            failures.push(format!("{what}: {c:?}"));
+        }
+    };
+    expect(
+        "first visit",
+        &mut store,
+        true,
+        Some("Add to Shoji"),
+        &mut failures,
+    );
+    let text = store.eval("(()=>{const h=[...document.documentElement.children].find(e=>e.shadowRoot);return h&&h.shadowRoot.getElementById('s').textContent})()");
+    eprintln!("card text: {text}");
+    std::thread::sleep(Duration::from_secs(20));
+    expect(
+        "still there after 20 s",
+        &mut store,
+        true,
+        Some("Add to Shoji"),
+        &mut failures,
+    );
+    store.call("Page.reload", serde_json::json!({}));
+    std::thread::sleep(Duration::from_secs(4));
+    expect(
+        "after a reload",
+        &mut store,
+        true,
+        Some("Add to Shoji"),
+        &mut failures,
+    );
+    for n in ["Bitwarden", "Grammarly"] {
+        store.goto(&page_of(n));
+        expect(
+            &format!("{n}'s page"),
+            &mut store,
+            true,
+            Some("Add to Shoji"),
+            &mut failures,
+        );
+    }
+    // In-page navigation: a link to another extension on the same page.
+    let link = store.eval("(()=>{const id=location.pathname.split('/').pop();const a=[...document.querySelectorAll('a[href*=\"/detail/\"]')].find(a=>!a.href.includes(id));if(!a)return null;a.scrollIntoView({block:'center'});const r=a.getBoundingClientRect();return [r.x+r.width/2,r.y+r.height/2,a.href]})()");
+    if let Some(l) = link.as_array() {
+        std::thread::sleep(Duration::from_millis(500));
+        let to = l[2].as_str().unwrap_or("").to_string();
+        store.eval("window.__beforeNav=1;(()=>{const id=location.pathname.split('/').pop();[...document.querySelectorAll('a[href*=\"/detail/\"]')].find(a=>!a.href.includes(id)).click()})()");
+        let moved = store.wait_for(
+            &format!(
+                "location.href.startsWith({:?})",
+                to.split('?').next().unwrap()
+            ),
+            Duration::from_secs(10),
+        );
+        let same_doc = store.eval("!!window.__beforeNav") == true;
+        eprintln!("in-page navigation to {to}: moved {moved}, same document {same_doc}");
+        if !moved {
+            failures.push("in-page navigation didn't happen".to_string());
+        }
+        expect(
+            "after in-page navigation",
+            &mut store,
+            true,
+            Some("Add to Shoji"),
+            &mut failures,
+        );
+    } else {
+        failures.push("no link to another extension".to_string());
+    }
+    // Store pages that aren't an extension's.
+    for url in [
+        "https://chromewebstore.google.com/",
+        "https://chromewebstore.google.com/category/extensions",
+        "https://chromewebstore.google.com/search/password",
+    ] {
+        store.goto(url);
+        std::thread::sleep(Duration::from_secs(3));
+        expect(url, &mut store, false, None, &mut failures);
+    }
+    // Back to an extension, add it from the card.
+    store.goto(&page_of("Bitwarden"));
+    expect(
+        "Bitwarden again",
+        &mut store,
+        true,
+        Some("Add to Shoji"),
+        &mut failures,
+    );
+    // The card itself carries the news of an add started from it.
+    press_card(&mut store);
+    wait("the card to say it's installed", 120, || {
+        card(&mut store).filter(|c| c.1 == "Installed in Shoji")
+    });
+    expect(
+        "after adding",
+        &mut store,
+        true,
+        Some("Installed in Shoji"),
+        &mut failures,
+    );
+    store.goto(&page_of("1Password"));
+    store.goto(&page_of("Bitwarden"));
+    expect(
+        "installed, on a later visit",
+        &mut store,
+        true,
+        Some("Installed in Shoji"),
+        &mut failures,
+    );
     assert!(failures.is_empty(), "{failures:#?}");
 }
