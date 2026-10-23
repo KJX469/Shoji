@@ -553,11 +553,11 @@ fn the_store_card_is_on_every_extension_page() {
     );
     let mut failures = Vec::new();
     let mut store = shoji.page("chromewebstore.google.com");
-    let mut expect = |what: &str,
-                      store: &mut Page,
-                      shown: bool,
-                      title: Option<&str>,
-                      failures: &mut Vec<String>| {
+    let expect = |what: &str,
+                  store: &mut Page,
+                  shown: bool,
+                  title: Option<&str>,
+                  failures: &mut Vec<String>| {
         let c = card_settled(store, shown);
         eprintln!("{what}: {c:?}");
         let ok = match &c {
