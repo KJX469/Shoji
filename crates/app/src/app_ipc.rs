@@ -1658,6 +1658,15 @@ impl BrowserApp {
                 self.toggle_extension_popup(win_id, &id, right)
             }
             M::InstallExtension { source } => self.install_extension_from_store(&source),
+            M::ExtensionOpen { url } => {
+                // Only an extension's own page may ask.
+                let from_extension = from_tab
+                    .and_then(|t| self.windows.get(&win_id)?.tabs.get_tab_by_id(t))
+                    .is_some_and(|t| t.url.starts_with("chrome-extension://"));
+                if from_extension {
+                    self.open_extension_tab(win_id, &url);
+                }
+            }
             M::StoreInstall => {
                 // The extension is the one whose store page the tab is on, never what the
                 // page says.

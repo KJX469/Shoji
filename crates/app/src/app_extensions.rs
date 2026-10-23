@@ -93,6 +93,19 @@ impl BrowserApp {
         self.request_extension_list();
     }
 
+    /// An extension's page asked for a tab: open it (web or the extension's own pages only) and
+    /// close the popup it came from.
+    pub(super) fn open_extension_tab(&mut self, win_id: WindowId, url: &str) {
+        if !(url.starts_with("https://")
+            || url.starts_with("http://")
+            || url.starts_with("chrome-extension://"))
+        {
+            return;
+        }
+        self.close_extension_popup(win_id);
+        self.create_tab(win_id, Some(url.to_string()));
+    }
+
     /// Pick an unpacked extension, copy it into the data folder (so moving the original can't
     /// break it) and hand it to the engine.
     pub(super) fn add_extension_from_folder(&self) {
@@ -241,8 +254,20 @@ const POPUP_SIZE_SCRIPT: &str = r#"(() => {
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
 enum PopupMessage {
-    Size { w: f64, h: f64 },
+    Size {
+        w: f64,
+        h: f64,
+    },
     Close(String),
+    Open {
+        action: String,
+        payload: OpenPayload,
+    },
+}
+
+#[derive(serde::Deserialize)]
+struct OpenPayload {
+    url: String,
 }
 
 impl BrowserApp {
@@ -441,11 +466,23 @@ impl BrowserApp {
             .with_background_color(window::page_rgba(dark))
             .with_theme(window::webview_theme(&self.settings.appearance.theme))
             .with_initialization_script(POPUP_SIZE_SCRIPT)
+            .with_initialization_script(pages::EXTENSION_TABS_SCRIPT)
+            // A window the popup asks for becomes a tab.
+            .with_new_window_req_handler({
+                let proxy = self.proxy.clone();
+                move |url, _| {
+                    let _ = proxy.send_event(BrowserEvent::ExtensionOpenTab(win_id, url));
+                    wry::NewWindowResponse::Deny
+                }
+            })
             // The page is the extension's, so the only thing it may say is how big it is.
             .with_ipc_handler(move |req: wry::http::Request<String>| {
                 let event = match serde_json::from_str::<PopupMessage>(req.body()) {
                     Ok(PopupMessage::Size { w, h }) if w.is_finite() && h.is_finite() => {
                         BrowserEvent::ExtensionPopupSize(win_id, w, h)
+                    }
+                    Ok(PopupMessage::Open { action, payload }) if action == "ExtensionOpen" => {
+                        BrowserEvent::ExtensionOpenTab(win_id, payload.url)
                     }
                     Ok(PopupMessage::Close(c)) if c == "close" => {
                         BrowserEvent::ExtensionPopupClosed(win_id)

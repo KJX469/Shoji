@@ -42,6 +42,8 @@ const EXTENSIONS: &str = include_str!("../ui/extensions.html");
 pub const LOGIN_SCRIPT: &str = include_str!("../ui/login.js");
 /// Hands the Chrome Web Store's "Add to Chrome" button to Shoji (see the file's header).
 pub const STORE_SCRIPT: &str = include_str!("../ui/store.js");
+/// Opens what an extension page asks to open (see the file's header).
+pub const EXTENSION_TABS_SCRIPT: &str = include_str!("../ui/extension-tabs.js");
 const SETTINGS: &str = include_str!("../ui/settings.html");
 const NOTICE: &str = include_str!("../ui/notice.html");
 const BYOBU: &str = include_str!("../ui/byobu.html");

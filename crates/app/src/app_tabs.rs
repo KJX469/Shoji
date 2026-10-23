@@ -131,6 +131,7 @@ impl BrowserApp {
         if !internal {
             builder = builder.with_initialization_script(pages::PAGE_INFO_SCRIPT);
             builder = builder.with_initialization_script(pages::STORE_SCRIPT);
+            builder = builder.with_initialization_script(pages::EXTENSION_TABS_SCRIPT);
             // Password manager: report login forms and fields (see ui/login.js).
             if self.settings.privacy.save_passwords
                 && !self.settings.privacy.ephemeral_default
