@@ -17,8 +17,10 @@
   const root = document.createElement('div');
   root.style.cssText = 'all:initial;position:fixed;left:0;right:0;top:76px;z-index:2147483647;display:none;pointer-events:none;justify-content:center';
   const shadow = root.attachShadow({ mode: 'open' });
-  shadow.innerHTML = `
-    <style>
+  // The store's pages only take trusted HTML, so the card is built element by element.
+  const el = (tag, props, ...kids) => { const e = document.createElement(tag); Object.assign(e, props); e.append(...kids); return e; };
+  const style = el('style');
+  style.textContent = `
       .card { pointer-events: auto; display: flex; align-items: center; gap: 16px; box-sizing: border-box; width: min(560px, calc(100vw - 32px)); padding: 14px 18px;
         border-radius: 14px; background: #1f1d1a; color: #f6f1e8; box-shadow: 0 10px 34px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,.08);
         font: 14px/1.35 "Segoe UI", system-ui, sans-serif; }
@@ -31,12 +33,15 @@
       button:disabled { cursor: default; opacity: .7; filter: none; }
       button.quiet { background: rgba(255,255,255,.12); color: #f6f1e8; }
       .err { color: #ffb4a6 !important; }
-    </style>
-    <div class="card" role="region" aria-label="Add to Shoji">
-      <div class="mark" aria-hidden="true">S</div>
-      <div class="text"><b id="t"></b><span id="s"></span></div>
-      <button id="b"></button>
-    </div>`;
+  `;
+  const card = el('div', { className: 'card' },
+    el('div', { className: 'mark', textContent: 'S' }),
+    el('div', { className: 'text' }, el('b', { id: 't' }), el('span', { id: 's' })),
+    el('button', { id: 'b' }));
+  card.setAttribute('role', 'region');
+  card.setAttribute('aria-label', 'Add to Shoji');
+  card.firstChild.setAttribute('aria-hidden', 'true');
+  shadow.append(style, card);
   const $ = id => shadow.getElementById(id);
   let id = '', phase = 'ready', error = '', since = 0;
 
@@ -62,7 +67,7 @@
       b.textContent = 'Try again';
     } else {
       $('t').textContent = 'Add to Shoji';
-      $('s').textContent = 'Install extensions into Shoji with this button.';
+      $('s').textContent = 'For now, use this button to add extensions from the Chrome Web Store.';
       b.textContent = 'Add to Shoji';
     }
   };
