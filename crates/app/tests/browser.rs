@@ -456,3 +456,66 @@ fn removeparam_rules_and_amp_pages_clean_where_you_land() {
         "the AMP page didn't go to its canonical page"
     );
 }
+
+#[test]
+fn every_page_in_a_tab_starts_protected() {
+    if !can_run() {
+        return;
+    }
+    // Each page notes, from its very first script, what was already in place.
+    let page_html = "<script>window.__early=[navigator.globalPrivacyControl===true,!!window.__shojiFp,!!window.__shojiAutoplay]</script><p>page</p><a id=next href=\"/\">next</a>";
+    let server = Arc::new(Server::start(move |hit| {
+        let reply = Reply::html(page_html);
+        if hit.path() == "/cached" {
+            reply.header("Cache-Control", "max-age=3600")
+        } else {
+            reply
+        }
+    }));
+    let shoji = Shoji::start(
+        "base-script",
+        &server.url("site-1.test", "/"),
+        Options::default(),
+    );
+    let mut page = shoji.page("site-1.test");
+    let mut seen = Vec::new();
+    let mut check = |page: &mut Page, how: &str| {
+        page.wait_for("!!window.__early", Duration::from_secs(10));
+        let early = page.eval("JSON.stringify(window.__early)");
+        seen.push(format!("{how} {}: {early}", page.eval("location.host")));
+        assert_eq!(
+            early, "[true,true,true]",
+            "{how}: protections missing at the page's start"
+        );
+    };
+    check(&mut page, "first page");
+    for i in 2..=6 {
+        // New sites in the same tab, the way people get to them.
+        page.goto(&server.url(&format!("site-{i}.test"), "/"));
+        check(&mut page, "new site");
+    }
+    // A link on the page to yet another site (the page navigates itself).
+    page.eval(&format!(
+        "location.href={:?}",
+        server.url("site-7.test", "/")
+    ));
+    std::thread::sleep(Duration::from_millis(300));
+    check(&mut page, "link");
+    for _ in 0..3 {
+        page.eval("history.back()");
+        std::thread::sleep(Duration::from_millis(400));
+        check(&mut page, "back");
+    }
+    page.eval("history.forward()");
+    std::thread::sleep(Duration::from_millis(400));
+    check(&mut page, "forward");
+    page.goto(&server.url("site-8.test", "/cached"));
+    check(&mut page, "cacheable");
+    page.goto(&server.url("site-1.test", "/"));
+    page.goto(&server.url("site-8.test", "/cached"));
+    check(&mut page, "from the cache");
+    page.call("Page.reload", json!({}));
+    std::thread::sleep(Duration::from_millis(400));
+    check(&mut page, "reload");
+    eprintln!("{}", seen.join("\n"));
+}
