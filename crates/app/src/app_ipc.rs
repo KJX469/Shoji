@@ -1078,6 +1078,7 @@ impl BrowserApp {
                         },
                         sub: format!("Fill with Shoji · {}", l.host()),
                         color: None,
+                        ..Default::default()
                     })
                     .collect();
                 if items.is_empty() {
@@ -1347,6 +1348,7 @@ impl BrowserApp {
                     label: format!("{}{name}", if *id == current { "● " } else { "" }),
                     sub: String::new(),
                     color: None,
+                    ..Default::default()
                 })
                 .collect();
                 let Some(win) = self.windows.get(&win_id) else {
@@ -1656,11 +1658,42 @@ impl BrowserApp {
                 self.toggle_extension_popup(win_id, &id, right)
             }
             M::InstallExtension { source } => self.install_extension_from_store(&source),
-            M::RemoveExtension { id } => {
-                if let Some(view) = self.persistent_view() {
-                    webview::remove_extension(view, id, self.proxy.clone());
+            M::ExtensionOpen { url } => {
+                // Only an extension's own page may ask.
+                let from_extension = from_tab
+                    .and_then(|t| self.windows.get(&win_id)?.tabs.get_tab_by_id(t))
+                    .is_some_and(|t| t.url.starts_with("chrome-extension://"));
+                if from_extension {
+                    self.open_extension_tab(win_id, &url);
                 }
             }
+            M::StoreInstall => {
+                // The extension is the one whose store page the tab is on, never what the
+                // page says.
+                let id = from_tab
+                    .and_then(|t| self.windows.get(&win_id)?.tabs.get_tab_by_id(t))
+                    .and_then(|t| extstore::store_page_id(&t.url));
+                if let (Some(id), Some(tab)) = (id, from_tab) {
+                    self.install_from_store_page(&id, tab);
+                }
+            }
+            M::StoreState => {
+                let id = from_tab
+                    .and_then(|t| self.windows.get(&win_id)?.tabs.get_tab_by_id(t))
+                    .and_then(|t| extstore::store_page_id(&t.url));
+                if let (Some(id), Some(tab)) = (id, from_tab) {
+                    self.store_page_state(tab, &id);
+                }
+            }
+            M::StoreRemove => {
+                let id = from_tab
+                    .and_then(|t| self.windows.get(&win_id)?.tabs.get_tab_by_id(t))
+                    .and_then(|t| extstore::store_page_id(&t.url));
+                if let (Some(id), Some(tab)) = (id, from_tab) {
+                    self.remove_from_store_page(&id, tab);
+                }
+            }
+            M::RemoveExtension { id } => self.remove_extension_for_good(&id),
             M::ClearSiteData => {
                 self.site_data.clear();
                 self.push_data();

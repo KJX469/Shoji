@@ -1494,3 +1494,36 @@ fn forget_on_close_and_keep_list() {
     assert!(!s.privacy.clear_on_exit);
     assert!(s.permissions.quiet_notifications);
 }
+
+#[test]
+fn a_web_page_may_press_the_stores_add_button_but_not_install_by_id() {
+    use shoji_core::ipc::UiToHostMessage as M;
+    assert!(M::StoreInstall.allowed_from_web_content());
+    assert!(M::StoreState.allowed_from_web_content());
+    assert!(M::StoreRemove.allowed_from_web_content());
+    assert!(M::ExtensionOpen { url: "x".into() }.allowed_from_web_content());
+    assert!(!M::InstallExtension { source: "x".into() }.allowed_from_web_content());
+    assert!(!M::RemoveExtension { id: "x".into() }.allowed_from_web_content());
+}
+
+#[test]
+fn test_the_chosen_colour_survives_an_update() {
+    let dir = std::env::temp_dir().join(format!("shoji_colour_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("settings.json");
+    // As 0.1.6 left it: an older defaults revision, a field this version dropped, and one that
+    // no longer reads.
+    std::fs::write(
+        &path,
+        r#"{"defaults_rev":3,"first_run_complete":true,
+            "appearance":{"accent":"gold","theme":"dark","gone_field":1,"default_zoom_level":"big"}}"#,
+    )
+    .unwrap();
+    let s = Settings::load_from_path(&path);
+    assert_eq!(s.appearance.accent, "gold");
+    assert_eq!(s.appearance.theme, "dark");
+    // Saved again by the new version: still the user's colour.
+    s.save_to_path(&path).unwrap();
+    assert_eq!(Settings::load_from_path(&path).appearance.accent, "gold");
+    let _ = std::fs::remove_dir_all(&dir);
+}

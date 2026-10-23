@@ -302,8 +302,8 @@ pub fn render_rgba(accent: Accent, size: u32) -> Vec<u8> {
 
 /// The app icon, "kage" (影, shadow): the crane's shadow falling on a lit shoji screen. A
 /// rounded tile of warm paper in a thin wooden frame, crossed by one kumiko bar each way, with
-/// the crane behind it as a soft shadow in the chosen colour. Reads on light and dark taskbars.
-/// The plain crane stays for the notification area and the pages.
+/// the crane behind it as a soft shadow in the chosen colour. The installer's icon; the browser
+/// itself uses the plain crane.
 pub fn render_kage_rgba(accent: Accent, size: u32) -> Vec<u8> {
     const SS: u32 = 4;
     let n = size as usize;
@@ -471,12 +471,21 @@ fn box_blur(src: &[f32], n: usize, r: usize) -> Vec<f32> {
 /// Icon sizes embedded in generated `.ico` files.
 pub const ICO_SIZES: [u32; 7] = [16, 24, 32, 48, 64, 128, 256];
 
-/// Encode the app icon (the [kage](render_kage_rgba) tile) for the given colour as a
+/// Encode the browser's icon (the plain [crane](render_rgba)) for the given colour as a
 /// multi-resolution `.ico` (32-bit BMP entries).
 pub fn ico(accent: Accent, sizes: &[u32]) -> Vec<u8> {
+    encode_ico(render_rgba, accent, sizes)
+}
+
+/// Encode the installer's icon (the [kage](render_kage_rgba) tile) as a multi-resolution `.ico`.
+pub fn setup_ico(accent: Accent, sizes: &[u32]) -> Vec<u8> {
+    encode_ico(render_kage_rgba, accent, sizes)
+}
+
+fn encode_ico(render: fn(Accent, u32) -> Vec<u8>, accent: Accent, sizes: &[u32]) -> Vec<u8> {
     let images: Vec<(u32, Vec<u8>)> = sizes
         .iter()
-        .map(|&s| (s, bmp_entry(&render_kage_rgba(accent, s), s)))
+        .map(|&s| (s, bmp_entry(&render(accent, s), s)))
         .collect();
 
     let mut out = Vec::new();

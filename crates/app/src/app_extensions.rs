@@ -19,6 +19,11 @@ impl BrowserApp {
 
     /// Download an extension from the Chrome Web Store (by link or id) and load it.
     pub(super) fn install_extension_from_store(&self, source: &str) {
+        self.download_extension(source, true);
+    }
+
+    /// `announce`: say the download has started (a store page's card does that itself).
+    fn download_extension(&self, source: &str, announce: bool) {
         let say = |app: &Self, title: &str, text: &str| {
             app.toast(&serde_json::json!({ "title": title, "text": text, "pose": "unfold" }));
         };
@@ -38,11 +43,14 @@ impl BrowserApp {
             );
             return;
         };
-        say(
-            self,
-            "Downloading the extension…",
-            "It is added in a moment.",
-        );
+        self.install_running.set(true);
+        if announce {
+            say(
+                self,
+                "Downloading the extension…",
+                "It is added in a moment.",
+            );
+        }
         let proxy = self.proxy.clone();
         let dir = self.data_dir.join("Extensions");
         let _ = std::thread::Builder::new()
@@ -51,6 +59,132 @@ impl BrowserApp {
                 let _ =
                     proxy.send_event(BrowserEvent::ExtensionFetched(extstore::fetch(&id, &dir)));
             });
+    }
+
+    /// The Add to Shoji card (or the store's own button) on `tab`'s store page was pressed.
+    pub(super) fn install_from_store_page(&mut self, id: &str, tab: TabId) {
+        // Switched off: the install says so itself and nothing is left waiting.
+        if EXTENSIONS_ON.load(std::sync::atomic::Ordering::Relaxed) {
+            if self.store_installs.contains_key(id) {
+                return;
+            }
+            self.store_installs.insert(id.to_string(), tab);
+        } else {
+            self.tell_store_page(tab, id, "error", "Turn extensions on in Settings first.");
+            return;
+        }
+        self.download_extension(id, false);
+    }
+
+    /// The Remove button on a store page's card.
+    pub(super) fn remove_from_store_page(&mut self, id: &str, tab: TabId) {
+        self.store_installs.insert(id.to_string(), tab);
+        self.remove_extension_for_good(id);
+    }
+
+    /// Remove an extension from the engine and, once that is done, its files: left behind they
+    /// would be loaded again at the next start and checked for updates.
+    pub(super) fn remove_extension_for_good(&mut self, id: &str) {
+        if self.persistent_view().is_none() {
+            return;
+        }
+        let name = self
+            .extension_menu
+            .iter()
+            .find(|e| e.id == id)
+            .map(|e| e.name.clone())
+            .unwrap_or_default();
+        let dir = self.data_dir.join("Extensions");
+        if let Some(p) = extstore::find(&extstore::pages(&dir), id, &name) {
+            self.pending_removals.push(dir.join(&p.folder));
+        }
+        if let Some(view) = self.persistent_view() {
+            webview::remove_extension(view, id.to_string(), self.proxy.clone());
+        }
+    }
+
+    /// Tell a store page's card where its extension stands: "ready", "adding", "added" or "error".
+    pub(super) fn tell_store_page(&self, tab: TabId, id: &str, phase: &str, message: &str) {
+        let Some(view) = self.windows.values().find_map(|w| w.views.get(&tab)) else {
+            return;
+        };
+        let js = format!(
+            "window.__shojiStore && window.__shojiStore({}, {}, {})",
+            serde_json::json!(id),
+            serde_json::json!(phase),
+            serde_json::json!(message)
+        );
+        let _ = view.view.evaluate_script(&js);
+    }
+
+    /// A store page asked where its extension stands.
+    pub(super) fn store_page_state(&self, tab: TabId, id: &str) {
+        let installed = extstore::installed_versions(&self.data_dir.join("Extensions"))
+            .iter()
+            .any(|(i, _)| i == id);
+        let phase = if self.store_installs.contains_key(id) {
+            "adding"
+        } else if installed {
+            "added"
+        } else {
+            "ready"
+        };
+        self.tell_store_page(tab, id, phase, "");
+    }
+
+    /// An add, update or removal finished. Files of removed extensions go, store pages waiting
+    /// on it are told how it ended, and a failure is reported.
+    pub(super) fn extensions_changed(&mut self, error: Option<String>) {
+        if error.is_none() {
+            for dir in std::mem::take(&mut self.pending_removals) {
+                let _ = std::fs::remove_dir_all(dir);
+            }
+        } else {
+            self.pending_removals.clear();
+        }
+        let pending: Vec<(String, TabId)> = self.store_installs.drain().collect();
+        let installed_now = self.install_running.replace(false);
+        let installed = extstore::installed_versions(&self.data_dir.join("Extensions"));
+        for (id, tab) in &pending {
+            match &error {
+                Some(e) => self.tell_store_page(*tab, id, "error", e),
+                None if installed.iter().any(|(i, _)| i == id) => {
+                    self.tell_store_page(*tab, id, "added", "")
+                }
+                None => self.tell_store_page(*tab, id, "ready", ""),
+            }
+        }
+        // The card carries the news for installs started from a store page; any other way of
+        // adding one (the extensions page, Settings, a folder) gets a toast.
+        if pending.is_empty() {
+            match &error {
+                Some(error) => self.toast(&serde_json::json!({
+                    "title": "That didn't work.",
+                    "text": error,
+                    "pose": "unfold",
+                })),
+                None if installed_now => self.toast(&serde_json::json!({
+                    "title": "Added to Shoji.",
+                    "text": "Find it under the puzzle piece in the toolbar.",
+                    "pose": "unfold",
+                })),
+                None => {}
+            }
+        }
+        self.request_extension_list();
+    }
+
+    /// An extension's page asked for a tab: open it (web or the extension's own pages only) and
+    /// close the popup it came from.
+    pub(super) fn open_extension_tab(&mut self, win_id: WindowId, url: &str) {
+        if !(url.starts_with("https://")
+            || url.starts_with("http://")
+            || url.starts_with("chrome-extension://"))
+        {
+            return;
+        }
+        self.close_extension_popup(win_id);
+        self.create_tab(win_id, Some(url.to_string()));
     }
 
     /// Pick an unpacked extension, copy it into the data folder (so moving the original can't
@@ -135,6 +269,18 @@ impl BrowserApp {
     }
 }
 
+/// One installed extension as the puzzle menu lists it.
+pub(super) struct ExtensionEntry {
+    pub id: String,
+    pub name: String,
+    /// Its logo as a `data:` URL
+    pub icon: Option<String>,
+    pub enabled: bool,
+    pub pinned: bool,
+    /// It has a popup or options page to open
+    pub openable: bool,
+}
+
 /// An extension's popup, open under its toolbar button.
 pub(super) struct ExtensionPopup {
     id: String,
@@ -189,8 +335,20 @@ const POPUP_SIZE_SCRIPT: &str = r#"(() => {
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
 enum PopupMessage {
-    Size { w: f64, h: f64 },
+    Size {
+        w: f64,
+        h: f64,
+    },
     Close(String),
+    Open {
+        action: String,
+        payload: OpenPayload,
+    },
+}
+
+#[derive(serde::Deserialize)]
+struct OpenPayload {
+    url: String,
 }
 
 impl BrowserApp {
@@ -206,7 +364,16 @@ impl BrowserApp {
             let id = item["id"].as_str().unwrap_or("").to_string();
             let name = item["name"].as_str().unwrap_or("").to_string();
             let enabled = item["enabled"].as_bool().unwrap_or(true);
+            let pinned = !self.settings.extensions.unpinned.contains(&id);
             let Some(p) = extstore::find(&pages, &id, &name) else {
+                self.extension_menu.push(ExtensionEntry {
+                    id,
+                    name,
+                    icon: None,
+                    enabled,
+                    pinned,
+                    openable: false,
+                });
                 continue;
             };
             let url =
@@ -214,27 +381,31 @@ impl BrowserApp {
             let (popup, options) = (url(&p.popup), url(&p.options));
             item["popup"] = serde_json::json!(popup);
             item["options"] = serde_json::json!(options);
-            let pinned = !self.settings.extensions.unpinned.contains(&id);
             item["pinned"] = serde_json::json!(pinned);
             item["icon"] = serde_json::json!(p.icon);
-            if !enabled {
-                continue;
-            }
             // Every enabled extension can open: its popup, else its options page. Pinned ones
             // also get a toolbar button.
-            if let Some(target) = popup.clone().or(options) {
+            let target = popup.clone().or(options).filter(|_| enabled);
+            self.extension_menu.push(ExtensionEntry {
+                id: id.clone(),
+                name: name.clone(),
+                icon: p.icon.clone(),
+                enabled,
+                pinned,
+                openable: target.is_some(),
+            });
+            if let Some(target) = target {
                 if pinned {
                     buttons.push(serde_json::json!({
                         "id": id, "name": name, "icon": p.icon, "popup": popup.is_some(),
                     }));
                 }
-                self.extension_menu.push((id.clone(), name.clone()));
                 self.extension_popups.insert(id, (target, popup.is_some()));
             }
         }
         self.extension_buttons = serde_json::json!({
             "buttons": buttons,
-            "any": !self.extension_popups.is_empty(),
+            "any": !self.extension_menu.is_empty(),
         })
         .to_string();
         let ids: Vec<WindowId> = self.windows.keys().copied().collect();
@@ -242,6 +413,36 @@ impl BrowserApp {
             self.push_extension_buttons(id);
         }
         serde_json::Value::Array(items).to_string()
+    }
+
+    /// At startup, load again any extension in the Extensions folder that the engine doesn't
+    /// list (it forgets them after a crash or a kill, and the toolbar button stays hidden).
+    pub(super) fn restore_extensions(&mut self, listed_json: &str) {
+        if !EXTENSIONS_ON.load(std::sync::atomic::Ordering::Relaxed)
+            || std::mem::replace(&mut self.extensions_restored, true)
+        {
+            return;
+        }
+        let Some(view) = self.persistent_view() else {
+            self.extensions_restored = false;
+            return;
+        };
+        let listed: Vec<(String, String)> =
+            serde_json::from_str::<Vec<serde_json::Value>>(listed_json)
+                .unwrap_or_default()
+                .iter()
+                .map(|e| {
+                    (
+                        e["id"].as_str().unwrap_or("").to_string(),
+                        e["name"].as_str().unwrap_or("").to_string(),
+                    )
+                })
+                .collect();
+        let dir = self.data_dir.join("Extensions");
+        for folder in extstore::unlisted_folders(&listed, &extstore::pages(&dir)) {
+            eprintln!("extensions: loading {folder} again, the engine had forgotten it");
+            webview::add_extension(view, &dir.join(folder), self.proxy.clone());
+        }
     }
 
     /// Check the store for newer versions of installed extensions, at most every six hours.
@@ -259,28 +460,6 @@ impl BrowserApp {
                 let _ =
                     proxy.send_event(BrowserEvent::ExtensionsUpdated(extstore::update_all(&dir)));
             });
-    }
-
-    /// A tab reached a Chrome Web Store page for an extension that isn't installed: offer to add
-    /// it, once per extension each session.
-    pub(super) fn offer_store_extension(&mut self, url: &str) {
-        if !EXTENSIONS_ON.load(std::sync::atomic::Ordering::Relaxed) {
-            return;
-        }
-        let Some(id) = extstore::store_page_id(url) else {
-            return;
-        };
-        let installed = extstore::installed_versions(&self.data_dir.join("Extensions"));
-        if installed.iter().any(|(i, _)| *i == id) || !self.extensions_offered.insert(id.clone()) {
-            return;
-        }
-        self.toast(&serde_json::json!({
-            "title": "Add this extension to Shoji?",
-            "text": "It is downloaded from the Chrome Web Store and added in a moment.",
-            "pose": "unfold",
-            "ms": 12000,
-            "actions": [{ "label": "Add to Shoji", "primary": true, "action": "InstallExtension", "payload": { "source": id } }],
-        }));
     }
 
     /// Send the downloaded catalog to the open store pages.
@@ -376,11 +555,23 @@ impl BrowserApp {
             .with_background_color(window::page_rgba(dark))
             .with_theme(window::webview_theme(&self.settings.appearance.theme))
             .with_initialization_script(POPUP_SIZE_SCRIPT)
+            .with_initialization_script(pages::EXTENSION_TABS_SCRIPT)
+            // A window the popup asks for becomes a tab.
+            .with_new_window_req_handler({
+                let proxy = self.proxy.clone();
+                move |url, _| {
+                    let _ = proxy.send_event(BrowserEvent::ExtensionOpenTab(win_id, url));
+                    wry::NewWindowResponse::Deny
+                }
+            })
             // The page is the extension's, so the only thing it may say is how big it is.
             .with_ipc_handler(move |req: wry::http::Request<String>| {
                 let event = match serde_json::from_str::<PopupMessage>(req.body()) {
                     Ok(PopupMessage::Size { w, h }) if w.is_finite() && h.is_finite() => {
                         BrowserEvent::ExtensionPopupSize(win_id, w, h)
+                    }
+                    Ok(PopupMessage::Open { action, payload }) if action == "ExtensionOpen" => {
+                        BrowserEvent::ExtensionOpenTab(win_id, payload.url)
                     }
                     Ok(PopupMessage::Close(c)) if c == "close" => {
                         BrowserEvent::ExtensionPopupClosed(win_id)
@@ -503,35 +694,122 @@ impl BrowserApp {
 }
 
 impl BrowserApp {
-    /// The puzzle button's menu: every extension that can open, then the manager.
+    /// The puzzle button's menu: every installed extension with its logo, a pin switch and a
+    /// remove button, then the manager. Opens under the button at `x`, `y`.
     pub(super) fn show_extensions_menu(&mut self, win_id: WindowId, x: f64, y: f64) {
-        use shoji_core::ipc::OverlayItem;
-        let item = |value: String, label: String, sub: &str| OverlayItem {
-            kind: "action".into(),
-            value,
-            label,
-            sub: sub.into(),
-            color: None,
-        };
-        let mut items: Vec<OverlayItem> = self
-            .extension_menu
-            .iter()
-            .map(|(id, name)| {
-                let pinned = !self.settings.extensions.unpinned.contains(id);
-                item(
-                    format!("ext-open:{id}"),
-                    name.clone(),
-                    if pinned { "On the toolbar" } else { "" },
-                )
-            })
-            .collect();
-        items.push(item("extensions".into(), "Manage extensions".into(), ""));
+        self.extension_menu_at = (x, y);
+        let items = menu_items(&self.extension_menu);
         let Some(win) = self.windows.get(&win_id) else {
             return;
         };
-        let w = 280.0f64.min(win.width - 8.0);
+        let w = 320.0f64.min(win.width - 8.0);
         let x = (x - w / 2.0).clamp(4.0, (win.width - w - 4.0).max(4.0));
-        let h = items.len() as f64 * 46.0 + 10.0;
-        self.show_overlay(win_id, "menu", items, [x, y.max(30.0), w, h], "", "", "");
+        let y = y.max(30.0);
+        let h = (items.len() as f64 * 46.0 + 10.0).min((win.height - y - 8.0).max(120.0));
+        self.show_overlay(win_id, "menu", items, [x, y, w, h], "", "", "");
+    }
+
+    /// Pin or unpin an extension's toolbar button, from its menu row, and show the menu again.
+    pub(super) fn pin_extension_from_menu(&mut self, win_id: WindowId, id: &str, pinned: bool) {
+        self.update_settings(|s| {
+            s.extensions.unpinned.retain(|i| i != id);
+            if !pinned {
+                s.extensions.unpinned.push(id.to_string());
+            }
+        });
+        if let Some(e) = self.extension_menu.iter_mut().find(|e| e.id == id) {
+            e.pinned = pinned;
+        }
+        self.request_extension_list();
+        let (x, y) = self.extension_menu_at;
+        self.show_extensions_menu(win_id, x, y);
+    }
+}
+
+/// The puzzle menu's rows: each installed extension with its logo, a pin switch and a remove
+/// button, then the manager.
+fn menu_items(entries: &[ExtensionEntry]) -> Vec<shoji_core::ipc::OverlayItem> {
+    use shoji_core::ipc::{OverlayItem, OverlayTool};
+    let tool = |title: &str, value: String, glyph: &str| OverlayTool {
+        title: title.into(),
+        value,
+        glyph: glyph.into(),
+    };
+    let mut items: Vec<OverlayItem> = entries
+        .iter()
+        .map(|e| OverlayItem {
+            kind: "action".into(),
+            value: if e.openable {
+                format!("ext-open:{}", e.id)
+            } else {
+                "extensions".into()
+            },
+            label: e.name.clone(),
+            sub: match (e.enabled, e.pinned) {
+                (false, _) => "Off",
+                (true, true) => "On the toolbar",
+                (true, false) => "",
+            }
+            .into(),
+            // An empty logo still asks for the row's picture slot: the page draws a letter.
+            icon: Some(e.icon.clone().unwrap_or_default()),
+            tools: vec![
+                if e.pinned {
+                    tool(
+                        "Unpin from the toolbar",
+                        format!("ext-pin:0:{}", e.id),
+                        "pinned",
+                    )
+                } else {
+                    tool("Pin to the toolbar", format!("ext-pin:1:{}", e.id), "pin")
+                },
+                tool("Remove", format!("ext-remove:{}", e.id), "remove"),
+            ],
+            ..Default::default()
+        })
+        .collect();
+    items.push(OverlayItem {
+        kind: "action".into(),
+        value: "extensions".into(),
+        label: "Manage extensions".into(),
+        ..Default::default()
+    });
+    items
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(id: &str, pinned: bool, enabled: bool, icon: Option<&str>) -> ExtensionEntry {
+        ExtensionEntry {
+            id: id.into(),
+            name: format!("Ext {id}"),
+            icon: icon.map(String::from),
+            enabled,
+            pinned,
+            openable: enabled,
+        }
+    }
+
+    #[test]
+    fn the_menu_lists_every_extension_with_its_logo_pin_and_remove() {
+        let items = menu_items(&[
+            entry("a", true, true, Some("data:image/png;base64,AA")),
+            entry("b", false, true, None),
+            entry("c", true, false, None),
+        ]);
+        assert_eq!(items.len(), 4);
+        assert_eq!(items[0].icon.as_deref(), Some("data:image/png;base64,AA"));
+        assert_eq!(items[1].icon.as_deref(), Some(""));
+        assert_eq!(items[0].value, "ext-open:a");
+        assert_eq!(items[0].tools[0].value, "ext-pin:0:a");
+        assert_eq!(items[0].tools[0].glyph, "pinned");
+        assert_eq!(items[1].tools[0].value, "ext-pin:1:b");
+        assert_eq!(items[1].tools[0].glyph, "pin");
+        assert_eq!(items[0].tools[1].value, "ext-remove:a");
+        assert_eq!(items[2].sub, "Off");
+        assert_eq!(items[2].value, "extensions");
+        assert_eq!(items[3].label, "Manage extensions");
     }
 }

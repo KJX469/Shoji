@@ -29,11 +29,10 @@ pub fn retint_shortcuts(data_dir: PathBuf, accent: Accent) {
             exe.clone()
         } else {
             let path = icon_path(&data_dir, accent);
-            if !path.exists() {
-                let _ = std::fs::create_dir_all(path.parent().unwrap_or(&data_dir));
-                if std::fs::write(&path, ico(accent, &ICO_SIZES)).is_err() {
-                    return;
-                }
+            // Written again whenever the icon itself changed (a new version draws it
+            // differently), so shortcuts never keep an old one.
+            if write_if_changed(&path, &ico(accent, &ICO_SIZES)).is_err() {
+                return;
             }
             path
         };
@@ -58,3 +57,35 @@ pub fn retint_shortcuts(data_dir: PathBuf, accent: Accent) {
 
 #[cfg(not(windows))]
 pub fn retint_shortcuts(_data_dir: PathBuf, _accent: Accent) {}
+
+/// Write `bytes` to `path` unless it already holds exactly them. Returns whether it wrote.
+fn write_if_changed(path: &Path, bytes: &[u8]) -> std::io::Result<bool> {
+    if std::fs::read(path).is_ok_and(|old| old == bytes) {
+        return Ok(false);
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(path, bytes)?;
+    Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_icon_left_by_an_older_version_is_replaced() {
+        let dir = std::env::temp_dir().join(format!("shoji_icons_{}", std::process::id()));
+        let path = icon_path(&dir, Accent::Gold);
+        let now = ico(Accent::Gold, &[16, 32]);
+        // An older version's drawing of the same colour.
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"old icon").unwrap();
+        assert!(write_if_changed(&path, &now).unwrap());
+        assert_eq!(std::fs::read(&path).unwrap(), now);
+        // Unchanged: left alone.
+        assert!(!write_if_changed(&path, &now).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

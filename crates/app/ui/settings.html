@@ -17,6 +17,8 @@
     .card { border-radius: 12px; background: var(--surface); border: 1px solid var(--line); }
     .sitelist { padding: 4px 20px 12px; border-bottom: 1px solid var(--line); }
     .sitelist[hidden] { display: none; }
+    .extlogo { width: 24px; height: 24px; border-radius: 5px; object-fit: contain; flex-shrink: 0; margin-right: 10px; }
+    .extlogo.none { display: inline-grid; place-items: center; background: var(--tint); color: var(--ink-2); font-weight: 600; font-size: 13px; }
     .siterow { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
     .siterow:first-child { border-top: 0; }
     .siterow b { min-width: 140px; font-weight: 600; }
@@ -464,7 +466,7 @@
       <span class="label" id="sec-extensions">Extensions</span>
       <div class="card">
         <div class="row">
-          <div class="what"><b>Browser extensions</b><small>Chromium extensions, loaded by the engine. They have no toolbar button; their pages open from the list below. Applies after a restart</small></div>
+          <div class="what"><b>Browser extensions</b><small>Chromium extensions, loaded by the engine. Pinned ones get a toolbar button; all of them are in the puzzle-piece menu. Applies after a restart</small></div>
           <label class="switch"><input type="checkbox" data-path="extensions.enabled"><span></span></label>
         </div>
         <div class="row">
@@ -635,12 +637,18 @@
       d.items.forEach(x => {
         const row = document.createElement('div');
         row.className = 'siterow';
-        row.innerHTML = '<b>' + esc(x.name || x.id) + '</b><span class="chips"></span>' +
+        const logo = x.icon
+          ? '<img class="extlogo" alt="" src="' + esc(x.icon) + '">'
+          : '<span class="extlogo none">' + esc((x.name || '?').trim().charAt(0).toUpperCase()) + '</span>';
+        row.innerHTML = logo + '<b>' + esc(x.name || x.id) + '</b><span class="chips"></span>' +
+          (x.enabled ? '<button class="btn small" data-open="pin">' + (x.pinned ? 'Unpin' : 'Pin') + '</button>' : '') +
           (x.popup ? '<button class="btn small" data-open="popup">Open</button>' : '') +
           (x.options ? '<button class="btn small" data-open="options">Options</button>' : '') +
           '<button class="btn small" data-open="remove">Remove</button>';
         row.querySelectorAll('button').forEach(b => {
-          b.onclick = () => b.dataset.open === 'remove' ? post('RemoveExtension', { id: x.id }) : post('CreateTab', { url: x[b.dataset.open] });
+          b.onclick = () => b.dataset.open === 'remove' ? post('RemoveExtension', { id: x.id })
+            : b.dataset.open === 'pin' ? post('SetExtensionPinned', { id: x.id, pinned: !x.pinned })
+            : post('CreateTab', { url: x[b.dataset.open] });
         });
         box.appendChild(row);
       });

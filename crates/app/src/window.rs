@@ -1,18 +1,18 @@
 //! Top-level window setup: size, crane icons, and native frame colours that match the
 //! Washi (light) or Sumi (dark) theme.
 
-use shoji_brand::{render_kage_rgba, theme, Accent};
+use shoji_brand::{render_rgba, theme, Accent};
 use winit::dpi::LogicalSize;
 use winit::window::{Icon, Theme, Window, WindowAttributes};
 
 pub const DEFAULT_WIDTH: f64 = 1280.0;
 pub const DEFAULT_HEIGHT: f64 = 800.0;
 
-/// Title-bar icon (small) and taskbar icon (large): the kage tile, the crane's shadow on a
-/// lit shoji screen.
+/// Title-bar icon (small) and taskbar icon (large): the crane, as on the executable and the
+/// shortcuts (the shoji-screen tile is the installer's).
 pub fn icons(accent: Accent) -> (Option<Icon>, Option<Icon>) {
-    let small = Icon::from_rgba(render_kage_rgba(accent, 32), 32, 32).ok();
-    let large = Icon::from_rgba(render_kage_rgba(accent, 64), 64, 64).ok();
+    let small = Icon::from_rgba(render_rgba(accent, 32), 32, 32).ok();
+    let large = Icon::from_rgba(render_rgba(accent, 64), 64, 64).ok();
     (small, large)
 }
 

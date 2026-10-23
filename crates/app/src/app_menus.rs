@@ -211,6 +211,7 @@ impl BrowserApp {
             label: label.to_string(),
             sub,
             color: None,
+            ..Default::default()
         };
         let mut out = Vec::new();
         let Some(win) = self.windows.get(&win_id) else {
@@ -342,6 +343,7 @@ impl BrowserApp {
             label: label.to_string(),
             sub: String::new(),
             color,
+            ..Default::default()
         };
         let mut out = Vec::new();
         let Some(win) = self.windows.get(&win_id) else {
@@ -531,6 +533,7 @@ impl BrowserApp {
             label: label.to_string(),
             sub: String::new(),
             color,
+            ..Default::default()
         };
         let mut out = Vec::new();
         let Some(win) = self.windows.get(&win_id) else {
@@ -626,6 +629,16 @@ impl BrowserApp {
         // "split-open:<address or search>" carries a colon of its own, so it is read first.
         if let Some(rest) = value.strip_prefix("split-open:") {
             return self.add_new_pane(win_id, Some(rest.to_string()));
+        }
+        if let Some(rest) = value.strip_prefix("ext-pin:") {
+            if let Some((on, id)) = rest.split_once(':') {
+                self.pin_extension_from_menu(win_id, id, on == "1");
+            }
+            return;
+        }
+        if let Some(id) = value.strip_prefix("ext-remove:") {
+            self.remove_extension_for_good(id);
+            return;
         }
         if let Some(id) = value.strip_prefix("ext-open:") {
             let right = self
