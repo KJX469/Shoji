@@ -47,11 +47,11 @@
     </div>
     <div class="tools">
       <input type="text" id="q" placeholder="Filter by site, address or rule" spellcheck="false">
-      <select id="action">
+      <select id="action" aria-label="What happened">
         <option value="">All actions</option><option value="blocked">Blocked</option>
         <option value="replaced">Replaced</option><option value="cleaned">Cleaned</option>
       </select>
-      <select id="kind"><option value="">All types</option></select>
+      <select id="kind" aria-label="Request type"><option value="">All types</option></select>
       <button class="btn" id="pause" onclick="togglePause()">Pause</button>
     </div>
     <div class="table">
