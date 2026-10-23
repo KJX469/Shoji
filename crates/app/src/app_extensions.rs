@@ -19,6 +19,11 @@ impl BrowserApp {
 
     /// Download an extension from the Chrome Web Store (by link or id) and load it.
     pub(super) fn install_extension_from_store(&self, source: &str) {
+        self.download_extension(source, true);
+    }
+
+    /// `announce`: say the download has started (a store page's card does that itself).
+    fn download_extension(&self, source: &str, announce: bool) {
         let say = |app: &Self, title: &str, text: &str| {
             app.toast(&serde_json::json!({ "title": title, "text": text, "pose": "unfold" }));
         };
@@ -38,11 +43,14 @@ impl BrowserApp {
             );
             return;
         };
-        say(
-            self,
-            "Downloading the extension…",
-            "It is added in a moment.",
-        );
+        self.install_running.set(true);
+        if announce {
+            say(
+                self,
+                "Downloading the extension…",
+                "It is added in a moment.",
+            );
+        }
         let proxy = self.proxy.clone();
         let dir = self.data_dir.join("Extensions");
         let _ = std::thread::Builder::new()
@@ -63,8 +71,9 @@ impl BrowserApp {
             self.store_installs.insert(id.to_string(), tab);
         } else {
             self.tell_store_page(tab, id, "error", "Turn extensions on in Settings first.");
+            return;
         }
-        self.install_extension_from_store(id);
+        self.download_extension(id, false);
     }
 
     /// The Remove button on a store page's card.
@@ -134,6 +143,7 @@ impl BrowserApp {
             self.pending_removals.clear();
         }
         let pending: Vec<(String, TabId)> = self.store_installs.drain().collect();
+        let installed_now = self.install_running.replace(false);
         let installed = extstore::installed_versions(&self.data_dir.join("Extensions"));
         for (id, tab) in &pending {
             match &error {
@@ -144,13 +154,22 @@ impl BrowserApp {
                 None => self.tell_store_page(*tab, id, "ready", ""),
             }
         }
-        // The card carries the news for installs started from a store page.
-        if let (Some(error), true) = (&error, pending.is_empty()) {
-            self.toast(&serde_json::json!({
-                "title": "That didn't work.",
-                "text": error,
-                "pose": "unfold",
-            }));
+        // The card carries the news for installs started from a store page; any other way of
+        // adding one (the extensions page, Settings, a folder) gets a toast.
+        if pending.is_empty() {
+            match &error {
+                Some(error) => self.toast(&serde_json::json!({
+                    "title": "That didn't work.",
+                    "text": error,
+                    "pose": "unfold",
+                })),
+                None if installed_now => self.toast(&serde_json::json!({
+                    "title": "Added to Shoji.",
+                    "text": "Find it under the puzzle piece in the toolbar.",
+                    "pose": "unfold",
+                })),
+                None => {}
+            }
         }
         self.request_extension_list();
     }

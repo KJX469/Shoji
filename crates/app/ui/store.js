@@ -62,7 +62,7 @@
       b.textContent = 'Try again';
     } else {
       $('t').textContent = 'Add to Shoji';
-      $('s').textContent = 'Install extensions into Shoji with this button.';
+      $('s').textContent = 'Install extensions in Shoji with this button for now.';
       b.textContent = 'Add to Shoji';
     }
   };
