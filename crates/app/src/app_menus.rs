@@ -637,9 +637,7 @@ impl BrowserApp {
             return;
         }
         if let Some(id) = value.strip_prefix("ext-remove:") {
-            if let Some(view) = self.persistent_view() {
-                webview::remove_extension(view, id.to_string(), self.proxy.clone());
-            }
+            self.remove_extension_for_good(id);
             return;
         }
         if let Some(id) = value.strip_prefix("ext-open:") {

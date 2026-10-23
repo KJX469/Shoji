@@ -931,10 +931,12 @@ struct BrowserApp {
     extension_popups: HashMap<String, (String, bool)>,
     /// Extensions the puzzle menu lists, in order
     extension_menu: Vec<app_extensions::ExtensionEntry>,
+    /// Folders of extensions being removed, deleted once the engine has let go of them
+    pending_removals: Vec<PathBuf>,
     /// Installed extensions the engine had forgotten were put back, once, at startup
     extensions_restored: bool,
     /// Store extensions being added because a Web Store page's button was pressed
-    store_installs: HashSet<String>,
+    store_installs: HashMap<String, TabId>,
     /// Where the puzzle menu was opened, to show it again after a pin or unpin
     extension_menu_at: (f64, f64),
     /// The extension popup that last closed by losing focus, and when (a click on its own
@@ -943,7 +945,6 @@ struct BrowserApp {
     /// When store extensions were last checked for updates
     extensions_checked: Option<Instant>,
     catalog_checked: Option<Instant>,
-    extensions_offered: std::collections::HashSet<String>,
     /// The toolbar has asked the engine for the installed extensions
     extensions_asked: std::cell::Cell<bool>,
     favourites: shoji_core::userdata::Favourites,
@@ -1156,13 +1157,13 @@ impl BrowserApp {
             extension_popups: HashMap::new(),
             extension_menu: Vec::new(),
             extension_menu_at: (0.0, 0.0),
-            store_installs: HashSet::new(),
+            store_installs: HashMap::new(),
+            pending_removals: Vec::new(),
             extensions_restored: false,
             popup_blurred: None,
             extensions_asked: std::cell::Cell::new(false),
             extensions_checked: None,
             catalog_checked: None,
-            extensions_offered: Default::default(),
             settings,
             settings_path,
             data_dir: data_dir.clone(),
@@ -2379,7 +2380,6 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 history,
                 favicon,
             } => {
-                let reported = url.clone();
                 let Some(win) = self.owner(tab_id).and_then(|id| self.windows.get_mut(&id)) else {
                     return;
                 };
@@ -2471,10 +2471,6 @@ impl ApplicationHandler<BrowserEvent> for BrowserApp {
                 win.ui_dirty |= changed;
                 // A tab that opens straight at a store page never "moves" there, so every report
                 // of the front tab's address is looked at.
-                let front = win.tabs.active_tab_id() == Some(tab_id);
-                if let Some(address) = reported.filter(|_| front) {
-                    self.offer_store_extension(&address);
-                }
                 // A different site: use its remembered zoom (or the default).
                 if let Some((old, new)) = moved {
                     if extract_host(&old) != extract_host(&new) && extract_host(&new).is_some() {

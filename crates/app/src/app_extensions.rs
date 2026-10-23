@@ -53,42 +53,104 @@ impl BrowserApp {
             });
     }
 
-    /// The Web Store page's own button was pressed: add the extension, tell the user how it goes.
-    pub(super) fn install_from_store_page(&mut self, id: &str) {
+    /// The Add to Shoji card (or the store's own button) on `tab`'s store page was pressed.
+    pub(super) fn install_from_store_page(&mut self, id: &str, tab: TabId) {
         // Switched off: the install says so itself and nothing is left waiting.
-        if EXTENSIONS_ON.load(std::sync::atomic::Ordering::Relaxed)
-            && !self.store_installs.insert(id.to_string())
-        {
-            return;
+        if EXTENSIONS_ON.load(std::sync::atomic::Ordering::Relaxed) {
+            if self.store_installs.contains_key(id) {
+                return;
+            }
+            self.store_installs.insert(id.to_string(), tab);
+        } else {
+            self.tell_store_page(tab, id, "error", "Turn extensions on in Settings first.");
         }
         self.install_extension_from_store(id);
     }
 
-    /// An add, update or removal finished. Say how an install from a store page ended; a failure
-    /// of any kind is reported, with a way to try again.
+    /// The Remove button on a store page's card.
+    pub(super) fn remove_from_store_page(&mut self, id: &str, tab: TabId) {
+        self.store_installs.insert(id.to_string(), tab);
+        self.remove_extension_for_good(id);
+    }
+
+    /// Remove an extension from the engine and, once that is done, its files: left behind they
+    /// would be loaded again at the next start and checked for updates.
+    pub(super) fn remove_extension_for_good(&mut self, id: &str) {
+        if self.persistent_view().is_none() {
+            return;
+        }
+        let name = self
+            .extension_menu
+            .iter()
+            .find(|e| e.id == id)
+            .map(|e| e.name.clone())
+            .unwrap_or_default();
+        let dir = self.data_dir.join("Extensions");
+        if let Some(p) = extstore::find(&extstore::pages(&dir), id, &name) {
+            self.pending_removals.push(dir.join(&p.folder));
+        }
+        if let Some(view) = self.persistent_view() {
+            webview::remove_extension(view, id.to_string(), self.proxy.clone());
+        }
+    }
+
+    /// Tell a store page's card where its extension stands: "ready", "adding", "added" or "error".
+    pub(super) fn tell_store_page(&self, tab: TabId, id: &str, phase: &str, message: &str) {
+        let Some(view) = self.windows.values().find_map(|w| w.views.get(&tab)) else {
+            return;
+        };
+        let js = format!(
+            "window.__shojiStore && window.__shojiStore({}, {}, {})",
+            serde_json::json!(id),
+            serde_json::json!(phase),
+            serde_json::json!(message)
+        );
+        let _ = view.view.evaluate_script(&js);
+    }
+
+    /// A store page asked where its extension stands.
+    pub(super) fn store_page_state(&self, tab: TabId, id: &str) {
+        let installed = extstore::installed_versions(&self.data_dir.join("Extensions"))
+            .iter()
+            .any(|(i, _)| i == id);
+        let phase = if self.store_installs.contains_key(id) {
+            "adding"
+        } else if installed {
+            "added"
+        } else {
+            "ready"
+        };
+        self.tell_store_page(tab, id, phase, "");
+    }
+
+    /// An add, update or removal finished. Files of removed extensions go, store pages waiting
+    /// on it are told how it ended, and a failure is reported.
     pub(super) fn extensions_changed(&mut self, error: Option<String>) {
-        let pending: Vec<String> = self.store_installs.drain().collect();
-        match error {
-            Some(error) => {
-                let mut toast = serde_json::json!({
-                    "title": "That didn't work.",
-                    "text": error,
-                    "pose": "unfold",
-                });
-                if let Some(id) = pending.first() {
-                    toast["actions"] = serde_json::json!([{
-                        "label": "Try again", "primary": true,
-                        "action": "InstallExtension", "payload": { "source": id },
-                    }]);
-                }
-                self.toast(&toast);
+        if error.is_none() {
+            for dir in std::mem::take(&mut self.pending_removals) {
+                let _ = std::fs::remove_dir_all(dir);
             }
-            None if !pending.is_empty() => self.toast(&serde_json::json!({
-                "title": "Added to Shoji.",
-                "text": "Find it under the puzzle piece in the toolbar.",
+        } else {
+            self.pending_removals.clear();
+        }
+        let pending: Vec<(String, TabId)> = self.store_installs.drain().collect();
+        let installed = extstore::installed_versions(&self.data_dir.join("Extensions"));
+        for (id, tab) in &pending {
+            match &error {
+                Some(e) => self.tell_store_page(*tab, id, "error", e),
+                None if installed.iter().any(|(i, _)| i == id) => {
+                    self.tell_store_page(*tab, id, "added", "")
+                }
+                None => self.tell_store_page(*tab, id, "ready", ""),
+            }
+        }
+        // The card carries the news for installs started from a store page.
+        if let (Some(error), true) = (&error, pending.is_empty()) {
+            self.toast(&serde_json::json!({
+                "title": "That didn't work.",
+                "text": error,
                 "pose": "unfold",
-            })),
-            None => {}
+            }));
         }
         self.request_extension_list();
     }
@@ -379,28 +441,6 @@ impl BrowserApp {
                 let _ =
                     proxy.send_event(BrowserEvent::ExtensionsUpdated(extstore::update_all(&dir)));
             });
-    }
-
-    /// A tab reached a Chrome Web Store page for an extension that isn't installed: offer to add
-    /// it, once per extension each session.
-    pub(super) fn offer_store_extension(&mut self, url: &str) {
-        if !EXTENSIONS_ON.load(std::sync::atomic::Ordering::Relaxed) {
-            return;
-        }
-        let Some(id) = extstore::store_page_id(url) else {
-            return;
-        };
-        let installed = extstore::installed_versions(&self.data_dir.join("Extensions"));
-        if installed.iter().any(|(i, _)| *i == id) || !self.extensions_offered.insert(id.clone()) {
-            return;
-        }
-        self.toast(&serde_json::json!({
-            "title": "Add this extension to Shoji?",
-            "text": "It is downloaded from the Chrome Web Store and added in a moment.",
-            "pose": "unfold",
-            "ms": 12000,
-            "actions": [{ "label": "Add to Shoji", "primary": true, "action": "InstallExtension", "payload": { "source": id } }],
-        }));
     }
 
     /// Send the downloaded catalog to the open store pages.

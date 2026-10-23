@@ -25,6 +25,22 @@ const EXTENSIONS: &[(&str, &str, &str)] = &[
     ),
 ];
 
+/// The Add to Shoji card on a Web Store page: (shown, title, button), if the page has one.
+fn card(store: &mut Page) -> Option<(bool, String, String)> {
+    let v = store.eval("(()=>{const h=[...document.documentElement.children].find(e=>e.shadowRoot);if(!h)return null;const r=h.shadowRoot;return [getComputedStyle(h).display!=='none',r.getElementById('t').textContent,r.getElementById('b').textContent]})()");
+    let a = v.as_array()?;
+    Some((
+        a[0].as_bool()?,
+        a[1].as_str()?.to_string(),
+        a[2].as_str()?.to_string(),
+    ))
+}
+
+/// Press the card's button.
+fn press_card(store: &mut Page) {
+    store.eval("[...document.documentElement.children].find(e=>e.shadowRoot).shadowRoot.getElementById('b').click()");
+}
+
 /// The toolbar strip: the inline page with the tab strip in it.
 fn chrome(shoji: &Shoji) -> Page {
     let end = Instant::now() + Duration::from_secs(30);
@@ -80,46 +96,17 @@ fn real_extensions_install_and_open() {
                 ..Default::default()
             },
         );
-        let _ = shoji.page("chromewebstore.google.com");
-        let mut strip = chrome(&shoji);
-        // The toast offering to add it.
-        let toast = wait("the Add to Shoji toast", 30, || {
-            let t = strip.eval("(document.getElementById('toastTitle')||{}).textContent||''");
-            let acts = strip.eval("[...document.querySelectorAll('#toastActs button')].map(b=>b.textContent).join('|')");
-            acts.as_str()
-                .unwrap_or("")
-                .contains("Add to Shoji")
-                .then(|| {
-                    format!(
-                        "{} [{}]",
-                        t.as_str().unwrap_or(""),
-                        acts.as_str().unwrap_or("")
-                    )
-                })
+        let mut store = shoji.page("chromewebstore.google.com");
+        // The card offering to add it, on the page itself.
+        let offered = wait("the Add to Shoji card", 30, || {
+            card(&mut store).filter(|c| c.0 && c.2 == "Add to Shoji")
         });
-        eprintln!("{name}: toast {toast:?}");
-        if toast.is_none() {
-            let urls: Vec<String> = shoji
-                .targets()
-                .iter()
-                .map(|t| t["url"].as_str().unwrap_or("").chars().take(140).collect())
-                .collect();
-            eprintln!("  targets: {urls:?}");
-            failures.push(format!("{name}: no toast"));
+        eprintln!("{name}: card {offered:?}");
+        if offered.is_none() {
+            failures.push(format!("{name}: no card"));
             continue;
         }
-        strip.eval("[...document.querySelectorAll('#toastActs button')].find(b=>b.textContent==='Add to Shoji').click()");
-        for _ in 0..2 {
-            std::thread::sleep(Duration::from_secs(5));
-            let t = strip.eval("[document.getElementById('toastTitle').textContent, document.getElementById('toastText').textContent].join(' / ')");
-            let files: Vec<String> = std::fs::read_dir(shoji.data_dir().join("Extensions"))
-                .into_iter()
-                .flatten()
-                .flatten()
-                .map(|e| e.file_name().to_string_lossy().into_owned())
-                .collect();
-            eprintln!("  toast: {t}  extensions dir: {files:?}");
-        }
+        press_card(&mut store);
         let installing = Instant::now();
         let worker = wait("the service worker", 900, || {
             shoji.targets().into_iter().find(|t| {
@@ -260,15 +247,15 @@ fn real_extensions_install_and_open() {
                 failures.push(format!("{name}: no popup"))
             }
         }
-        // Installed now: its store page doesn't offer it again.
+        // Installed now: every visit to its store page still shows the card, as Installed.
         let mut tab = shoji.page("chromewebstore.google.com");
         tab.goto(&url);
-        std::thread::sleep(Duration::from_secs(8));
-        let mut strip = chrome(&shoji);
-        let offered = strip.eval("[...document.querySelectorAll('#toastActs button')].some(b=>b.textContent==='Add to Shoji') && getComputedStyle(document.getElementById('toast')).opacity!=='0'");
-        eprintln!("{name}: offered again on its store page: {offered}");
-        if offered == true {
-            failures.push(format!("{name}: offered again although installed"));
+        let again = wait("the card on a repeat visit", 30, || {
+            card(&mut tab).filter(|c| c.0 && c.1 == "Installed in Shoji")
+        });
+        eprintln!("{name}: card on a repeat visit: {again:?}");
+        if again.is_none() {
+            failures.push(format!("{name}: no Installed card on a repeat visit"));
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
@@ -335,19 +322,23 @@ fn store_button_logos_and_pins() {
     })
     .expect("no Add to Chrome button");
     store.click(at[0].as_f64().unwrap(), at[1].as_f64().unwrap());
-    let mut strip = chrome(&shoji);
-    let mut toasts = Vec::new();
-    let added = wait("Added to Shoji", 300, || {
-        let t = strip.eval("[document.getElementById('toastTitle').textContent, document.getElementById('toastText').textContent].join(' / ')");
-        let t = t.as_str().unwrap_or("").to_string();
-        if !toasts.contains(&t) {
-            toasts.push(t.clone());
-        }
-        t.contains("Added to Shoji").then_some(())
+    let added = wait("Installed in Shoji", 300, || {
+        card(&mut store).filter(|c| c.1 == "Installed in Shoji")
     });
-    eprintln!("{name}: store button toasts {toasts:?}");
+    eprintln!("{name}: store button card {added:?}");
     if added.is_none() {
         failures.push("store button: never added".to_string());
+    }
+    // The card is there on every visit, and only on extension pages.
+    store.goto("https://chromewebstore.google.com/");
+    std::thread::sleep(Duration::from_secs(5));
+    if card(&mut store).is_some_and(|c| c.0) {
+        failures.push("card shown on the store's home page".to_string());
+    }
+    store.goto(&url);
+    let back = wait("the card again", 30, || card(&mut store).filter(|c| c.0));
+    if back.is_none() {
+        failures.push("card missing on a repeat visit".to_string());
     }
     let worker = wait("the service worker", 60, || {
         shoji.targets().into_iter().find(|t| {

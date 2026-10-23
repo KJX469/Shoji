@@ -689,6 +689,10 @@ pub enum UiToHostMessage {
     /// The "Add to Chrome" button on a Chrome Web Store page was pressed (the page it came from
     /// says which extension)
     StoreInstall,
+    /// A Chrome Web Store page asks where its extension stands (installed or not)
+    StoreState,
+    /// The Remove button on a Chrome Web Store page's card
+    StoreRemove,
     /// An extension page asked for a tab at `url` (chrome.tabs.create and the like)
     ExtensionOpen {
         url: String,
@@ -789,6 +793,8 @@ impl UiToHostMessage {
                 | UiToHostMessage::LoginFieldFocused { .. }
                 | UiToHostMessage::LinkDropped { .. }
                 | UiToHostMessage::StoreInstall
+                | UiToHostMessage::StoreState
+                | UiToHostMessage::StoreRemove
                 | UiToHostMessage::ExtensionOpen { .. }
         )
     }
