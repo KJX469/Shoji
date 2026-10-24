@@ -2,6 +2,46 @@
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-10-23
+
+### Added
+- Cookie notices are answered with "Reject all" (Consent-O-Matic's rules), and can be hidden.
+- Ad popups and popunders are blocked.
+- Downloads from known dangerous sites are stopped, with a way to download anyway.
+- Byōbu uncloaks trackers hidden behind a site's own subdomains (CNAME).
+- Links lose more tracking parameters (AdGuard URL Tracking, Brave's per-site rules); tracker redirects are skipped and AMP pages open on the publisher's site.
+- Regional ad lists for the Windows display language.
+- Shoji fixes: Shoji's own filter list, updated hourly, so broken sites can be fixed without a release.
+- Sound waits for a click; muted video still plays. Sites can be allowed from the This site menu.
+- Secure DNS setting (Automatic by default).
+- Optional blocking of Facebook, X and LinkedIn embeds.
+- Per-site shield categories, and an offer to lower the shield after repeated reloads.
+- Sites can be forgotten when their tab closes or when Shoji exits.
+- Password breach check on the passwords page.
+- Report a broken site from the shield panel.
+- A Wait or Close page card when a page stops responding.
+- Beta updates (opt-in), and an offer to go back after a new version closes early twice.
+- Extensions: a store page with a catalog, the Web Store's Add to Chrome button and an Add to Shoji card on every extension page, toolbar buttons with popups, and a puzzle menu with logos, pin and remove.
+
+### Changed
+- Byōbu checks requests on a thread of its own and uses about half the memory.
+- Global Privacy Control, de-AMP, the sound hold and fingerprinting protection apply from the first script of every page.
+- Fingerprinting protection covers more surfaces.
+- Cross-site requests send only the page's origin as referrer; third-party requests lose high-entropy client hints; click pings are blocked.
+- Hidden tabs rest after 30 seconds, sooner when Windows is low on memory; Energy saver also stops animations.
+- The Byōbu page shows each list's age and last error, and warns about lists over a week old.
+- Settings and Byōbu controls are named for screen readers.
+- The browser's icon is the crane again; the shoji-screen tile is the installer's.
+
+### Fixed
+- Engine switches, such as third-party cookie blocking, apply on every machine.
+- Installed extensions come back after Shoji is closed by a crash or Task Manager.
+- Coloured shortcut icons follow icon changes after an update.
+- Damaged browser profiles, extension packages or settings files can no longer crash Shoji.
+
+### Known limitations
+- 1Password's Add account doesn't work yet; its desktop app may be needed.
+
 ## [0.1.6] - 2026-10-21
 
 ### Added
@@ -108,7 +148,8 @@
 
 First release.
 
-[Unreleased]: https://github.com/KJX469/Shoji/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/KJX469/Shoji/compare/v0.1.7...HEAD
+[0.1.7]: https://github.com/KJX469/Shoji/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/KJX469/Shoji/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/KJX469/Shoji/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/KJX469/Shoji/compare/v0.1.3...v0.1.4
