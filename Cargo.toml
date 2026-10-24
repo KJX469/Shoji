@@ -15,6 +15,11 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
+# Lean dev and test builds keep target/ small: no debug info (no .pdb files) and no incremental cache.
+[profile.dev]
+debug = false
+incremental = false
+
 # Byōbu compiles hundreds of thousands of rules; unoptimised, that takes minutes in test builds.
 [profile.dev.package.adblock]
 opt-level = 3
